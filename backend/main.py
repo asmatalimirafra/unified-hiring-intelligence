@@ -435,7 +435,7 @@ async def login_user(email: str = Form(...), password: str = Form(...)):
     user_payload = {
         "user_id": "U001",
         "name": "Admin User",
-        "role": "Interviewer",
+        "role": "HR",
         "email": email
     }
     

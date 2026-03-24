@@ -1,16 +1,12 @@
 import React from 'react';
 import './ResumeViewer.css';
 
-
 const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
-const headers = {
-  headers: {
-    "ngrok-skip-browser-warning": "true"
-  }
-};
 
 function ResumeViewer({ candidateId, fileName, onClose }) {
-  const resumeURL = (`${BASE_URL}/get-resume/${candidateId}`, headers);
+  // ✅ FIX: Use a template string and add the ngrok bypass as a query parameter
+  // We don't use the 'headers' object here because iframes/links can't read them.
+  const resumeURL = `${BASE_URL}/get-resume/${candidateId}?ngrok-skip-browser-warning=true`;
 
   return (
     <div className="modal-backdrop">
@@ -29,13 +25,15 @@ function ResumeViewer({ candidateId, fileName, onClose }) {
             <button className="close-btn" onClick={onClose}>×</button>
           </div>
         </div>
-        <iframe
-          src={resumeURL}
-          width="100%"
-          height="100%"
-          title="Resume PDF"
-          style={{ border: 'none' }}
-        />
+        <div className="modal-body" style={{ height: '80vh' }}>
+            <iframe
+              src={resumeURL}
+              width="100%"
+              height="100%"
+              title="Resume PDF"
+              style={{ border: 'none' }}
+            />
+        </div>
       </div>
     </div>
   );
