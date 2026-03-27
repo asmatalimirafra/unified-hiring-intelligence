@@ -5,7 +5,7 @@ import re
 OLLAMA_BASE_URL = "http://localhost:11434/api/generate"
 
 # Small local model for speed
-MODEL = "llama3.2:8b"
+MODEL = "llama3.1:8b"
 
 
 def call_fitment_llm(prompt: str, max_tokens: int = 1500) -> str:
