@@ -56,7 +56,7 @@ def get_hr_chat_response(user_query: str, stream: bool = False):
         response = requests.post(
             "http://localhost:11434/api/generate",
             json={
-                "model": "llama3.2:8b", # Ensure this model is pulled in Colab!
+                "model": "llama3.1:8b", # Ensure this model is pulled in Colab!
                 "prompt": prompt,
                 "stream": stream
             },
