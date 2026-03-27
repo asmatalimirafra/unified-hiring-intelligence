@@ -8,7 +8,10 @@ import torch
 
 # Initialize embedding model
 device = "cuda" if torch.cuda.is_available() else "cpu"
-embedder = SentenceTransformer('all-MiniLM-L6-v2', device=device)
+# embedder = SentenceTransformer('all-MiniLM-L6-v2', device=device)
+embedder = SentenceTransformer("BAAI/bge-large-en-v1.5", device=device)
+embedder.max_seq_length = 512 # Crucial for reading full queries/context
+
 
 def get_hr_chat_response(user_query: str, stream: bool = False):
     try:
@@ -53,7 +56,7 @@ def get_hr_chat_response(user_query: str, stream: bool = False):
         response = requests.post(
             "http://localhost:11434/api/generate",
             json={
-                "model": "llama3.2:1b", # Ensure this model is pulled in Colab!
+                "model": "llama3.2:8b", # Ensure this model is pulled in Colab!
                 "prompt": prompt,
                 "stream": stream
             },

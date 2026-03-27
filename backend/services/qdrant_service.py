@@ -12,14 +12,15 @@ client = QdrantClient(
 )
 # Load SentenceTransformer model (384-dimensional)
 device = "cuda" if torch.cuda.is_available() else "cpu"
-model = SentenceTransformer("all-MiniLM-L6-v2", device=device)
-
+# model = SentenceTransformer("all-MiniLM-L6-v2", device=device)
+model = SentenceTransformer("BAAI/bge-large-en-v1.5", device=device)
+model.max_seq_length = 512 # Added for more details
 # Collection names
 JD_COLLECTION = "job_descriptions"
 RESUME_COLLECTION = "resumes"
 
 # Qdrant vector config for both collections
-vector_config = VectorParams(size=384, distance=Distance.COSINE)
+vector_config = VectorParams(size=1024, distance=Distance.COSINE)
 
 # Ensure both collections exist
 for collection in [JD_COLLECTION, RESUME_COLLECTION]:
