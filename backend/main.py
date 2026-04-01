@@ -432,25 +432,32 @@ async def aggregate_interviews(candidate_id: str):
     
 @app.post("/login/")
 async def login_user(email: str = Form(...), password: str = Form(...)):
-    user_payload = {
-        "user_id": "U001",
-        "name": "Admin User",
-        "role": "Interviewer",
-        "email": email
+    # 1. Find user
+    user = users_collection.find_one({"email": email})
+    
+    if not user:
+        print(f"❌ User not found: {email}")
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    # 2. Get the hash using the key 'password_hash'
+    stored_hash = user.get("password_hash")
+    
+    if not stored_hash:
+        print(f"❌ DB Error: Key 'password_hash' missing for {email}")
+        raise HTTPException(status_code=500, detail="User data error")
+
+    # 3. Verify
+    if not verify_password(password, stored_hash):
+        print(f"❌ Password mismatch for: {email}")
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    print(f"✅ Login Success: {user['name']} ({user['role']})")
+    return {
+        "user_id": user["user_id"],
+        "name": user["name"],
+        "role": user["role"]
     }
-    
-    # This ensures the Dashboard always finds a record for this ID
-    db.interviewers.update_one(
-        {"interviewer_id": user_payload["user_id"]},
-        {"$setOnInsert": {
-            "name": user_payload["name"],
-            "email": user_payload["email"],
-            "interviews_taken": [] 
-        }},
-        upsert=True
-    )
-    
-    return user_payload
+
 
 from fastapi import HTTPException, Response
 from fastapi.responses import StreamingResponse
