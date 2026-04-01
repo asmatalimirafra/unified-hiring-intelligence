@@ -512,26 +512,68 @@ from fastapi.responses import StreamingResponse
 
 chat_collection = db["chat_history"]
 
-# 1. Fetch all unique thread summaries for the sidebar
+# # 1. Fetch all unique thread summaries for the sidebar
+# @app.get("/hr/threads/{user_email}")
+# async def get_user_threads(user_email: str):
+#     if not user_email or user_email == "undefined":
+#         return []
+
+#     # Pipeline searches for messages belonging to the user
+#     pipeline = [
+#         {"$match": {"user_email": user_email}},
+#         {"$sort": {"timestamp": 1}},
+#         {"$group": {
+#             "_id": "$thread_id",
+#             "title": {"$first": "$text"},
+#             "last_updated": {"$last": "$timestamp"}
+#         }},
+#         {"$sort": {"last_updated": -1}}
+#     ]
+#     threads = list(chat_collection.aggregate(pipeline))
+#     # Safety check on title to prevent empty sidebar items
+#     return [{"id": t["_id"], "title": (t.get("title", "New Conversation")[:30] + "...")} for t in threads]
+
 @app.get("/hr/threads/{user_email}")
 async def get_user_threads(user_email: str):
-    if not user_email or user_email == "undefined":
+    try:
+        print(f"📡 HR Thread Request for: {user_email}") # Debug Print
+        
+        if not user_email or user_email == "null" or user_email == "undefined":
+            return []
+
+        # 🎯 Ensure we are using the correct collection
+        # If your collection in mongo_service is named 'chat_history', use that.
+        pipeline = [
+            {"$match": {"user_email": user_email, "context": "hr"}}, 
+            {"$sort": {"timestamp": 1}},
+            {"$group": {
+                "_id": "$thread_id",
+                "title": {"$first": "$text"},
+                "last_updated": {"$last": "$timestamp"}
+            }},
+            {"$sort": {"last_updated": -1}}
+        ]
+        
+        threads = list(chat_collection.aggregate(pipeline))
+        
+        # 🛡️ Safety map to prevent NoneType errors in the title
+        formatted_threads = []
+        for t in threads:
+            formatted_threads.append({
+                "id": str(t.get("_id")), 
+                "title": (t.get("title") or "New Conversation")[:30] + "..."
+            })
+            
+        print(f"✅ Found {len(formatted_threads)} HR threads")
+        return formatted_threads
+
+    except Exception as e:
+        # 🚨 THIS WILL PRINT THE ACTUAL ERROR IN YOUR TERMINAL
+        print(f"❌ DATABASE CRASH IN HR THREADS: {str(e)}")
+        # Returning an empty list instead of crashing (prevents the 500 error)
         return []
 
-    # Pipeline searches for messages belonging to the user
-    pipeline = [
-        {"$match": {"user_email": user_email}},
-        {"$sort": {"timestamp": 1}},
-        {"$group": {
-            "_id": "$thread_id",
-            "title": {"$first": "$text"},
-            "last_updated": {"$last": "$timestamp"}
-        }},
-        {"$sort": {"last_updated": -1}}
-    ]
-    threads = list(chat_collection.aggregate(pipeline))
-    # Safety check on title to prevent empty sidebar items
-    return [{"id": t["_id"], "title": (t.get("title", "New Conversation")[:30] + "...")} for t in threads]
+        
 # 2. Fetch all messages for a specific thread
 @app.get("/hr/chat-history/{thread_id}")
 async def get_thread_history(thread_id: str):
