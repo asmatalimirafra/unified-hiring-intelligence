@@ -496,159 +496,81 @@ async def get_roles_closed():
 # RAG Implementation
 
 from services.rag_service import get_hr_chat_response # Import your function
-# from datetime import datetime
 
-# @app.post("/hr-chat/")
-# async def hr_chat(request: dict):
-#     query = request.get("query")
-#     if not query:
-#         return {"error": "No query provided"}
-    
-#     response = get_hr_chat_response(query)
-#     return {"reply": response}
 
 from uuid import uuid4 # For unique thread IDs
 from fastapi.responses import StreamingResponse
 
 chat_collection = db["chat_history"]
 
-# # 1. Fetch all unique thread summaries for the sidebar
-# @app.get("/hr/threads/{user_email}")
-# async def get_user_threads(user_email: str):
-#     if not user_email or user_email == "undefined":
-#         return []
 
-#     # Pipeline searches for messages belonging to the user
-#     pipeline = [
-#         {"$match": {"user_email": user_email}},
-#         {"$sort": {"timestamp": 1}},
-#         {"$group": {
-#             "_id": "$thread_id",
-#             "title": {"$first": "$text"},
-#             "last_updated": {"$last": "$timestamp"}
-#         }},
-#         {"$sort": {"last_updated": -1}}
-#     ]
-#     threads = list(chat_collection.aggregate(pipeline))
-#     # Safety check on title to prevent empty sidebar items
-#     return [{"id": t["_id"], "title": (t.get("title", "New Conversation")[:30] + "...")} for t in threads]
-
+# 1. Fetch hr unique threads
 @app.get("/hr/threads/{user_email}")
-async def get_user_threads(user_email: str):
-    try:
-        print(f"📡 HR Thread Request for: {user_email}") # Debug Print
-        
-        if not user_email or user_email == "null" or user_email == "undefined":
-            return []
-
-        # 🎯 Ensure we are using the correct collection
-        # If your collection in mongo_service is named 'chat_history', use that.
-        pipeline = [
-            {"$match": {"user_email": user_email, "context": "hr"}}, 
-            {"$sort": {"timestamp": 1}},
-            {"$group": {
-                "_id": "$thread_id",
-                "title": {"$first": "$text"},
-                "last_updated": {"$last": "$timestamp"}
-            }},
-            {"$sort": {"last_updated": -1}}
-        ]
-        
-        threads = list(chat_collection.aggregate(pipeline))
-        
-        # 🛡️ Safety map to prevent NoneType errors in the title
-        formatted_threads = []
-        for t in threads:
-            formatted_threads.append({
-                "id": str(t.get("_id")), 
-                "title": (t.get("title") or "New Conversation")[:30] + "..."
-            })
-            
-        print(f"✅ Found {len(formatted_threads)} HR threads")
-        return formatted_threads
-
-    except Exception as e:
-        # 🚨 THIS WILL PRINT THE ACTUAL ERROR IN YOUR TERMINAL
-        print(f"❌ DATABASE CRASH IN HR THREADS: {str(e)}")
-        # Returning an empty list instead of crashing (prevents the 500 error)
-        return []
+async def get_hr_threads(user_email: str):
+    pipeline = [
+        {"$match": {"user_email": user_email, "context": "hr"}}, # Filter by hr context
+        {"$sort": {"timestamp": 1}},
+        {"$group": {
+            "_id": "$thread_id",
+            "title": {"$first": "$text"},
+            "last_updated": {"$last": "$timestamp"}
+        }},
+        {"$sort": {"last_updated": -1}}
+    ]
+    threads = list(chat_collection.aggregate(pipeline))
+    return [{"id": t["_id"], "title": t["title"][:30] + "..."} for t in threads]
 
         
-# 2. Fetch all messages for a specific thread
+# 2. Fetch hr history
 @app.get("/hr/chat-history/{thread_id}")
-async def get_thread_history(thread_id: str):
+async def get_hr_history(thread_id: str):
     messages = list(chat_collection.find({"thread_id": thread_id}).sort("timestamp", 1))
     for msg in messages:
         msg["_id"] = str(msg["_id"])
     return messages
-
-# 3. Updated Chat Endpoint to save history
-# @app.post("/hr-chat/")
-# async def hr_chat(request: dict):
-#     query = request.get("query")
-#     user_email = request.get("user_email", "admin@company.com")
-#     thread_id = request.get("thread_id") or str(uuid4()) # Create new ID if none exists
-    
-#     # Get LLM Response
-#     response_text = get_hr_chat_response(query)
-    
-#     # Save to MongoDB
-#     timestamp = datetime.utcnow()
-#     chat_collection.insert_many([
-#         {
-#             "thread_id": thread_id, "user_email": user_email, 
-#             "sender": "user", "text": query, "timestamp": timestamp
-#         },
-#         {
-#             "thread_id": thread_id, "user_email": user_email, 
-#             "sender": "bot", "text": response_text, "timestamp": timestamp
-#         }
-#     ])
-    
-#     return {"reply": response_text, "thread_id": thread_id}
 
 
 from fastapi.responses import StreamingResponse
 from uuid import uuid4
 from datetime import datetime
 
+# 3. hr Chat Streaming Endpoint
 @app.post("/hr-chat/")
 async def hr_chat(request: dict):
     query = request.get("query")
-    # Defaulting to admin@company.com if React fails to send email
-    user_email = request.get("user_email")
-    if not user_email or user_email == "null":
-        user_email = "admin@company.com"
-        
+    user_email = request.get("user_email", "hr@company.com")
     thread_id = request.get("thread_id")
+    
     if not thread_id or thread_id == "null":
         thread_id = str(uuid4())
     
+    # Save User Message with context="hr"
     timestamp = datetime.utcnow()
     chat_collection.insert_one({
         "thread_id": thread_id, 
         "user_email": user_email, 
         "sender": "user", 
         "text": query, 
+        "context": "hr",
         "timestamp": timestamp
     })
 
     def stream_generator():
         full_response = ""
-        # iterate through generator from rag_service
+        # We can reuse the same RAG service but we will handle the "hr" prompt later
         for chunk in get_hr_chat_response(query, stream=True):
             full_response += chunk
             yield chunk
 
-        # Only save if we actually got a response
-        if full_response.strip():
-            chat_collection.insert_one({
-                "thread_id": thread_id, 
-                "user_email": user_email, 
-                "sender": "bot", 
-                "text": full_response, 
-                "timestamp": datetime.utcnow()
-            })
+        # Save Bot Response
+        chat_collection.insert_one({
+            "thread_id": thread_id, 
+            "user_email": user_email, 
+            "sender": "bot", 
+            "text": full_response, 
+            "context": "hr",
+            "timestamp": datetime.utcnow()
+        })
 
     return StreamingResponse(
         stream_generator(), 
@@ -729,4 +651,3 @@ async def interviewer_chat(request: dict):
     )
 
 
-###Hello
