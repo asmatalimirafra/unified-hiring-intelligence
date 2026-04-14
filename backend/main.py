@@ -127,13 +127,37 @@ async def add_role(
 async def get_roles():
     return get_all_roles()
 
+# @app.put("/update-role/{role_id}")
+# async def update_role_api(role_id: str, update_data: dict = Body(...)):
+#     modified = update_role(role_id, update_data)
+#     if modified:
+#         return {"message": f"Role {role_id} updated."}
+#     else:
+#         raise HTTPException(status_code=404, detail="Role not found or no change applied.")
+
 @app.put("/update-role/{role_id}")
 async def update_role_api(role_id: str, update_data: dict = Body(...)):
+    # 1. Update the record in MongoDB
+    # This handles changes to 'role' name, 'positions', and 'job_description'
     modified = update_role(role_id, update_data)
+    
     if modified:
-        return {"message": f"Role {role_id} updated."}
+        # 2. Check if the Job Description text was part of the update
+        if "job_description" in update_data:
+            try:
+                # We re-run the embedding logic so Qdrant stays in sync
+                # We cast role_id to int because your Qdrant logic expects numeric IDs
+                store_jd_embedding(int(role_id), update_data["job_description"])
+                print(f"✅ Qdrant embedding updated for Role ID: {role_id}")
+            except Exception as e:
+                print(f"⚠️ Warning: MongoDB updated, but Qdrant failed: {e}")
+                # You might not want to raise an HTTPException here if you want 
+                # the DB change to persist regardless, but logging it is critical.
+
+        return {"message": f"Role {role_id} updated successfully across DB and AI."}
     else:
-        raise HTTPException(status_code=404, detail="Role not found or no change applied.")
+        # If modified is 0, it means the role_id wasn't found or data was identical
+        raise HTTPException(status_code=404, detail="Role not found or no changes applied.")
 
 @app.delete("/delete-role/{role_id}")
 async def delete_role_api(role_id: str):
