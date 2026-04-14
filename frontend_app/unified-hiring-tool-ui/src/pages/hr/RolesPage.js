@@ -2,6 +2,30 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import './RolesPage.css';
 import { FaEye, FaEdit, FaTrashAlt, FaTimesCircle, FaUndo } from 'react-icons/fa';
+import ReactQuill from 'react-quill-new';
+import 'react-quill-new/dist/quill.snow.css';
+
+// ✅ Full toolbar configuration
+const quillModules = {
+  toolbar: [
+    [{ 'font': [] }, { 'size': ['small', false, 'large', 'huge'] }],
+    ['bold', 'italic', 'underline', 'strike'],
+    [{ 'color': [] }, { 'background': [] }],
+    [{ 'list': 'ordered' }, { 'list': 'bullet' }],
+    [{ 'align': [] }],
+    ['link'],
+    ['clean']
+  ]
+};
+
+const quillFormats = [
+  'font', 'size',
+  'bold', 'italic', 'underline', 'strike',
+  'color', 'background',
+  'list', 'bullet',
+  'align',
+  'link'
+];
 
 function RolesPage() {
   const [openRoles, setOpenRoles] = useState([]);
@@ -19,6 +43,9 @@ function RolesPage() {
     jd_text: ''
   });
 
+  // ✅ State to hold duplicate Role ID error message
+  const [roleIdError, setRoleIdError] = useState('');
+
   // const BASE_URL = 'http://localhost:8080';
   const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 
@@ -26,64 +53,29 @@ function RolesPage() {
     fetchRoles();
   }, []);
 
-  // const fetchRoles = async () => {
-  //   try {
-  //     const response = await axios.get(`${BASE_URL}/get-roles/`);
-  //     const roles = response.data;
-  //     setOpenRoles(roles.filter((role) => role.status === 'open'));
-  //     setClosedRoles(roles.filter((role) => role.status === 'closed'));
-  //   } catch (err) {
-  //     console.error('Failed to fetch roles:', err);
-  //   }
-  // };
-const fetchRoles = async () => {
-  try {
+  const fetchRoles = async () => {
+    try {
+      const response = await axios.get(`${BASE_URL}/get-roles/`, {
+        headers: { "ngrok-skip-browser-warning": "true" }
+      });
+      const roles = response.data;
+      setOpenRoles(roles.filter(role => role.status === "open"));
+      setClosedRoles(roles.filter(role => role.status === "closed"));
+    } catch (err) {
+      console.error('Failed to fetch roles:', err);
+    }
+  };
 
-    const response = await axios.get(
-      `${BASE_URL}/get-roles/`,
-      {
-        headers: {
-          "ngrok-skip-browser-warning": "true"
-        }
-      }
-    );
-
-    const roles = response.data;
-
-    setOpenRoles(roles.filter(role => role.status === "open"));
-    setClosedRoles(roles.filter(role => role.status === "closed"));
-
-  } catch (err) {
-    console.error('Failed to fetch roles:', err);
-  }
-};
   const handleViewJD = (jdText) => {
     setSelectedJD(jdText);
     setShowModal(true);
   };
 
-  // const handleClose = async (role_id) => {
-  //   try {
-  //     await axios.post(`${BASE_URL}/close-role/${role_id}`);
-  //     fetchRoles();
-  //   } catch (err) {
-  //     console.error('Error closing role:', err);
-  //   }
-  // };
-
   const handleClose = async (role_id) => {
-    // 1. Ask for confirmation so it's not clicked by accident
     if (window.confirm('Are you sure you want to close this position? This will set vacancies to 0.')) {
       try {
-        // 2. Tell the backend to move status to 'closed'
         await axios.post(`${BASE_URL}/close-role/${role_id}`);
-
-        // 3. Update the vacancy count to 0 in the database
-        await axios.put(`${BASE_URL}/update-role/${role_id}`, {
-          positions: 0,
-        });
-
-        // 4. Refresh the lists so the role moves to the "Closed" section automatically
+        await axios.put(`${BASE_URL}/update-role/${role_id}`, { positions: 0 });
         fetchRoles();
         alert("Role closed and vacancies set to 0.");
       } catch (err) {
@@ -92,6 +84,7 @@ const fetchRoles = async () => {
       }
     }
   };
+
   const handleDelete = async (role_id) => {
     if (window.confirm('Are you sure you want to delete this role?')) {
       try {
@@ -124,22 +117,11 @@ const fetchRoles = async () => {
     }
   };
 
-  // const handleReopenRole = async (roleId) => {
-  //   try {
-  //     await axios.put(`${BASE_URL}/update-role/${roleId}`, {
-  //       status: 'open',
-  //     });
-  //     fetchRoles();
-  //   } catch (err) {
-  //     console.error('Failed to reopen role:', err);
-  //   }
-  // };
-
   const handleReopenRole = async (roleId) => {
     try {
       await axios.put(`${BASE_URL}/update-role/${roleId}`, {
         status: 'open',
-        positions: 1, // Reset to 1 so it's not a 'closed' role with 0 vacancies
+        positions: 1,
       });
       fetchRoles();
       alert("Role reopened with 1 vacancy.");
@@ -148,8 +130,21 @@ const fetchRoles = async () => {
     }
   };
 
+  // ✅ Real-time duplicate check while typing Role ID
+  const handleRoleIdChange = (e) => {
+    const value = e.target.value;
+    setNewRoleData({ ...newRoleData, role_id: value });
+    const allRoles = [...openRoles, ...closedRoles];
+    const isDuplicate = allRoles.some((role) => role.role_id === value.trim());
+    setRoleIdError(isDuplicate ? '⚠️ This Role ID already exists. Please use a unique ID.' : '');
+  };
+
   const handleAddRole = async (e) => {
     e.preventDefault();
+
+    // ✅ Block submission if frontend already detected a duplicate
+    if (roleIdError) return;
+
     const formData = new FormData();
     formData.append('role_id', newRoleData.role_id);
     formData.append('role', newRoleData.role);
@@ -159,12 +154,17 @@ const fetchRoles = async () => {
     try {
       await axios.post(`${BASE_URL}/add-role/`, formData);
       alert('Role added successfully!');
-      setShowAddModal(false); // Close the popup
-      setNewRoleData({ role_id: '', role: '', positions: 1, jd_text: '' }); // Reset form
-      fetchRoles(); // Refresh the table
+      setShowAddModal(false);
+      setNewRoleData({ role_id: '', role: '', positions: 1, jd_text: '' });
+      setRoleIdError('');
+      fetchRoles();
     } catch (err) {
       console.error('Error adding role:', err);
-      alert('Failed to add role. Check console for details.');
+      if (err.response?.status === 400) {
+        setRoleIdError(`⚠️ ${err.response.data.detail}`);
+      } else {
+        alert('Failed to add role. Check console for details.');
+      }
     }
   };
 
@@ -181,17 +181,27 @@ const fetchRoles = async () => {
       </thead>
       <tbody>
         {roles.map((role) => (
-          // <tr key={role.role_id}>
           <tr key={`${role.role_id}_${role.jd_filename}`}>
             <td>{role.role_id}</td>
             <td>{role.role}</td>
-            <td>
-              <FaEye
-                className="icon view"
-                onClick={() => handleViewJD(role.job_description)}
-                title="View JD"
-              />
+
+            {/* ✅ JD preview text + eye icon */}
+            <td className="jd-preview-cell">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className="jd-preview-text">
+                  {role.job_description
+                    ? role.job_description.replace(/<[^>]+>/g, '').substring(0, 150).trim() + '...'
+                    : 'No description available'}
+                </span>
+                <FaEye
+                  className="icon view"
+                  onClick={() => handleViewJD(role.job_description)}
+                  title="View Full JD"
+                  style={{ cursor: 'pointer', flexShrink: 0 }}
+                />
+              </div>
             </td>
+
             <td>{role.positions}</td>
             <td className="action-buttons">
               <div className="icon-group">
@@ -220,12 +230,14 @@ const fetchRoles = async () => {
           + Add New Role
         </button>
       </div>
+
       <h2>Open Positions</h2>
       {renderTable(openRoles, false)}
 
       <h2 className="mt-5">Closed Positions</h2>
       {renderTable(closedRoles, true)}
 
+      {/* View JD Modal — ✅ renders HTML from rich text editor */}
       {showModal && (
         <div className="modal d-block" tabIndex="-1" onClick={() => setShowModal(false)}>
           <div className="modal-dialog modal-lg" onClick={(e) => e.stopPropagation()}>
@@ -235,14 +247,25 @@ const fetchRoles = async () => {
                 <button type="button" className="btn-close" onClick={() => setShowModal(false)}></button>
               </div>
               <div className="modal-body">
-                <pre style={{ whiteSpace: 'pre-wrap' }}>{selectedJD}</pre>
+                {/* ✅ dangerouslySetInnerHTML renders the rich text HTML properly */}
+                <div
+                  className="jd-view-content"
+                  dangerouslySetInnerHTML={{ __html: selectedJD }}
+                />
               </div>
               <div className="modal-footer">
                 <button
                   className="btn btn-primary"
                   onClick={() => {
                     const newTab = window.open();
-                    newTab.document.write(`<pre>${selectedJD}</pre>`);
+                    newTab.document.write(`
+                      <html>
+                        <head><title>Job Description</title></head>
+                        <body style="font-family: Segoe UI, sans-serif; padding: 2rem;">
+                          ${selectedJD}
+                        </body>
+                      </html>
+                    `);
                   }}
                 >
                   Open in New Tab
@@ -256,17 +279,17 @@ const fetchRoles = async () => {
         </div>
       )}
 
+      {/* Edit Vacancies Modal */}
       {showEditModal && (
         <div className="modal show d-block" tabIndex="-1">
           <div className="modal-dialog">
             <div className="modal-content">
               <div className="modal-header">
                 <h5 className="modal-title">Edit Vacancies</h5>
-                {/* <button type="button" className="btn-close" onClick={() => setShowEditModal(false)}></button> */}
                 <FaTimesCircle
-  style={{ cursor: "pointer", fontSize: "22px", color: "#dc3545" }}
-  onClick={() => setShowEditModal(false)}
-/>
+                  style={{ cursor: "pointer", fontSize: "22px", color: "#dc3545" }}
+                  onClick={() => setShowEditModal(false)}
+                />
               </div>
               <div className="modal-body">
                 <label>Number of Vacancies:</label>
@@ -279,55 +302,97 @@ const fetchRoles = async () => {
                 />
               </div>
               <div className="modal-footer">
-                <button className="btn btn-secondary" onClick={() => setShowEditModal(false)}>
-                  Cancel
-                </button>
-                <button className="btn btn-primary" onClick={saveVacancyUpdate}>
-                  Save
-                </button>
+                <button className="btn btn-secondary" onClick={() => setShowEditModal(false)}>Cancel</button>
+                <button className="btn btn-primary" onClick={saveVacancyUpdate}>Save</button>
               </div>
             </div>
           </div>
         </div>
       )}
+
+      {/* ✅ Add New Role Modal with React Quill */}
       {showAddModal && (
         <div className="modal show d-block" tabIndex="-1">
           <div className="modal-dialog modal-lg">
             <div className="modal-content">
               <div className="modal-header">
                 <h5 className="modal-title">Create New Job Role</h5>
-                {/* <button type="button" className="btn-close" onClick={() => setShowAddModal(false)}></button> */}
-               <FaTimesCircle
-  style={{ cursor: "pointer", fontSize: "22px", color: "#dc3545" }}
-  onClick={() => setShowAddModal(false)}
-/>
+                <FaTimesCircle
+                  style={{ cursor: "pointer", fontSize: "22px", color: "#dc3545" }}
+                  onClick={() => {
+                    setShowAddModal(false);
+                    setRoleIdError('');
+                  }}
+                />
               </div>
               <form onSubmit={handleAddRole}>
                 <div className="modal-body">
                   <div className="mb-3">
                     <label className="form-label">Role ID (Numeric)</label>
-                    <input type="text" className="form-control" required 
-                      onChange={(e) => setNewRoleData({...newRoleData, role_id: e.target.value})} />
+                    <input
+                      type="text"
+                      className={`form-control ${roleIdError ? 'is-invalid' : ''}`}
+                      required
+                      onChange={handleRoleIdChange}
+                    />
+                    {roleIdError && (
+                      <div className="invalid-feedback d-block" style={{ color: '#dc3545', fontSize: '0.875rem' }}>
+                        {roleIdError}
+                      </div>
+                    )}
                   </div>
                   <div className="mb-3">
                     <label className="form-label">Role Name</label>
-                    <input type="text" className="form-control" required
-                      onChange={(e) => setNewRoleData({...newRoleData, role: e.target.value})} />
+                    <input
+                      type="text"
+                      className="form-control"
+                      required
+                      onChange={(e) => setNewRoleData({ ...newRoleData, role: e.target.value })}
+                    />
                   </div>
                   <div className="mb-3">
                     <label className="form-label">Number of Vacancies</label>
-                    <input type="number" className="form-control" min="1" required
-                      onChange={(e) => setNewRoleData({...newRoleData, positions: e.target.value})} />
+                    <input
+                      type="number"
+                      className="form-control"
+                      min="1"
+                      required
+                      onChange={(e) => setNewRoleData({ ...newRoleData, positions: e.target.value })}
+                    />
                   </div>
+
+                  {/* ✅ React Quill Rich Text Editor */}
                   <div className="mb-3">
-                    <label className="form-label">Job Description (Text)</label>
-                    <textarea className="form-control" rows="5" required
-                      onChange={(e) => setNewRoleData({...newRoleData, jd_text: e.target.value})}></textarea>
+                    <label className="form-label">Job Description</label>
+                    <ReactQuill
+                      theme="snow"
+                      modules={quillModules}
+                      formats={quillFormats}
+                      value={newRoleData.jd_text}
+                      onChange={(value) => setNewRoleData({ ...newRoleData, jd_text: value })}
+                      style={{ height: '200px', marginBottom: '50px' }}
+                    />
                   </div>
+
                 </div>
                 <div className="modal-footer">
-                  <button type="button" className="btn btn-secondary" onClick={() => setShowAddModal(false)}>Cancel</button>
-                  <button type="submit" className="btn btn-success">Save Role</button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      setShowAddModal(false);
+                      setRoleIdError('');
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-success"
+                    disabled={!!roleIdError}
+                  >
+                    Save Role
+                  </button>
                 </div>
               </form>
             </div>

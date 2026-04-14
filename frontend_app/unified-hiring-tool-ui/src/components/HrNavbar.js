@@ -66,8 +66,8 @@ function HrNavbar() {
     <nav className="hr-navbar">
       <div className="navbar-brand">
         <div className="navbar-logo" onClick={() => navigate('/hr/dashboard')}>
-          <span className="logo-bold">CODE</span>
-          <span className="logo-highlight">SENSEI</span>
+          <span className="logo-bold">Mirafra</span>
+          <span className="logo-highlight">Technologies</span>
         </div>
       </div>
 

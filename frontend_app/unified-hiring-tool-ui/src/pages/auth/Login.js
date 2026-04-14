@@ -93,7 +93,7 @@ function Login() {
     <div className="login-container">
       <div className="login-box">
         <div className="login-title">
-          CODE<span>SENSEI</span>
+          Mirafra<span>Technologies</span>
         </div>
         <form onSubmit={handleLogin}>
           <input

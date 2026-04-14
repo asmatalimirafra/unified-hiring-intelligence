@@ -175,7 +175,7 @@ const RagChat = () => {
                 <div className="chat-window">
                     {messages.length === 0 && !loading ? (
                         <div className="welcome-screen">
-                            <div className="lion-logo">🦁</div>
+                            <div className="lion-logo"></div>
                             <h2>HR Intelligence Assistant</h2>
                             <p>Ask me about candidate skills, experience, or fitment scores.</p>
                         </div>
@@ -183,14 +183,14 @@ const RagChat = () => {
                         <>
                             {messages.map((msg, index) => (
                                 <div key={index} className={`message-bubble ${msg.sender}`}>
-                                    <div className="avatar">{msg.sender === 'user' ? 'HR' : '🦁'}</div>
+                                    <div className="avatar">{msg.sender === 'user' ? 'HR' : ' '}</div>
                                     <div className="message-text">{msg.text}</div>
                                 </div>
                             ))}
                             {/* Show "Thinking" only before the first chunk arrives */}
                             {loading && messages[messages.length - 1]?.text === "" && (
                                 <div className="message-bubble bot thinking">
-                                    <div className="avatar">🦁</div>
+                                    <div className="avatar"></div>
                                     <div className="message-text italic">Analyzing resumes...</div>
                                 </div>
                             )}

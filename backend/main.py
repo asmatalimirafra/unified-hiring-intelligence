@@ -79,11 +79,28 @@ async def add_role(
     jd_text: Optional[str] = Form(None),
     jd_file: Optional[UploadFile] = Form(None)
 ):
+    # ✅ 1. Validate JD is provided
     if not jd_text and (jd_file is None or jd_file.filename == ""):
         raise HTTPException(status_code=422, detail="Please provide either JD text or upload a JD file.")
 
+    # ✅ 2. Validate role_id is numeric (moved up, before any DB calls)
+    try:
+        role_id_int = int(role_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="role_id must be numeric.")
+
+    # ✅ 3. Check for duplicate Role ID in MongoDB
+    existing_role = db["roles"].find_one({"role_id": role_id})
+    if existing_role:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Role ID '{role_id}' already exists. Please use a unique Role ID."
+        )
+
+    # ✅ 4. Build filename
     filename = f"{role.replace(' ', '_')}_{role_id}_jd"
 
+    # ✅ 5. Extract text from uploaded JD file if provided
     if jd_file and jd_file.filename:
         file_content = await jd_file.read()
         if jd_file.filename.endswith(".pdf"):
@@ -93,13 +110,10 @@ async def add_role(
         else:
             raise HTTPException(status_code=400, detail="Only PDF and DOCX files are supported.")
 
+    # ✅ 6. Store in MongoDB
     mongo_status = store_job_description(role_id, role, positions, jd_text, filename)
 
-    try:
-        role_id_int = int(role_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="role_id must be numeric")
-
+    # ✅ 7. Store embedding in Qdrant
     qdrant_status = store_jd_embedding(role_id_int, jd_text)
 
     return {

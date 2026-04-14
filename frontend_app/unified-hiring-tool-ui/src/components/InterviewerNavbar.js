@@ -14,8 +14,8 @@ function InterviewerNavbar() {
   return (
     <nav className="navbar">
       <div className="navbar-logo">
-        <span className="logo-bold">CODE</span>
-        <span className="logo-highlight">SENSEI</span>
+        <span className="logo-bold">Mirafra</span>
+        <span className="logo-highlight">Technologies</span>
       </div>
       <div className="navbar-links">
         <NavLink to={`/interviewer/${userId}/dashboard`} className={({ isActive }) => isActive ? 'active-link' : ''}>

@@ -1,9 +1,7 @@
 // src/components/ComparisonSection.js
 import React, { useState } from 'react';
 import { Radar, Bar } from 'react-chartjs-2';
-// import html2canvas from 'html2canvas';
 import html2pdf from 'html2pdf.js/dist/html2pdf.bundle.min.js';
-import jsPDF from 'jspdf';
 import { FiExternalLink } from 'react-icons/fi';
 
 import {
@@ -66,6 +64,7 @@ function ComparisonSection({ candidates }) {
 
   const radarOptions = {
     responsive: true,
+    animation: false, // Ensures charts are fully rendered for PDF capture
     scales: {
       r: {
         beginAtZero: false,
@@ -101,6 +100,7 @@ function ComparisonSection({ candidates }) {
 
   const barOptions = {
     responsive: true,
+    animation: false, // Ensures charts are fully rendered for PDF capture
     scales: {
       y: {
         beginAtZero: true,
@@ -112,39 +112,20 @@ function ComparisonSection({ candidates }) {
     }
   };
 
-  const exportToPDF = async () => {
+  // --- PDF EXPORT LOGIC ---
+  const exportToPDF = () => {
     const element = document.querySelector(".comparison-container");
-    const canvas = await html2canvas(element, {
-      scale: 2,
-      useCORS: true
-    });
+    if (!element) return;
 
-    const imgData = canvas.toDataURL('image/png');
-    const pdf = new jsPDF({
-      orientation: 'portrait',
-      unit: 'mm',
-      format: 'a4'
-    });
+    const opt = {
+      margin: 0.3,
+      filename: `Comparison_Report_${new Date().toISOString().slice(0,10)}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, logging: false },
+      jsPDF: { unit: 'in', format: 'letter', orientation: 'landscape' }
+    };
 
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const pageHeight = pdf.internal.pageSize.getHeight();
-    const imgProps = pdf.getImageProperties(imgData);
-    const imgRatio = imgProps.width / imgProps.height;
-    const pdfWidth = pageWidth;
-    const pdfHeight = pdfWidth / imgRatio;
-
-    if (pdfHeight > pageHeight) {
-      const totalPages = Math.ceil(pdfHeight / pageHeight);
-      for (let i = 0; i < totalPages; i++) {
-        const y = -i * pageHeight;
-        if (i !== 0) pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, y, pdfWidth, pdfHeight);
-      }
-    } else {
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-    }
-
-    pdf.save('comparison.pdf');
+    html2pdf().from(element).set(opt).save();
   };
 
   return (
