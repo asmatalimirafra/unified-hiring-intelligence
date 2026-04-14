@@ -64,11 +64,11 @@ app = FastAPI()
 # Allow frontend requests from localhost:3000
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "*"], # Explicitly allow your React port
+    allow_origins=["http://localhost:3000", "*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Thread-Id"] # Required for your streaming logic
+    expose_headers=["X-Thread-Id"]
 )
 
 @app.post("/add-role/", status_code=201)
@@ -83,13 +83,13 @@ async def add_role(
     if not jd_text and (jd_file is None or jd_file.filename == ""):
         raise HTTPException(status_code=422, detail="Please provide either JD text or upload a JD file.")
 
-    # ✅ 2. Validate role_id is numeric (moved up, before any DB calls)
+    # ✅ 2. Validate role_id is numeric
     try:
         role_id_int = int(role_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="role_id must be numeric.")
 
-    # ✅ 3. Check for duplicate Role ID in MongoDB
+    # ✅ 3. Check for duplicate Role ID in MongoDB before inserting
     existing_role = db["roles"].find_one({"role_id": role_id})
     if existing_role:
         raise HTTPException(
@@ -113,7 +113,14 @@ async def add_role(
     # ✅ 6. Store in MongoDB
     mongo_status = store_job_description(role_id, role, positions, jd_text, filename)
 
-    # ✅ 7. Store embedding in Qdrant
+    # ✅ 7. Catch if MongoDB itself rejected the duplicate (race condition safety net)
+    if mongo_status is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Role ID '{role_id}' already exists. Please use a unique Role ID."
+        )
+
+    # ✅ 8. Store embedding in Qdrant
     qdrant_status = store_jd_embedding(role_id_int, jd_text)
 
     return {
@@ -163,11 +170,8 @@ async def add_candidate(
     candidate_id_str = f"CND-{candidate_id_num}"
 
     resume_text = extract_text_from_resume(file_bytes, resume_file.filename)
-    # resume_text = clean_resume_text(resume_text)
     print("🔎 Extracted resume text preview:\n", resume_text[:3000])
 
-    # ✅ Only extract metadata using LLM (no skills/education)
-    # metadata = extract_all_contact_metadata_from_context(resume_text)
     from services.resume_utils import extract_contact_metadata
     metadata = extract_contact_metadata(resume_text)
     email = metadata.get("email", "")
@@ -198,10 +202,7 @@ async def add_candidate(
     if mongo_status is None:
         raise HTTPException(status_code=409, detail=f"Candidate ID '{candidate_id_str}' already exists.")
 
-    # qdrant_status = store_resume_embedding(candidate_id_num, resume_text, name, applied_role)
-    # qdrant_status = store_resume_embedding(candidate_id_str, resume_text, name, applied_role)
     qdrant_status = store_resume_embedding(candidate_id_num, resume_text, name, applied_role)
-
 
     return {
         "candidate_id": candidate_id_str,
@@ -232,31 +233,18 @@ async def delete_candidate_api(candidate_id: str):
     else:
         raise HTTPException(status_code=404, detail="Candidate not found.")
 
-# @app.get("/score-fitment/{candidate_id}")
-# async def score_fitment(candidate_id: str):
-#     result = score_fitment_logic(candidate_id)
-#     if result:
-#         return result
-#     else:
-#         raise HTTPException(status_code=404, detail="Candidate or Role not found.")
-
 @app.get("/score-fitment/{candidate_id}")
 async def score_fitment(candidate_id: str):
-
     try:
         result = score_fitment_logic(candidate_id)
-
         if result:
             return result
         else:
             return {"error": "Fitment returned empty result"}
-
     except Exception as e:
         import traceback
         traceback.print_exc()
         return {"error": str(e)}
-
-
 
 @app.post("/add-interviewer/", status_code=201)
 async def add_interviewer(
@@ -275,17 +263,14 @@ async def add_interviewer(
         "mongo_status": mongo_status
     }
 
-
 @app.get("/get-interviewers/")
 async def list_interviewers():
     return get_all_interviewers()
 
-
-
 @app.post("/add-interview/", status_code=201)
 async def add_interview(
     candidate_id: str = Form(...),
-    round_num: int = Form(...),  # renamed from 'round' to avoid shadowing built-in
+    round_num: int = Form(...),
     interviewer_id: str = Form(...),
     communication: int = Form(...),
     problem_solving: int = Form(...),
@@ -295,19 +280,16 @@ async def add_interview(
     from datetime import datetime
     now = datetime.now()
 
-    # Ratings dictionary
     ratings = {
         "communication": communication,
         "problem_solving": problem_solving,
         "domain_knowledge": domain_knowledge
     }
 
-    # Validate rating ranges
     for rating, value in ratings.items():
         if not 1 <= value <= 5:
             raise HTTPException(status_code=400, detail=f"Rating '{rating}' must be between 1 and 5.")
 
-    # Prepare detailed interview record for candidate
     interview_data = {
         "round": round_num,
         "interviewer_id": interviewer_id,
@@ -320,7 +302,6 @@ async def add_interview(
     if candidate_updated == 0:
         raise HTTPException(status_code=404, detail=f"Candidate ID '{candidate_id}' not found.")
 
-    # Prepare lightweight log for interviewer
     interview_log = {
         "candidate_id": candidate_id,
         "round": round_num,
@@ -328,16 +309,6 @@ async def add_interview(
     }
 
     interviewer_updated = add_interview_to_interviewer(interviewer_id, interview_log)
-    # if interviewer_updated == 0:
-    #     raise HTTPException(status_code=404, detail=f"Interviewer ID '{interviewer_id}' not found.")
-
-    # return {
-    #     "candidate_id": candidate_id,
-    #     "round": round_num,
-    #     "interviewer_id": interviewer_id,
-    #     "timestamp": now.isoformat(),
-    #     "message": "Interview successfully recorded."
-    # }
 
     return {
         "status": "success",
@@ -348,37 +319,28 @@ async def add_interview(
         "message": "Interview successfully recorded."
     }
 
-
-
-
 @app.get("/aggregate-interviews/{candidate_id}")
 async def aggregate_interviews(candidate_id: str):
-
-    # Fetch interviews & existing aggregate
     candidate = get_candidate_interviews(candidate_id)
 
     if not candidate or "interviews" not in candidate:
         raise HTTPException(status_code=404, detail=f"No interviews found for candidate ID '{candidate_id}'.")
 
-    # Return cached aggregate if already exists
     if "interview_aggregate" in candidate and candidate["interview_aggregate"]:
         return candidate["interview_aggregate"]
 
     interviews = candidate["interviews"]
 
-    # Check both rounds exist
     rounds = {interview["round"] for interview in interviews}
     if not {1, 2}.issubset(rounds):
         raise HTTPException(status_code=400, detail="Candidate must complete both rounds before aggregation.")
 
-    # Get round 1 and round 2 interview details
     round1 = next((i for i in interviews if i["round"] == 1), None)
     round2 = next((i for i in interviews if i["round"] == 2), None)
 
     if not round1 or not round2:
         raise HTTPException(status_code=400, detail="Both round 1 and round 2 must be completed for aggregation.")
 
-    # Compute average scores
     average_scores = {}
     categories = ["communication", "problem_solving", "domain_knowledge"]
     for category in categories:
@@ -387,14 +349,11 @@ async def aggregate_interviews(candidate_id: str):
     overall_avg = round(sum(average_scores.values()) / len(categories), 2)
     average_scores["overall_average"] = overall_avg
 
-    # Combine comments
     combined_comments = f"Round 1 Comments: {round1['comments']}\nRound 2 Comments: {round2['comments']}"
 
-    # Build prompt with helper function + call LLM
     prompt = build_aggregator_prompt(average_scores, combined_comments)
     raw_output = call_fitment_llm(prompt, max_tokens=300)
 
-    # Parse LLM JSON output
     json_match = re.search(r"\{[\s\S]*\}", raw_output)
     if not json_match:
         raise HTTPException(status_code=500, detail="LLM did not return valid JSON.")
@@ -404,7 +363,6 @@ async def aggregate_interviews(candidate_id: str):
     except Exception:
         raise HTTPException(status_code=500, detail="Failed to parse LLM JSON output.")
 
-    # Build and store aggregate result
     aggregate_result = {
         "average_scores": average_scores,
         "verdict": parsed.get("verdict", "Unknown"),
@@ -421,46 +379,20 @@ async def aggregate_interviews(candidate_id: str):
 
     return aggregate_result
 
-
-# @app.post("/login/")
-# async def login_user(email: str = Form(...), password: str = Form(...)):
-#     user = users_collection.find_one({"email": email})
-#     if not user or not verify_password(password, user["password_hash"]):
-#         raise HTTPException(status_code=401, detail="Invalid email or password")
-
-#     return {
-#         "user_id": user["user_id"],
-#         "name": user["name"],
-#         "role": user["role"]
-#     }
-
-# @app.post("/login/")
-# async def login_user(email: str = Form(...), password: str = Form(...)):
-#     # This ignores the DB and lets you in immediately
-#     return {
-#         "user_id": "U001",
-#         "name": "Admin User",
-#         "role": "Interviewer",
-#         "email":email
-#     }
-    
 @app.post("/login/")
 async def login_user(email: str = Form(...), password: str = Form(...)):
-    # 1. Find user
     user = users_collection.find_one({"email": email})
-    
+
     if not user:
         print(f"❌ User not found: {email}")
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    # 2. Get the hash using the key 'password_hash'
     stored_hash = user.get("password_hash")
-    
+
     if not stored_hash:
         print(f"❌ DB Error: Key 'password_hash' missing for {email}")
         raise HTTPException(status_code=500, detail="User data error")
 
-    # 3. Verify
     if not verify_password(password, stored_hash):
         print(f"❌ Password mismatch for: {email}")
         raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -472,7 +404,6 @@ async def login_user(email: str = Form(...), password: str = Form(...)):
         "role": user["role"]
     }
 
-
 from fastapi import HTTPException, Response
 from fastapi.responses import StreamingResponse
 import io
@@ -483,7 +414,6 @@ async def get_resume(candidate_id: str):
     if not candidate or "resume_file" not in candidate:
         raise HTTPException(status_code=404, detail="Resume not found")
 
-    # Use the actual file name from your DB
     file_name = candidate.get("file_name", f"{candidate_id}.pdf")
 
     return StreamingResponse(
@@ -506,23 +436,18 @@ async def close_role_api(role_id: str):
 async def get_roles_closed():
     return get_all_closed_roles()
 
+from services.rag_service import get_hr_chat_response
 
-# RAG Implementation
-
-from services.rag_service import get_hr_chat_response # Import your function
-
-
-from uuid import uuid4 # For unique thread IDs
+from uuid import uuid4
 from fastapi.responses import StreamingResponse
 
 chat_collection = db["chat_history"]
-
 
 # 1. Fetch hr unique threads
 @app.get("/hr/threads/{user_email}")
 async def get_hr_threads(user_email: str):
     pipeline = [
-        {"$match": {"user_email": user_email, "context": "hr"}}, # Filter by hr context
+        {"$match": {"user_email": user_email, "context": "hr"}},
         {"$sort": {"timestamp": 1}},
         {"$group": {
             "_id": "$thread_id",
@@ -534,7 +459,6 @@ async def get_hr_threads(user_email: str):
     threads = list(chat_collection.aggregate(pipeline))
     return [{"id": t["_id"], "title": t["title"][:30] + "..."} for t in threads]
 
-        
 # 2. Fetch hr history
 @app.get("/hr/chat-history/{thread_id}")
 async def get_hr_history(thread_id: str):
@@ -542,7 +466,6 @@ async def get_hr_history(thread_id: str):
     for msg in messages:
         msg["_id"] = str(msg["_id"])
     return messages
-
 
 from fastapi.responses import StreamingResponse
 from uuid import uuid4
@@ -554,53 +477,46 @@ async def hr_chat(request: dict):
     query = request.get("query")
     user_email = request.get("user_email", "hr@company.com")
     thread_id = request.get("thread_id")
-    
+
     if not thread_id or thread_id == "null":
         thread_id = str(uuid4())
-    
-    # Save User Message with context="hr"
+
     timestamp = datetime.utcnow()
     chat_collection.insert_one({
-        "thread_id": thread_id, 
-        "user_email": user_email, 
-        "sender": "user", 
-        "text": query, 
+        "thread_id": thread_id,
+        "user_email": user_email,
+        "sender": "user",
+        "text": query,
         "context": "hr",
         "timestamp": timestamp
     })
 
     def stream_generator():
         full_response = ""
-        # We can reuse the same RAG service but we will handle the "hr" prompt later
         for chunk in get_hr_chat_response(query, stream=True):
             full_response += chunk
             yield chunk
 
-        # Save Bot Response
         chat_collection.insert_one({
-            "thread_id": thread_id, 
-            "user_email": user_email, 
-            "sender": "bot", 
-            "text": full_response, 
+            "thread_id": thread_id,
+            "user_email": user_email,
+            "sender": "bot",
+            "text": full_response,
             "context": "hr",
             "timestamp": datetime.utcnow()
         })
 
     return StreamingResponse(
-        stream_generator(), 
+        stream_generator(),
         media_type="text/plain",
         headers={"X-Thread-Id": thread_id}
     )
-
-    # Interviewer Page
-
-    # --- INTERVIEWER CHAT IMPLEMENTATION ---
 
 # 1. Fetch Interviewer unique threads
 @app.get("/interviewer/threads/{user_email}")
 async def get_interviewer_threads(user_email: str):
     pipeline = [
-        {"$match": {"user_email": user_email, "context": "interviewer"}}, # Filter by interviewer context
+        {"$match": {"user_email": user_email, "context": "interviewer"}},
         {"$sort": {"timestamp": 1}},
         {"$group": {
             "_id": "$thread_id",
@@ -626,42 +542,37 @@ async def interviewer_chat(request: dict):
     query = request.get("query")
     user_email = request.get("user_email", "interviewer@company.com")
     thread_id = request.get("thread_id")
-    
+
     if not thread_id or thread_id == "null":
         thread_id = str(uuid4())
-    
-    # Save User Message with context="interviewer"
+
     timestamp = datetime.utcnow()
     chat_collection.insert_one({
-        "thread_id": thread_id, 
-        "user_email": user_email, 
-        "sender": "user", 
-        "text": query, 
+        "thread_id": thread_id,
+        "user_email": user_email,
+        "sender": "user",
+        "text": query,
         "context": "interviewer",
         "timestamp": timestamp
     })
 
     def stream_generator():
         full_response = ""
-        # We can reuse the same RAG service but we will handle the "Interviewer" prompt later
         for chunk in get_hr_chat_response(query, stream=True):
             full_response += chunk
             yield chunk
 
-        # Save Bot Response
         chat_collection.insert_one({
-            "thread_id": thread_id, 
-            "user_email": user_email, 
-            "sender": "bot", 
-            "text": full_response, 
+            "thread_id": thread_id,
+            "user_email": user_email,
+            "sender": "bot",
+            "text": full_response,
             "context": "interviewer",
             "timestamp": datetime.utcnow()
         })
 
     return StreamingResponse(
-        stream_generator(), 
+        stream_generator(),
         media_type="text/plain",
         headers={"X-Thread-Id": thread_id}
     )
-
-

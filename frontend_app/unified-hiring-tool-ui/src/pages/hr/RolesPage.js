@@ -85,7 +85,7 @@ function RolesPage() {
     setShowModal(true);
   };
 
-  // ✅ Fixed: no longer sets positions to 0 on close
+  // ✅ No longer sets positions to 0 on close
   const handleClose = async (role_id) => {
     if (window.confirm('Are you sure you want to close this position?')) {
       try {
@@ -131,7 +131,7 @@ function RolesPage() {
     }
   };
 
-  // ✅ Fixed: no longer hardcodes positions to 1 on reopen
+  // ✅ No longer hardcodes positions to 1 on reopen
   const handleReopenRole = async (roleId) => {
     try {
       await axios.put(`${BASE_URL}/update-role/${roleId}`, {
@@ -144,12 +144,14 @@ function RolesPage() {
     }
   };
 
-  // ✅ Real-time duplicate check while typing Role ID
+  // ✅ Fixed: String comparison on both sides to handle numeric role_id from MongoDB
   const handleRoleIdChange = (e) => {
     const value = e.target.value;
     setNewRoleData({ ...newRoleData, role_id: value });
     const allRoles = [...openRoles, ...closedRoles];
-    const isDuplicate = allRoles.some((role) => role.role_id === value.trim());
+    const isDuplicate = allRoles.some(
+      (role) => String(role.role_id) === String(value.trim())
+    );
     setRoleIdError(isDuplicate ? '⚠️ This Role ID already exists. Please use a unique ID.' : '');
   };
 
@@ -347,6 +349,7 @@ function RolesPage() {
                       required
                       onChange={handleRoleIdChange}
                     />
+                    {/* ✅ Inline error message */}
                     {roleIdError && (
                       <div className="invalid-feedback d-block" style={{ color: '#dc3545', fontSize: '0.875rem' }}>
                         {roleIdError}
@@ -398,6 +401,7 @@ function RolesPage() {
                   >
                     Cancel
                   </button>
+                  {/* ✅ Disabled while duplicate error exists */}
                   <button
                     type="submit"
                     className="btn btn-success"

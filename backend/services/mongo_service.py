@@ -17,6 +17,7 @@ closed_roles_collection = db["closed_roles"]
 candidates_collection.create_index("candidate_id", unique=True)
 interviewers_collection.create_index("interviewer_id", unique=True)
 users_collection.create_index("user_id", unique=True)
+roles_collection.create_index("role_id", unique=True)  # ✅ NEW: hard DB constraint
 
 def get_role_id_by_name(role_name):
     """Fetch role_id from roles collection by role name."""
@@ -25,15 +26,18 @@ def get_role_id_by_name(role_name):
 
 def store_job_description(role_id, role, positions, jd_text, filename):
     """Insert a new job role into MongoDB."""
-    result = roles_collection.insert_one({
-        "role_id": role_id,
-        "role": role,
-        "positions": positions,
-        "job_description": jd_text,
-        "jd_filename": filename,
-        "status": "open"
-    })
-    return str(result.inserted_id)
+    try:
+        result = roles_collection.insert_one({
+            "role_id": role_id,
+            "role": role,
+            "positions": positions,
+            "job_description": jd_text,
+            "jd_filename": filename,
+            "status": "open"
+        })
+        return str(result.inserted_id)
+    except DuplicateKeyError:  # ✅ NEW: catch MongoDB duplicate key error
+        return None
 
 def store_candidate(candidate_id, name, applied_role, applied_role_id, resume_text, file_bytes, stored_file_name,
                     email, github, location, phone, timestamp):
@@ -108,8 +112,6 @@ def get_all_interviewers():
     """Return all interviewers from the DB."""
     return list(interviewers_collection.find({}, {"_id": 0}))
 
-
-
 def add_interview_to_candidate(candidate_id, interview_data):
     """Push interview details to a candidate's interviews array."""
     result = candidates_collection.update_one(
@@ -117,8 +119,6 @@ def add_interview_to_candidate(candidate_id, interview_data):
         {"$push": {"interviews": interview_data}}
     )
     return result.modified_count
-
-
 
 def add_interview_to_interviewer(interviewer_id, log_data):
     """Push interview summary to an interviewer's interviews_taken array."""
@@ -128,10 +128,12 @@ def add_interview_to_interviewer(interviewer_id, log_data):
     )
     return result.modified_count
 
-
 def get_candidate_interviews(candidate_id):
     """Retrieve interviews array for a given candidate."""
-    candidate = candidates_collection.find_one({"candidate_id": candidate_id}, {"_id": 0, "interviews": 1, "interview_aggregate": 1})
+    candidate = candidates_collection.find_one(
+        {"candidate_id": candidate_id},
+        {"_id": 0, "interviews": 1, "interview_aggregate": 1}
+    )
     return candidate
 
 def add_user(user_id, name, email, hashed_password, role, department):
@@ -165,7 +167,7 @@ def close_role(role_id):
     """Close a role if it's open and log the closure."""
     role = roles_collection.find_one({"role_id": role_id})
     if not role or role.get("status") != "open":
-        return None  # Role not found or already closed
+        return None
 
     # Update role status
     roles_collection.update_one(
