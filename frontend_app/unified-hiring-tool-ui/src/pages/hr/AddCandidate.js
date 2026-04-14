@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './AddCandidate.css';
-import { FaSave, FaCheckCircle, FaTrashAlt } from 'react-icons/fa';
+import { FaCheckCircle } from 'react-icons/fa';
 
 // const BASE_URL = 'http://localhost:8080';
 const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
@@ -476,14 +476,11 @@ const res = await axios.post(`${BASE_URL}/add-candidate/`, data, {
           </div>
 
           <div className="action-buttons">
-            <button className="btn-confirm" onClick={handleUpdate} disabled={loading}>
-              <FaSave /> Update Details
-            </button>
             <button className="btn-exit" onClick={handleSaveAndExit} disabled={loading}>
               <FaCheckCircle /> Save & Exit
             </button>
-            <button className="btn-delete" onClick={handleDelete} disabled={loading}>
-              <FaTrashAlt /> Delete Candidate
+            <button className="btn-delete" onClick={handleReset} disabled={loading}>
+              Cancel
             </button>
           </div>
         </div>

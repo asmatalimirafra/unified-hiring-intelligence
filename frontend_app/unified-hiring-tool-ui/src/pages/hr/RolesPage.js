@@ -47,7 +47,14 @@ function RolesPage() {
   const [selectedJD, setSelectedJD] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [editVacancyData, setEditVacancyData] = useState({ role_id: '', positions: 0 });
+
+  // ✅ editVacancyData holds all editable fields
+  const [editVacancyData, setEditVacancyData] = useState({
+    role_id: '',
+    role: '',
+    positions: 0,
+    jd_text: ''
+  });
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [newRoleData, setNewRoleData] = useState({
@@ -110,24 +117,31 @@ function RolesPage() {
     }
   };
 
+  // ✅ Populate all fields when opening edit modal
   const handleEdit = (role) => {
-    setEditVacancyData({ role_id: role.role_id, positions: role.positions });
+    setEditVacancyData({
+      role_id: role.role_id,
+      role: role.role,
+      positions: role.positions,
+      jd_text: role.job_description || ''
+    });
     setShowEditModal(true);
   };
 
-  const handleVacancyChange = (e) => {
-    setEditVacancyData((prev) => ({ ...prev, positions: e.target.value }));
-  };
-
+  // ✅ Save all fields to backend
   const saveVacancyUpdate = async () => {
     try {
       await axios.put(`${BASE_URL}/update-role/${editVacancyData.role_id}`, {
+        role: editVacancyData.role,
         positions: Number(editVacancyData.positions),
+        job_description: editVacancyData.jd_text
       });
       setShowEditModal(false);
       fetchRoles();
+      alert("Role updated successfully.");
     } catch (err) {
-      console.error('Failed to update vacancies:', err);
+      console.error('Failed to update role:', err);
+      alert("Failed to update role. Please check the backend connection.");
     }
   };
 
@@ -144,7 +158,7 @@ function RolesPage() {
     }
   };
 
-  // ✅ Fixed: String comparison on both sides to handle numeric role_id from MongoDB
+  // ✅ String comparison on both sides to handle numeric role_id from MongoDB
   const handleRoleIdChange = (e) => {
     const value = e.target.value;
     setNewRoleData({ ...newRoleData, role_id: value });
@@ -221,7 +235,7 @@ function RolesPage() {
               <div className="icon-group">
                 {!isClosed ? (
                   <>
-                    <FaEdit className="icon edit" onClick={() => handleEdit(role)} title="Edit Vacancies" />
+                    <FaEdit className="icon edit" onClick={() => handleEdit(role)} title="Edit Role" />
                     <FaTimesCircle className="icon close" onClick={() => handleClose(role.role_id)} title="Close Role" />
                   </>
                 ) : (
@@ -251,17 +265,19 @@ function RolesPage() {
       <h2 className="mt-5">Closed Positions</h2>
       {renderTable(closedRoles, true)}
 
-      {/* View JD Modal */}
+      {/* ✅ View JD Modal — modal-xl for larger size */}
       {showModal && (
         <div className="modal d-block" tabIndex="-1" onClick={() => setShowModal(false)}>
-          <div className="modal-dialog modal-lg" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-dialog modal-xl" onClick={(e) => e.stopPropagation()}>
             <div className="modal-content">
               <div className="modal-header">
                 <h5 className="modal-title">Job Description</h5>
-                <button type="button" className="btn-close" onClick={() => setShowModal(false)}></button>
+                <FaTimesCircle
+                  style={{ cursor: "pointer", fontSize: "22px", color: "#dc3545" }}
+                  onClick={() => setShowModal(false)}
+                />
               </div>
               <div className="modal-body">
-                {/* ✅ Renders rich text HTML properly */}
                 <div
                   className="jd-view-content"
                   dangerouslySetInnerHTML={{ __html: selectedJD }}
@@ -293,31 +309,75 @@ function RolesPage() {
         </div>
       )}
 
-      {/* Edit Vacancies Modal */}
+      {/* ✅ Edit Role Modal — all fields editable except Role ID */}
       {showEditModal && (
         <div className="modal show d-block" tabIndex="-1">
-          <div className="modal-dialog">
+          <div className="modal-dialog modal-lg">
             <div className="modal-content">
               <div className="modal-header">
-                <h5 className="modal-title">Edit Vacancies</h5>
+                <h5 className="modal-title">
+                  Edit Role
+                  <span style={{ fontSize: '0.85rem', color: '#888', marginLeft: '10px' }}>
+                    (Role ID: {editVacancyData.role_id} — not editable)
+                  </span>
+                </h5>
                 <FaTimesCircle
                   style={{ cursor: "pointer", fontSize: "22px", color: "#dc3545" }}
                   onClick={() => setShowEditModal(false)}
                 />
               </div>
               <div className="modal-body">
-                <label>Number of Vacancies:</label>
-                <input
-                  type="number"
-                  className="form-control"
-                  value={editVacancyData.positions}
-                  onChange={handleVacancyChange}
-                  min="0"
-                />
+
+                {/* Role Name */}
+                <div className="mb-3">
+                  <label className="form-label">Role Name</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={editVacancyData.role}
+                    onChange={(e) => setEditVacancyData({ ...editVacancyData, role: e.target.value })}
+                  />
+                </div>
+
+                {/* Number of Vacancies */}
+                <div className="mb-3">
+                  <label className="form-label">Number of Vacancies</label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    value={editVacancyData.positions}
+                    onChange={(e) => setEditVacancyData({ ...editVacancyData, positions: e.target.value })}
+                    min="0"
+                  />
+                </div>
+
+                {/* Job Description — React Quill */}
+                <div className="mb-3">
+                  <label className="form-label">Job Description</label>
+                  <ReactQuill
+                    theme="snow"
+                    modules={quillModules}
+                    formats={quillFormats}
+                    value={editVacancyData.jd_text}
+                    onChange={(value) => setEditVacancyData({ ...editVacancyData, jd_text: value })}
+                    style={{ height: '200px', marginBottom: '50px' }}
+                  />
+                </div>
+
               </div>
               <div className="modal-footer">
-                <button className="btn btn-secondary" onClick={() => setShowEditModal(false)}>Cancel</button>
-                <button className="btn btn-primary" onClick={saveVacancyUpdate}>Save</button>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setShowEditModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-primary"
+                  onClick={saveVacancyUpdate}
+                >
+                  Save Changes
+                </button>
               </div>
             </div>
           </div>
@@ -349,7 +409,6 @@ function RolesPage() {
                       required
                       onChange={handleRoleIdChange}
                     />
-                    {/* ✅ Inline error message */}
                     {roleIdError && (
                       <div className="invalid-feedback d-block" style={{ color: '#dc3545', fontSize: '0.875rem' }}>
                         {roleIdError}
@@ -401,7 +460,6 @@ function RolesPage() {
                   >
                     Cancel
                   </button>
-                  {/* ✅ Disabled while duplicate error exists */}
                   <button
                     type="submit"
                     className="btn btn-success"

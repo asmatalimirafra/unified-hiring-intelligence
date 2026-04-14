@@ -61,7 +61,6 @@ import io
 
 app = FastAPI()
 
-# Allow frontend requests from localhost:3000
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "*"],
@@ -79,17 +78,14 @@ async def add_role(
     jd_text: Optional[str] = Form(None),
     jd_file: Optional[UploadFile] = Form(None)
 ):
-    # ✅ 1. Validate JD is provided
     if not jd_text and (jd_file is None or jd_file.filename == ""):
         raise HTTPException(status_code=422, detail="Please provide either JD text or upload a JD file.")
 
-    # ✅ 2. Validate role_id is numeric
     try:
         role_id_int = int(role_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="role_id must be numeric.")
 
-    # ✅ 3. Check for duplicate Role ID in MongoDB before inserting
     existing_role = db["roles"].find_one({"role_id": role_id})
     if existing_role:
         raise HTTPException(
@@ -97,10 +93,8 @@ async def add_role(
             detail=f"Role ID '{role_id}' already exists. Please use a unique Role ID."
         )
 
-    # ✅ 4. Build filename
     filename = f"{role.replace(' ', '_')}_{role_id}_jd"
 
-    # ✅ 5. Extract text from uploaded JD file if provided
     if jd_file and jd_file.filename:
         file_content = await jd_file.read()
         if jd_file.filename.endswith(".pdf"):
@@ -110,17 +104,14 @@ async def add_role(
         else:
             raise HTTPException(status_code=400, detail="Only PDF and DOCX files are supported.")
 
-    # ✅ 6. Store in MongoDB
     mongo_status = store_job_description(role_id, role, positions, jd_text, filename)
 
-    # ✅ 7. Catch if MongoDB itself rejected the duplicate (race condition safety net)
     if mongo_status is None:
         raise HTTPException(
             status_code=400,
             detail=f"Role ID '{role_id}' already exists. Please use a unique Role ID."
         )
 
-    # ✅ 8. Store embedding in Qdrant
     qdrant_status = store_jd_embedding(role_id_int, jd_text)
 
     return {
@@ -253,7 +244,6 @@ async def add_interviewer(
     email: str = Form(...),
     department: str = Form(...)
 ):
-    from datetime import datetime
     joined_on = datetime.now()
     mongo_status = store_interviewer(interviewer_id, name, email, department, joined_on)
     if mongo_status is None:
@@ -277,7 +267,6 @@ async def add_interview(
     domain_knowledge: int = Form(...),
     comments: str = Form(...)
 ):
-    from datetime import datetime
     now = datetime.now()
 
     ratings = {
@@ -308,7 +297,7 @@ async def add_interview(
         "datetime": now
     }
 
-    interviewer_updated = add_interview_to_interviewer(interviewer_id, interview_log)
+    add_interview_to_interviewer(interviewer_id, interview_log)
 
     return {
         "status": "success",
@@ -384,29 +373,20 @@ async def login_user(email: str = Form(...), password: str = Form(...)):
     user = users_collection.find_one({"email": email})
 
     if not user:
-        print(f"❌ User not found: {email}")
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     stored_hash = user.get("password_hash")
-
     if not stored_hash:
-        print(f"❌ DB Error: Key 'password_hash' missing for {email}")
         raise HTTPException(status_code=500, detail="User data error")
 
     if not verify_password(password, stored_hash):
-        print(f"❌ Password mismatch for: {email}")
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    print(f"✅ Login Success: {user['name']} ({user['role']})")
     return {
         "user_id": user["user_id"],
         "name": user["name"],
         "role": user["role"]
     }
-
-from fastapi import HTTPException, Response
-from fastapi.responses import StreamingResponse
-import io
 
 @app.get("/get-resume/{candidate_id}")
 async def get_resume(candidate_id: str):
@@ -419,9 +399,7 @@ async def get_resume(candidate_id: str):
     return StreamingResponse(
         io.BytesIO(candidate["resume_file"]),
         media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'inline; filename="{file_name}"'
-        }
+        headers={"Content-Disposition": f'inline; filename="{file_name}"'}
     )
 
 @app.post("/close-role/{role_id}")
@@ -436,14 +414,33 @@ async def close_role_api(role_id: str):
 async def get_roles_closed():
     return get_all_closed_roles()
 
-from services.rag_service import get_hr_chat_response
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# CHAT SYSTEM
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from services.rag_service import get_hr_chat_response
 from uuid import uuid4
-from fastapi.responses import StreamingResponse
 
 chat_collection = db["chat_history"]
 
-# 1. Fetch hr unique threads
+
+def load_thread_history(thread_id: str) -> list:
+    """
+    Loads the full conversation for a thread from MongoDB.
+    Returns list of {sender, text} dicts, oldest first.
+    """
+    messages = list(
+        chat_collection.find(
+            {"thread_id": thread_id},
+            {"_id": 0, "sender": 1, "text": 1}
+        ).sort("timestamp", 1)
+    )
+    return messages
+
+
+# ── HR Endpoints ──────────────────────────────────────────────────────────────
+
 @app.get("/hr/threads/{user_email}")
 async def get_hr_threads(user_email: str):
     pipeline = [
@@ -452,14 +449,20 @@ async def get_hr_threads(user_email: str):
         {"$group": {
             "_id": "$thread_id",
             "title": {"$first": "$text"},
+            "custom_title": {"$last": "$custom_title"},   # preserve rename
             "last_updated": {"$last": "$timestamp"}
         }},
         {"$sort": {"last_updated": -1}}
     ]
     threads = list(chat_collection.aggregate(pipeline))
-    return [{"id": t["_id"], "title": t["title"][:30] + "..."} for t in threads]
+    result = []
+    for t in threads:
+        # Use custom_title if it was renamed, otherwise use auto-generated title
+        display_title = t.get("custom_title") or t["title"]
+        result.append({"id": t["_id"], "title": display_title[:40] + ("..." if len(display_title) > 40 else "")})
+    return result
 
-# 2. Fetch hr history
+
 @app.get("/hr/chat-history/{thread_id}")
 async def get_hr_history(thread_id: str):
     messages = list(chat_collection.find({"thread_id": thread_id}).sort("timestamp", 1))
@@ -467,11 +470,20 @@ async def get_hr_history(thread_id: str):
         msg["_id"] = str(msg["_id"])
     return messages
 
-from fastapi.responses import StreamingResponse
-from uuid import uuid4
-from datetime import datetime
 
-# 3. hr Chat Streaming Endpoint
+@app.patch("/hr/threads/{thread_id}/rename")
+async def rename_hr_thread(thread_id: str, body: dict = Body(...)):
+    """Rename a chat thread. Stores custom_title on all messages in the thread."""
+    new_title = body.get("title", "").strip()
+    if not new_title:
+        raise HTTPException(status_code=400, detail="Title cannot be empty.")
+    chat_collection.update_many(
+        {"thread_id": thread_id},
+        {"$set": {"custom_title": new_title}}
+    )
+    return {"message": "Thread renamed successfully."}
+
+
 @app.post("/hr-chat/")
 async def hr_chat(request: dict):
     query = request.get("query")
@@ -481,19 +493,22 @@ async def hr_chat(request: dict):
     if not thread_id or thread_id == "null":
         thread_id = str(uuid4())
 
-    timestamp = datetime.utcnow()
+    # ✅ Load full conversation history before calling LLM
+    chat_history = load_thread_history(thread_id)
+
     chat_collection.insert_one({
         "thread_id": thread_id,
         "user_email": user_email,
         "sender": "user",
         "text": query,
         "context": "hr",
-        "timestamp": timestamp
+        "timestamp": datetime.utcnow()
     })
 
     def stream_generator():
         full_response = ""
-        for chunk in get_hr_chat_response(query, stream=True):
+        # ✅ Pass history so LLM understands pronouns and follow-up questions
+        for chunk in get_hr_chat_response(query, chat_history=chat_history, stream=True):
             full_response += chunk
             yield chunk
 
@@ -512,7 +527,9 @@ async def hr_chat(request: dict):
         headers={"X-Thread-Id": thread_id}
     )
 
-# 1. Fetch Interviewer unique threads
+
+# ── Interviewer Endpoints ─────────────────────────────────────────────────────
+
 @app.get("/interviewer/threads/{user_email}")
 async def get_interviewer_threads(user_email: str):
     pipeline = [
@@ -521,14 +538,19 @@ async def get_interviewer_threads(user_email: str):
         {"$group": {
             "_id": "$thread_id",
             "title": {"$first": "$text"},
+            "custom_title": {"$last": "$custom_title"},
             "last_updated": {"$last": "$timestamp"}
         }},
         {"$sort": {"last_updated": -1}}
     ]
     threads = list(chat_collection.aggregate(pipeline))
-    return [{"id": t["_id"], "title": t["title"][:30] + "..."} for t in threads]
+    result = []
+    for t in threads:
+        display_title = t.get("custom_title") or t["title"]
+        result.append({"id": t["_id"], "title": display_title[:40] + ("..." if len(display_title) > 40 else "")})
+    return result
 
-# 2. Fetch Interviewer history
+
 @app.get("/interviewer/chat-history/{thread_id}")
 async def get_interviewer_history(thread_id: str):
     messages = list(chat_collection.find({"thread_id": thread_id}).sort("timestamp", 1))
@@ -536,7 +558,7 @@ async def get_interviewer_history(thread_id: str):
         msg["_id"] = str(msg["_id"])
     return messages
 
-# 3. Interviewer Chat Streaming Endpoint
+
 @app.post("/interviewer-chat/")
 async def interviewer_chat(request: dict):
     query = request.get("query")
@@ -546,19 +568,22 @@ async def interviewer_chat(request: dict):
     if not thread_id or thread_id == "null":
         thread_id = str(uuid4())
 
-    timestamp = datetime.utcnow()
+    # ✅ Load full conversation history before calling LLM
+    chat_history = load_thread_history(thread_id)
+
     chat_collection.insert_one({
         "thread_id": thread_id,
         "user_email": user_email,
         "sender": "user",
         "text": query,
         "context": "interviewer",
-        "timestamp": timestamp
+        "timestamp": datetime.utcnow()
     })
 
     def stream_generator():
         full_response = ""
-        for chunk in get_hr_chat_response(query, stream=True):
+        # ✅ Pass history so LLM understands pronouns and follow-up questions
+        for chunk in get_hr_chat_response(query, chat_history=chat_history, stream=True):
             full_response += chunk
             yield chunk
 
