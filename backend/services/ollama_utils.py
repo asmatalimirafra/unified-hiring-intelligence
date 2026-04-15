@@ -1,144 +1,11 @@
-# import requests
-# import re
-
-# # Ollama API endpoint
-# OLLAMA_BASE_URL = "http://localhost:11434/api/generate"
-
-# # Small local model for speed
-# MODEL = "llama3.1:8b"
-
-
-# def call_fitment_llm(prompt: str, max_tokens: int = 1500) -> str:
-#     """
-#     Calls Ollama local LLM and returns the raw text response.
-#     JSON parsing will be handled later in fitment_service.py.
-#     """
-
-#     try:
-#         response = requests.post(
-#             OLLAMA_BASE_URL,
-#             json={
-#                 "model": MODEL,
-#                 "prompt": prompt,
-#                 "stream": False,
-#                 "options": {
-#                     "num_predict": max_tokens,
-#                     "temperature": 0.0,
-#                     "num_ctx": 4096
-#                 }
-#             },
-#             timeout=300
-#         )
-
-#         if response.status_code != 200:
-#             print("❌ Ollama returned:", response.status_code)
-#             return ""
-
-#         data = response.json()
-
-#         raw_output = data.get("response", "").strip()
-
-#         # Remove markdown formatting if LLM adds it
-#         raw_output = re.sub(r'^```json\s*|\s*```$', '', raw_output, flags=re.MULTILINE)
-
-#         return raw_output
-
-#     except Exception as e:
-#         print("❌ LLM call failed:", e)
-#         return ""
-
-
-# def build_prompt(jd_text: str, resume_text: str) -> str:
-#     """
-#     Builds the prompt for candidate fitment analysis.
-#     """
-
-#     return f"""
-# You are a strict hiring analysis assistant.
-
-# TASK:
-# Compare the Job Description and Candidate Resume.
-
-# Rules:
-# 1. Only count a skill as matched if it appears explicitly in the resume.
-# 2. If a JD skill is missing from the resume, classify it as a gap.
-# 3. Skills mentioned in projects, work experience, or responsibilities count.
-# 4. Do NOT guess skills.
-
-# Return ONLY valid JSON with this structure:
-
-# {{
-#   "matched_skills": [],
-#   "gap_analysis": {{
-#     "minor": [],
-#     "major": []
-#   }},
-#   "suggestions": {{
-#       "resume_improvements": "specific advice",
-#       "skills_to_add": [],
-#       "learning_resources": [
-#         {{
-#           "skill": "skill name",
-#           "resource": "learning platform or link"
-#         }}
-#       ]
-#   }}
-# }}
-
-# JOB DESCRIPTION:
-# {jd_text}
-
-# CANDIDATE RESUME:
-# {resume_text}
-
-# Respond ONLY with JSON.
-# """.strip()
-
-
-# def build_aggregator_prompt(average_scores, combined_comments):
-#     """
-#     Prompt for interview aggregation verdict.
-#     """
-
-#     return f"""
-# You are an interview evaluation assistant.
-
-# Analyze the following interview scores and comments.
-
-# Return ONLY valid JSON with keys:
-# - verdict
-# - strengths
-# - weaknesses
-
-# Example:
-# {{
-#  "verdict": "Hire",
-#  "strengths": [],
-#  "weaknesses": []
-# }}
-
-# Scores:
-# Communication: {average_scores['communication']}
-# Problem Solving: {average_scores['problem_solving']}
-# Domain Knowledge: {average_scores['domain_knowledge']}
-# Overall Average: {average_scores['overall_average']}
-
-# Comments:
-# {combined_comments}
-
-# Return ONLY JSON.
-# """.strip()
-
 import requests
 import re
 
-# Ollama API endpoint
 OLLAMA_BASE_URL = "http://localhost:11434/api/generate"
-
-# Recommended model for better reasoning
 MODEL = "llama3.1:8b"
 
-def call_fitment_llm(prompt: str, max_tokens: int = 1500) -> str:
+
+def call_fitment_llm(prompt: str, max_tokens: int = 2000) -> str:
     try:
         response = requests.post(
             OLLAMA_BASE_URL,
@@ -146,11 +13,11 @@ def call_fitment_llm(prompt: str, max_tokens: int = 1500) -> str:
                 "model": MODEL,
                 "prompt": prompt,
                 "stream": False,
-                "format": "json",  # ✅ Forces the model to respond in JSON only
+                "format": "json",   # forces valid JSON output
                 "options": {
                     "num_predict": max_tokens,
-                    "temperature": 0.0,
-                    "num_ctx": 6144     # ✅ Increased context for JD + Resume
+                    "temperature": 0.0,   # fully deterministic
+                    "num_ctx": 8192       # enough for full JD + full resume
                 }
             },
             timeout=300
@@ -167,58 +34,110 @@ def call_fitment_llm(prompt: str, max_tokens: int = 1500) -> str:
         print("❌ LLM call failed:", e)
         return ""
 
+
 def build_prompt(jd_text: str, resume_text: str) -> str:
     """
-    Builds a high-precision prompt with explicit factual verification.
+    Two-pass chain-of-thought prompt.
+
+    WHY TWO-PASS:
+    Small models (llama3.1:8b) hallucinate when asked to compare and output
+    simultaneously. Forcing the model to first extract what is literally in
+    the resume (Pass 1), then compare that exact list against JD requirements
+    (Pass 2), grounds every decision in explicit text evidence.
+
+    The old prompt said "search the resume carefully before calling something
+    a gap" — that caused over-generosity (model found vague word proximity
+    and decided skills were present). The new prompt builds a verified list
+    first, then does strict set-difference comparison.
     """
-    return f"""
-You are a highly logical and strict Recruitment Analyst. 
-Compare the provided Job Description (JD) and Candidate Resume with 100% factual accuracy.
+    return f"""You are a strict technical recruiter performing a factual skill audit.
+You will work in two passes. Follow each step exactly.
 
-**INSTRUCTION: PLEASE SEE RESUMES DATA CORRECTLY.**
-Before categorizing a skill as a "Gap," you must search the entire resume (projects, skills section, and work history) to ensure it is truly missing.
+════════════════════════════════════════
+PASS 1 — EXTRACT CANDIDATE SKILLS FROM RESUME
+════════════════════════════════════════
+Read the RESUME TEXT below word by word.
+List every technical skill, tool, framework, programming language, platform,
+methodology, or domain knowledge that is EXPLICITLY written in the resume.
 
-CRITICAL LOGIC RULES:
-1. **NO OVERLAP (MUTUAL EXCLUSIVITY):** If a skill (e.g., SQL, Python, AWS) is mentioned ANYWHERE in the resume, it MUST be in 'matched_skills'. It is STRICTLY FORBIDDEN from appearing in 'gap_analysis' or 'skills_to_add'.
-2. **SYNONYM AWARENESS:** If the JD asks for "SQL" and the resume mentions "PostgreSQL," "MySQL," or "Database querying," this is a MATCH. Do not list it as a gap.
-3. **DEFINITION OF MATCHED:** Only match a skill if it is explicitly stated or clearly demonstrated in the resume.
-4. **DEFINITION OF GAP:** Only list a skill as a gap if it is a CORE requirement in the JD and is completely absent from the resume.
-5. **SUGGESTIONS:** 'skills_to_add' and 'learning_resources' must ONLY address the skills identified in the 'gap_analysis'. Do not suggest learning things the candidate already knows.
+Rules for Pass 1:
+- Include skills from ALL sections: Skills, Projects, Experience, Certifications.
+- Do NOT infer or assume. If "data analysis" is written, list "data analysis".
+  Do NOT convert it to "Python" or "SQL" unless those exact words appear.
+- Soft skills (communication, leadership, teamwork) are NOT technical skills.
+- Business skills (sales, marketing, negotiation, MBA, CRM, B2B) are NOT technical skills.
+- If the resume contains NO technical skills at all, candidate_skills_found = []
 
-Return ONLY valid JSON with this exact structure:
+════════════════════════════════════════
+PASS 2 — COMPARE AGAINST JD REQUIREMENTS
+════════════════════════════════════════
+Now read the JD TEXT. Extract all required and preferred technical skills.
 
+For each JD skill, check your Pass 1 candidate_skills_found list:
+- Skill IS in candidate_skills_found (or direct synonym below) → matched_skills
+- Skill is a CORE/REQUIRED JD requirement NOT in candidate_skills_found → gap_analysis.major
+- Skill is PREFERRED/NICE-TO-HAVE NOT in candidate_skills_found → gap_analysis.minor
+
+Permitted synonyms ONLY:
+- "PostgreSQL", "MySQL", "SQLite" = "SQL"
+- "GCP", "Azure" = "cloud platform"
+- "git", "GitHub", "GitLab" = "version control"
+- No other inferences are allowed.
+
+════════════════════════════════════════
+ABSOLUTE RULES — NEVER VIOLATE THESE
+════════════════════════════════════════
+1. A skill CANNOT appear in both matched_skills AND gap_analysis. Never. Ever.
+2. skills_to_add must ONLY contain skills already in gap_analysis. Nothing else.
+3. learning_resources must ONLY address gap_analysis skills. Nothing else.
+4. If candidate_skills_found is empty [], then matched_skills MUST be [].
+5. If the candidate has only an MBA/business/sales background and the JD requires
+   Python, ML, Cloud, Docker, etc. — ALL those technical skills go into
+   gap_analysis.major. matched_skills stays []. This is correct and expected.
+6. Do NOT award credit for business skills like "data-driven decision making",
+   "analytical mindset", "technology adoption" when JD asks for Python or SQL.
+   Those are not the same thing.
+
+════════════════════════════════════════
+OUTPUT — Return ONLY this exact JSON
+════════════════════════════════════════
 {{
-  "matched_skills": ["Skill 1", "Skill 2"],
+  "candidate_skills_found": ["exact skills extracted from resume in Pass 1"],
+  "matched_skills": ["JD skills confirmed present in resume"],
   "gap_analysis": {{
-    "minor": ["Missing secondary tool/skill"],
-    "major": ["Missing core requirement"]
+    "major": ["Core JD requirements completely absent from resume"],
+    "minor": ["Preferred JD skills absent from resume"]
   }},
   "suggestions": {{
-      "resume_improvements": "Actionable advice to better highlight existing skills",
-      "skills_to_add": ["Skill from gap_analysis only"],
-      "learning_resources": [
-        {{
-          "skill": "Skill from gap_analysis",
-          "resource": "Specific platform or course name"
-        }}
-      ]
+    "resume_improvements": "Honest, specific advice. If the profile is a poor fit, say so clearly and suggest what the candidate needs to do.",
+    "skills_to_add": ["Only skills from gap_analysis — nothing else"],
+    "learning_resources": [
+      {{
+        "skill": "Skill name from gap_analysis",
+        "resource": "Specific course or platform name (e.g. fast.ai, Coursera Deep Learning, AWS Training)"
+      }}
+    ]
   }}
 }}
 
-JOB DESCRIPTION:
-{jd_text}
-
-CANDIDATE RESUME:
+════════════════════════════════════════
+RESUME TEXT:
+════════════════════════════════════════
 {resume_text}
 
-Respond ONLY with valid JSON.
-""".strip()
+════════════════════════════════════════
+JD TEXT:
+════════════════════════════════════════
+{jd_text}
+
+════════════════════════════════════════
+Produce the JSON output now. Start with {{ and end with }}.
+════════════════════════════════════════"""
+
 
 def build_aggregator_prompt(average_scores, combined_comments):
-    # (Kept as is, but added Respond ONLY with JSON for safety)
-    return f"""
-You are an interview evaluation assistant. Analyze the scores and comments.
-Return ONLY valid JSON.
+    return f"""You are an interview evaluation assistant. Analyze the scores and comments.
+Return ONLY valid JSON. No explanation outside the JSON.
 
 Scores:
 Communication: {average_scores['communication']}
@@ -231,8 +150,7 @@ Comments:
 
 Expected Format:
 {{
- "verdict": "Hire/No Hire",
- "strengths": [],
- "weaknesses": []
-}}
-""".strip()
+  "verdict": "Hire/No Hire",
+  "strengths": ["strength 1", "strength 2"],
+  "weaknesses": ["weakness 1", "weakness 2"]
+}}"""

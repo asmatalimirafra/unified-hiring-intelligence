@@ -2,17 +2,15 @@ from datetime import datetime
 from services.mongo_service import candidates_collection, roles_collection
 from services.qdrant_service import client, RESUME_COLLECTION, JD_COLLECTION
 from sklearn.metrics.pairwise import cosine_similarity
-from sentence_transformers import SentenceTransformer
 from services.resume_segmenter import split_resume_into_chunks
 from services.ollama_utils import call_fitment_llm, build_prompt
 import numpy as np
 import json
 import re
-import torch
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
-model = SentenceTransformer("BAAI/bge-large-en-v1.5", device=device)
-model.max_seq_length = 512
+# NOTE: SentenceTransformer/BGE is only needed in qdrant_service.py for
+# storing vectors. fitment_service no longer does chunk-level encoding —
+# the LLM handles skill extraction directly via the two-pass prompt.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SCORING DESIGN
@@ -125,8 +123,7 @@ def score_fitment_logic(candidate_id: str, force_rescore: bool = False):
     jd_text     = jd_doc["job_description"]
     resume_text = candidate["resume_text"]
 
-    focused_resume = extract_top_relevant_chunks(jd_text, resume_text)
-    llm_analysis   = get_cleaned_fitment_analysis(jd_text, focused_resume)
+    llm_analysis   = get_cleaned_fitment_analysis(jd_text, resume_text)
 
     # Derive LLM score from actual skill lists Mistral returned
     matched = llm_analysis.get("matched_skills", [])
@@ -180,43 +177,63 @@ def compute_cosine_similarity(v1, v2):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Resume chunk extraction (logic was correct — kept unchanged)
+# Resume text preparation for LLM
+#
+# OLD APPROACH (broken):
+#   Ranked chunks by cosine + keyword overlap against the JD. For an MBA
+#   resume, generic words like "management", "strategy", "project", "team"
+#   overlapped heavily with JD text → wrong chunks got boosted → LLM never
+#   saw "no Python here" → hallucinated matches.
+#
+# NEW APPROACH:
+#   Send ALL chunks in section order with their section labels intact.
+#   The two-pass prompt handles a full resume — it extracts skills itself
+#   in Pass 1. Section labels ("Skills:", "Experience:") give the LLM
+#   critical context about what it is reading.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def extract_top_relevant_chunks(jd_text, resume_text, min_percent=0.25, min_coverage_chars=1500):
-    jd_vector     = model.encode(jd_text).reshape(1, -1)
-    resume_chunks = split_resume_into_chunks(resume_text)
-    jd_keywords   = set([w.lower() for w in jd_text.split() if len(w) > 2])
+MAX_RESUME_CHARS = 6000   # leaves room for JD + prompt within 8192-token ctx
 
-    chunk_scores = []
-    for chunk in resume_chunks:
-        chunk_vec       = model.encode(chunk).reshape(1, -1)
-        score           = compute_cosine_similarity(chunk_vec, jd_vector)
-        keyword_overlap = sum(1 for word in jd_keywords if word in chunk.lower())
-        bonus           = 0.05 * min(keyword_overlap, 4)
-        boosted_score   = min(score + bonus, 1.0)
-        chunk_scores.append((chunk, boosted_score))
 
-    top_chunks      = sorted(chunk_scores, key=lambda x: x[1], reverse=True)
-    threshold_chars = max(min_coverage_chars, int(len(resume_text) * min_percent))
+def prepare_resume_for_llm(resume_text: str) -> str:
+    """
+    Return the full resume structured with section labels,
+    truncated only if it exceeds the context window limit.
+    """
+    chunks = split_resume_into_chunks(resume_text)
 
-    selected, accumulated = [], 0
-    for chunk, _ in top_chunks:
-        selected.append(chunk)
-        accumulated += len(chunk)
-        if accumulated >= threshold_chars or len(selected) >= 8:
+    if not chunks:
+        return resume_text[:MAX_RESUME_CHARS]
+
+    full_text = "\n\n".join(chunks)
+
+    if len(full_text) <= MAX_RESUME_CHARS:
+        return full_text
+
+    # Truncate: keep as many complete chunks as fit, trim the last one
+    result, total = [], 0
+    for chunk in chunks:
+        if total + len(chunk) + 2 <= MAX_RESUME_CHARS:
+            result.append(chunk)
+            total += len(chunk) + 2
+        else:
+            remaining = MAX_RESUME_CHARS - total
+            if remaining > 100:
+                result.append(chunk[:remaining] + "…")
             break
 
-    return "\n\n".join(selected)
+    print(f"⚠️  Resume truncated to {MAX_RESUME_CHARS} chars for LLM context.")
+    return "\n\n".join(result)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# LLM analysis & output cleaning (logic was correct — kept unchanged)
+# LLM analysis & output cleaning
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_cleaned_fitment_analysis(jd_text, resume_text):
-    prompt     = build_prompt(jd_text, resume_text)
-    raw_output = call_fitment_llm(prompt, max_tokens=1500)
+    prepared_resume = prepare_resume_for_llm(resume_text)
+    prompt          = build_prompt(jd_text, prepared_resume)
+    raw_output      = call_fitment_llm(prompt, max_tokens=2000)
 
     if not raw_output:
         return empty_fitment_output()
@@ -240,6 +257,8 @@ def get_cleaned_fitment_analysis(jd_text, resume_text):
 
 def clean_llm_gap_output(raw_output):
     def normalize_list(items):
+        if not isinstance(items, list):
+            return []
         return [item.get("skill", "") if isinstance(item, dict) else str(item) for item in items]
 
     def canonicalize(skill):
@@ -266,23 +285,44 @@ def clean_llm_gap_output(raw_output):
 
     minor_raw     = dedup_skills(normalize_list(gap_analysis.get("minor", [])))
     major_raw     = dedup_skills(normalize_list(gap_analysis.get("major", [])))
-    skills_to_add = dedup_skills(normalize_list(suggestions.get("skills_to_add", [])))
 
+    # ── ENFORCE MUTUAL EXCLUSIVITY ────────────────────────────────────────────
+    # Even if the LLM violates the prompt rules and puts a skill in both
+    # matched AND gaps, we fix it here: matched takes priority, gaps are cleaned.
+    matched_canons = {canonicalize(s) for s in matched_skills}
+    minor_raw = [s for s in minor_raw if canonicalize(s) not in matched_canons]
+    major_raw = [s for s in major_raw if canonicalize(s) not in matched_canons]
+
+    # gap_canons for validating skills_to_add
+    gap_canons = {canonicalize(s) for s in minor_raw + major_raw}
+
+    # skills_to_add must ONLY contain gap skills — strip any matched ones
+    skills_to_add_raw = dedup_skills(normalize_list(suggestions.get("skills_to_add", [])))
+    skills_to_add = [s for s in skills_to_add_raw if canonicalize(s) not in matched_canons]
+
+    # learning_resources must ONLY address gap skills — strip matched ones
     learning_resources_raw = suggestions.get("learning_resources", [])
     final_resources = []
 
     if not isinstance(learning_resources_raw, list) or not learning_resources_raw:
-        final_resources = [{
-            "skill":    "Core Technology Stack",
-            "resource": "https://www.google.com/search?q=best+technical+courses+online"
-        }]
+        # Only generate fallback resources if there are actual gaps
+        if gap_canons:
+            final_resources = [{
+                "skill":    "Core Technical Skills",
+                "resource": "https://www.google.com/search?q=best+technical+courses+online"
+            }]
     else:
         for res in learning_resources_raw:
-            skill_name    = res.get("skill", "Technology")
+            skill_name    = res.get("skill", "")
+            if not skill_name:
+                continue
+            # Skip resources for skills the candidate already has
+            if canonicalize(skill_name) in matched_canons:
+                continue
             original_link = str(res.get("resource", res.get("url", "")))
             if "http" not in original_link or " " in original_link or len(original_link) < 10:
                 search_query = skill_name.replace(" ", "+")
-                resource_url = f"https://www.google.com/search?q={search_query}+best+course+tutorial+documentation"
+                resource_url = f"https://www.google.com/search?q={search_query}+course+tutorial"
             else:
                 resource_url = original_link
             final_resources.append({"skill": skill_name, "resource": resource_url})
@@ -290,6 +330,10 @@ def clean_llm_gap_output(raw_output):
     resume_improvements = suggestions.get("resume_improvements", "")
     if isinstance(resume_improvements, list):
         resume_improvements = " ".join(resume_improvements)
+
+    # Log for debugging — visible in backend terminal
+    print(f"✅ LLM output cleaned — matched: {len(matched_skills)}, "
+          f"minor gaps: {len(minor_raw)}, major gaps: {len(major_raw)}")
 
     return {
         "gap_analysis": {"minor": minor_raw, "major": major_raw},
