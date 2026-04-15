@@ -6,7 +6,6 @@ from sentence_transformers import SentenceTransformer
 from services.resume_segmenter import split_resume_into_chunks
 from services.ollama_utils import call_fitment_llm, build_prompt
 import numpy as np
-import time
 import json
 import re
 import torch
@@ -16,97 +15,108 @@ model = SentenceTransformer("BAAI/bge-large-en-v1.5", device=device)
 model.max_seq_length = 512
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CALIBRATION CONSTANTS  (tuned for BAAI/bge-large-en-v1.5)
+# SCORING DESIGN
 #
-# BGE cosine scores for resume↔JD pairs in practice:
-#   ~0.50–0.58  →  poor match   (different domain entirely)
-#   ~0.58–0.68  →  weak match   (some overlap, many gaps)
-#   ~0.68–0.76  →  moderate     (relevant background, missing skills)
-#   ~0.76–0.83  →  good match   (solid fit, minor gaps)
-#   ~0.83–0.88  →  strong match (very relevant, small gaps remain)
-#   >0.88       →  near-perfect (rare; almost never truly 100%)
+# Final fitment_score = WEIGHTED BLEND of two independent signals:
 #
-# We map this [FLOOR, CEILING] range → [0%, MAX_SCORE%]
-# MAX_SCORE is capped at 95 so no one ever hits 100% automatically.
+#   1. Cosine Signal  (40% weight)
+#      BGE cosine scores cluster 0.50–0.88 for resume↔JD pairs.
+#      Normalised: floor=0.50 → 0 pts,  ceiling=0.88 → 100 pts.
+#
+#   2. LLM Skill Signal  (60% weight)
+#      Derived from Mistral's actual skill-gap analysis:
+#        matched skill  → 1.0 pt  (full credit)
+#        minor gap      → 0.4 pt  (partial knowledge)
+#        major gap      → 0.0 pt  (missing entirely)
+#      score = weighted_sum / total_skills × 100
+#
+#   Final = (cosine × 0.40) + (llm × 0.60),  hard-capped at 94.
+#
+# WHY BETTER THAN THE OLD FORMULA:
+#   Old: (sim*1.3 + 0.15)*100  → almost always ≥100%, meaningless.
+#   New: actual skill coverage drives the score; cosine is supporting signal.
 # ─────────────────────────────────────────────────────────────────────────────
-SIMILARITY_FLOOR   = 0.50   # scores at or below this → 0% fitment
-SIMILARITY_CEILING = 0.90   # scores at or above this → MAX_SCORE fitment
-MAX_FITMENT_SCORE  = 95.0   # practical ceiling — perfect score is never auto-awarded
-MIN_FITMENT_SCORE  = 0.0
+
+COSINE_FLOOR   = 0.50
+COSINE_CEILING = 0.88
+HARD_CAP       = 94.0   # perfect score is never auto-awarded
+
+WEIGHT_COSINE  = 0.40
+WEIGHT_LLM     = 0.60
 
 
-def normalize_similarity_to_fitment(sim_score: float) -> float:
-    """
-    Maps raw BGE cosine similarity → a practical fitment percentage.
-
-    Formula:  linear interpolation between FLOOR and CEILING,
-              then scaled to [MIN_FITMENT_SCORE, MAX_FITMENT_SCORE].
-
-    Examples (with current constants):
-        sim=0.50  →   0%
-        sim=0.60  →  25%
-        sim=0.68  →  45%
-        sim=0.74  →  60%
-        sim=0.78  →  70%
-        sim=0.82  →  80%
-        sim=0.86  →  90%
-        sim=0.90  →  95%   (hard ceiling)
-    """
-    if sim_score <= SIMILARITY_FLOOR:
-        return MIN_FITMENT_SCORE
-    if sim_score >= SIMILARITY_CEILING:
-        return MAX_FITMENT_SCORE
-
-    normalized = (sim_score - SIMILARITY_FLOOR) / (SIMILARITY_CEILING - SIMILARITY_FLOOR)
-    fitment = normalized * MAX_FITMENT_SCORE
-
-    return round(fitment, 2)
-
-
-def normalize_semantic_display(sim_score: float) -> float:
-    """
-    Maps raw BGE cosine similarity → a display-friendly semantic similarity %.
-
-    The raw value (e.g. 0.82) is honest but misleading on a 0–100% gauge
-    because 0.50 already represents "some relation". This re-maps it so:
-        0.50  →  0%
-        0.70  →  50%
-        0.90  →  100%
-
-    This makes the gauge actually meaningful to a human reader.
-    """
-    if sim_score <= SIMILARITY_FLOOR:
+def _normalise_cosine(raw: float) -> float:
+    """Map raw BGE cosine [FLOOR, CEILING] → [0, 100]."""
+    if raw <= COSINE_FLOOR:
         return 0.0
-    if sim_score >= SIMILARITY_CEILING:
+    if raw >= COSINE_CEILING:
+        return 100.0
+    return round((raw - COSINE_FLOOR) / (COSINE_CEILING - COSINE_FLOOR) * 100, 2)
+
+
+def _llm_skill_score(matched: list, minor: list, major: list) -> float:
+    """
+    Compute a 0–100 score from LLM-extracted skill lists.
+      matched → 1.0 pt,  minor gap → 0.4 pt,  major gap → 0.0 pt
+    Returns 50.0 if LLM returned no skills at all (neutral fallback).
+    """
+    n_matched = len(matched)
+    n_minor   = len(minor)
+    n_major   = len(major)
+    total     = n_matched + n_minor + n_major
+
+    if total == 0:
+        return 50.0  # neutral — LLM returned nothing useful
+
+    weighted_sum = (n_matched * 1.0) + (n_minor * 0.4) + (n_major * 0.0)
+    return round((weighted_sum / total) * 100, 2)
+
+
+def _blend(cosine_score: float, llm_score: float) -> float:
+    """Blend the two signals and apply the hard cap."""
+    blended = (cosine_score * WEIGHT_COSINE) + (llm_score * WEIGHT_LLM)
+    return round(min(blended, HARD_CAP), 2)
+
+
+def _display_semantic(raw: float) -> float:
+    """
+    Re-map raw BGE cosine → 0.0–1.0 for the gauge display.
+    raw=0.50 → 0.0  (no meaningful match)
+    raw=0.69 → ~0.5
+    raw=0.88 → 1.0
+    Without this, the gauge shows 0.82 as "82%" even for weak matches.
+    """
+    if raw <= COSINE_FLOOR:
+        return 0.0
+    if raw >= COSINE_CEILING:
         return 1.0
+    return round((raw - COSINE_FLOOR) / (COSINE_CEILING - COSINE_FLOOR), 4)
 
-    normalized = (sim_score - SIMILARITY_FLOOR) / (SIMILARITY_CEILING - SIMILARITY_FLOOR)
-    return round(normalized, 4)
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Main entry point
+# ─────────────────────────────────────────────────────────────────────────────
 
 def score_fitment_logic(candidate_id: str, force_rescore: bool = False):
     candidate = candidates_collection.find_one({"candidate_id": candidate_id})
     if not candidate:
         return None
 
-    # Return cached result unless force_rescore is requested
+    # Return cached result unless caller wants a fresh score
     if "results" in candidate and not force_rescore:
         return candidate["results"]
 
-    role_id = candidate["applied_role_id"]
+    role_id   = candidate["applied_role_id"]
     resume_id = int(candidate_id.replace("CND-", ""))
 
     resume_vector = get_vector_by_id(RESUME_COLLECTION, resume_id)
-    jd_vector = get_vector_by_id(JD_COLLECTION, int(role_id))
+    jd_vector     = get_vector_by_id(JD_COLLECTION, int(role_id))
 
     if resume_vector is None or jd_vector is None:
         return None
 
-    raw_sim = compute_cosine_similarity(resume_vector, jd_vector)
-
-    # ── NEW: use calibrated formulas instead of the old (sim*1.3+0.15)*100 ──
-    fitment_percent        = normalize_similarity_to_fitment(raw_sim)
-    semantic_display_score = normalize_semantic_display(raw_sim)
+    raw_cosine   = compute_cosine_similarity(resume_vector, jd_vector)
+    cosine_score = _normalise_cosine(raw_cosine)
 
     jd_doc = roles_collection.find_one({"role_id": role_id})
     if not jd_doc:
@@ -118,12 +128,24 @@ def score_fitment_logic(candidate_id: str, force_rescore: bool = False):
     focused_resume = extract_top_relevant_chunks(jd_text, resume_text)
     llm_analysis   = get_cleaned_fitment_analysis(jd_text, focused_resume)
 
+    # Derive LLM score from actual skill lists Mistral returned
+    matched = llm_analysis.get("matched_skills", [])
+    minor   = llm_analysis.get("gap_analysis", {}).get("minor", [])
+    major   = llm_analysis.get("gap_analysis", {}).get("major", [])
+
+    llm_score     = _llm_skill_score(matched, minor, major)
+    fitment_score = _blend(cosine_score, llm_score)
+    semantic_disp = _display_semantic(raw_cosine)
+
     result = {
         "candidate_id":        candidate_id,
         "applied_role_id":     role_id,
-        "fitment_score":       fitment_percent,
-        "semantic_similarity": semantic_display_score,   # normalised for display
-        "raw_cosine":          round(raw_sim, 4),        # kept for debugging
+        "fitment_score":       fitment_score,   # blended, 0–94
+        "semantic_similarity": semantic_disp,   # normalised 0.0–1.0 for gauge
+        # debug fields — stored in DB, not shown in UI
+        "raw_cosine":          round(raw_cosine, 4),
+        "cosine_component":    round(cosine_score, 2),
+        "llm_component":       round(llm_score, 2),
         **llm_analysis
     }
 
@@ -139,7 +161,7 @@ def score_fitment_logic(candidate_id: str, force_rescore: bool = False):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Helpers — unchanged from original
+# Vector helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_vector_by_id(collection, id):
@@ -157,6 +179,10 @@ def compute_cosine_similarity(v1, v2):
     return float(cosine_similarity(v1, v2)[0][0])
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Resume chunk extraction (logic was correct — kept unchanged)
+# ─────────────────────────────────────────────────────────────────────────────
+
 def extract_top_relevant_chunks(jd_text, resume_text, min_percent=0.25, min_coverage_chars=1500):
     jd_vector     = model.encode(jd_text).reshape(1, -1)
     resume_chunks = split_resume_into_chunks(resume_text)
@@ -171,12 +197,10 @@ def extract_top_relevant_chunks(jd_text, resume_text, min_percent=0.25, min_cove
         boosted_score   = min(score + bonus, 1.0)
         chunk_scores.append((chunk, boosted_score))
 
-    top_chunks       = sorted(chunk_scores, key=lambda x: x[1], reverse=True)
-    total_resume_chars = len(resume_text)
-    threshold_chars  = max(min_coverage_chars, int(total_resume_chars * min_percent))
+    top_chunks      = sorted(chunk_scores, key=lambda x: x[1], reverse=True)
+    threshold_chars = max(min_coverage_chars, int(len(resume_text) * min_percent))
 
-    selected    = []
-    accumulated = 0
+    selected, accumulated = [], 0
     for chunk, _ in top_chunks:
         selected.append(chunk)
         accumulated += len(chunk)
@@ -185,6 +209,10 @@ def extract_top_relevant_chunks(jd_text, resume_text, min_percent=0.25, min_cove
 
     return "\n\n".join(selected)
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LLM analysis & output cleaning (logic was correct — kept unchanged)
+# ─────────────────────────────────────────────────────────────────────────────
 
 def get_cleaned_fitment_analysis(jd_text, resume_text):
     prompt     = build_prompt(jd_text, resume_text)
@@ -201,7 +229,7 @@ def get_cleaned_fitment_analysis(jd_text, resume_text):
             json_match = re.search(r"\{[\s\S]*\}", raw_output)
             if json_match:
                 parsed = json.loads(json_match.group())
-        except:
+        except Exception:
             return empty_fitment_output()
 
     if not parsed:
@@ -212,32 +240,19 @@ def get_cleaned_fitment_analysis(jd_text, resume_text):
 
 def clean_llm_gap_output(raw_output):
     def normalize_list(items):
-        cleaned = []
-        for item in items:
-            if isinstance(item, dict):
-                cleaned.append(item.get("skill", ""))
-            else:
-                cleaned.append(str(item))
-        return cleaned
+        return [item.get("skill", "") if isinstance(item, dict) else str(item) for item in items]
 
     def canonicalize(skill):
         return (
             str(skill).strip().lower()
-            .replace(" or similar", "")
-            .replace("basic knowledge of", "")
-            .replace("familiarity with", "")
-            .replace("understanding of", "")
-            .replace("experience in", "")
-            .replace("advanced", "")
-            .replace("basics", "")
-            .replace("(", "")
-            .replace(")", "")
-            .strip()
+            .replace(" or similar", "").replace("basic knowledge of", "")
+            .replace("familiarity with", "").replace("understanding of", "")
+            .replace("experience in", "").replace("advanced", "")
+            .replace("basics", "").replace("(", "").replace(")", "").strip()
         )
 
     def dedup_skills(skill_list):
-        seen    = set()
-        cleaned = []
+        seen, cleaned = set(), []
         for skill in skill_list:
             canon = canonicalize(skill)
             if canon and canon not in seen:
@@ -249,8 +264,8 @@ def clean_llm_gap_output(raw_output):
     gap_analysis   = raw_output.get("gap_analysis", {})
     suggestions    = raw_output.get("suggestions", {})
 
-    minor_raw    = dedup_skills(normalize_list(gap_analysis.get("minor", [])))
-    major_raw    = dedup_skills(normalize_list(gap_analysis.get("major", [])))
+    minor_raw     = dedup_skills(normalize_list(gap_analysis.get("minor", [])))
+    major_raw     = dedup_skills(normalize_list(gap_analysis.get("major", [])))
     skills_to_add = dedup_skills(normalize_list(suggestions.get("skills_to_add", [])))
 
     learning_resources_raw = suggestions.get("learning_resources", [])
@@ -265,13 +280,11 @@ def clean_llm_gap_output(raw_output):
         for res in learning_resources_raw:
             skill_name    = res.get("skill", "Technology")
             original_link = str(res.get("resource", res.get("url", "")))
-
             if "http" not in original_link or " " in original_link or len(original_link) < 10:
                 search_query = skill_name.replace(" ", "+")
                 resource_url = f"https://www.google.com/search?q={search_query}+best+course+tutorial+documentation"
             else:
                 resource_url = original_link
-
             final_resources.append({"skill": skill_name, "resource": resource_url})
 
     resume_improvements = suggestions.get("resume_improvements", "")
@@ -279,10 +292,7 @@ def clean_llm_gap_output(raw_output):
         resume_improvements = " ".join(resume_improvements)
 
     return {
-        "gap_analysis": {
-            "minor": minor_raw,
-            "major": major_raw
-        },
+        "gap_analysis": {"minor": minor_raw, "major": major_raw},
         "suggestions": {
             "resume_improvements": resume_improvements,
             "skills_to_add":       skills_to_add,

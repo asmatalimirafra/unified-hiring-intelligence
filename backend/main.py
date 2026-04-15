@@ -226,6 +226,10 @@ async def delete_candidate_api(candidate_id: str):
 
 @app.get("/score-fitment/{candidate_id}")
 async def score_fitment(candidate_id: str, force_rescore: bool = False):
+    """
+    Score candidate fitment against their applied role.
+    Pass ?force_rescore=true to bypass the MongoDB cache and recompute fresh.
+    """
     try:
         result = score_fitment_logic(candidate_id, force_rescore=force_rescore)
         if result:

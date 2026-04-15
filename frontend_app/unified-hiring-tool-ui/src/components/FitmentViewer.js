@@ -3,180 +3,288 @@ import React, { useRef } from 'react';
 import './FitmentViewer.css';
 import GaugeChart from 'react-gauge-chart';
 import { Oval } from 'react-loader-spinner';
-// import html2pdf from 'html2pdf.js';
 import html2pdf from 'html2pdf.js/dist/html2pdf.bundle.min.js';
-import { FiExternalLink } from 'react-icons/fi'; // External link icon
+import { FiExternalLink } from 'react-icons/fi';
 
 function FitmentViewer({ fitmentData, onClose, loading }) {
   const contentRef = useRef();
 
   const handleDownload = () => {
     if (!contentRef.current) return;
-
-    const opt = {
-      margin: 0.5,
-      filename: 'fitment-analysis.pdf',
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2 },
-      jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
-    };
-
-    html2pdf().from(contentRef.current).set(opt).save();
+    const candidateId = fitmentData?.candidate_id || 'candidate';
+    html2pdf()
+      .from(contentRef.current)
+      .set({
+        margin:     0.5,
+        filename:   `fitment-${candidateId}.pdf`,
+        image:      { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2 },
+        jsPDF:      { unit: 'in', format: 'letter', orientation: 'portrait' }
+      })
+      .save();
   };
 
+  // ── Loading state ────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <div className="modal-backdrop">
-        <div className="modal-content center">
+      <div className="fv-backdrop">
+        <div className="fv-modal fv-center">
           <Oval
-            height={80}
-            width={80}
-            color="#007bff"
+            height={60} width={60}
+            color="#2563eb"
+            secondaryColor="#bfdbfe"
+            strokeWidth={3}
+            strokeWidthSecondary={3}
             visible={true}
-            ariaLabel="oval-loading"
-            secondaryColor="#80bdff"
-            strokeWidth={2}
-            strokeWidthSecondary={2}
+            ariaLabel="loading"
           />
-          <p>Analyzing fitment…</p>
+          <p className="fv-loading-text">Analysing fitment…</p>
+          <p className="fv-loading-sub">Running semantic + skill gap analysis</p>
         </div>
       </div>
     );
   }
 
-  // if (!fitmentData) return null;
-  if (fitmentData.error) {
-  return (
-    <div className="modal-backdrop">
-      <div className="modal-content center">
-        <h3>Error</h3>
-        <p>{fitmentData.error}</p>
-        <button className="close-btn" onClick={onClose}>Close</button>
-      </div>
-    </div>
-  );
-}
+  // Guard: fitmentData must exist before accessing .error
+  if (!fitmentData) return null;
 
+  // ── Error state ──────────────────────────────────────────────────────────
+  if (fitmentData.error) {
+    return (
+      <div className="fv-backdrop">
+        <div className="fv-modal fv-center">
+          <span className="fv-error-icon">⚠️</span>
+          <h3 className="fv-error-title">Analysis Failed</h3>
+          <p className="fv-error-msg">{fitmentData.error}</p>
+          <button className="fv-btn-close" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Destructure with safe defaults ───────────────────────────────────────
   const {
-    fitment_score = 0,
+    fitment_score      = 0,
     semantic_similarity = 0,
-    gap_analysis = {},
-    suggestions = {},
-    matched_skills = []
+    gap_analysis       = {},
+    suggestions        = {},
+    matched_skills     = [],
+    cosine_component,
+    llm_component,
   } = fitmentData;
 
-  const improvementsArray = suggestions?.resume_improvements
-    ? suggestions.resume_improvements.split(/(?<=[.!?])\s+/).filter(Boolean)
+  const minor          = gap_analysis?.minor  || [];
+  const major          = gap_analysis?.major  || [];
+  const skillsToAdd    = suggestions?.skills_to_add       || [];
+  const resources      = suggestions?.learning_resources  || [];
+
+  // Split resume_improvements into individual sentences for a clean list
+  const improvements = suggestions?.resume_improvements
+    ? suggestions.resume_improvements
+        .split(/(?<=[.!?])\s+/)
+        .map(s => s.trim())
+        .filter(Boolean)
     : [];
 
+  // Score label for the fitment band
+  const fitmentLabel =
+    fitment_score >= 75 ? { text: 'Strong Fit',   cls: 'label-high' } :
+    fitment_score >= 50 ? { text: 'Moderate Fit', cls: 'label-mid'  } :
+                          { text: 'Weak Fit',      cls: 'label-low'  };
+
   return (
-    <div className="modal-backdrop">
-      <div className="modal-content large">
-        <div className="modal-header">
-          <h3>Fitment Analysis</h3>
-          <div className="modal-actions">
-            <button className="download-btn" onClick={handleDownload}>
-              ⬇ Download PDF
-            </button>
-            <button className="close-btn" onClick={onClose}>×</button>
+    <div className="fv-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="fv-modal fv-large">
+
+        {/* Header */}
+        <div className="fv-header">
+          <div>
+            <h3 className="fv-title">Fitment Analysis</h3>
+            {fitmentData.candidate_id && (
+              <p className="fv-subtitle">{fitmentData.candidate_id}</p>
+            )}
+          </div>
+          <div className="fv-header-actions">
+            <button className="fv-btn-download" onClick={handleDownload}>⬇ Download PDF</button>
+            <button className="fv-btn-x" onClick={onClose}>×</button>
           </div>
         </div>
 
-        <div ref={contentRef}>
-          <div className="dual-gauge-container">
-            <div className="gauge-item">
+        {/* Scrollable content */}
+        <div className="fv-body" ref={contentRef}>
+
+          {/* ── Gauges ───────────────────────────────────────────────────── */}
+          <div className="fv-gauges">
+            <div className="fv-gauge-item">
               <GaugeChart
-                id="fitment-gauge"
+                id="gauge-fitment"
                 nrOfLevels={20}
-                percent={fitment_score / 100}
-                textColor="#000"
-                needleColor="#345243"
-                colors={["#FF5F6D", "#FFC371", "#00C851"]}
+                percent={Math.min(fitment_score / 100, 1)}
+                textColor="#0f172a"
+                needleColor="#334155"
+                colors={['#ef4444', '#f59e0b', '#22c55e']}
                 arcPadding={0.02}
-                animate={true}
-                formatTextValue={() => `${fitment_score.toFixed(0)}%`}
+                animate
+                formatTextValue={() => `${fitment_score.toFixed(1)}%`}
               />
-              <p className="gauge-label">Fitment Score</p>
+              <p className="fv-gauge-label">Fitment Score</p>
+              <span className={`fv-fit-label ${fitmentLabel.cls}`}>{fitmentLabel.text}</span>
             </div>
 
-            <div className="gauge-item">
+            <div className="fv-gauge-item">
               <GaugeChart
-                id="semantic-gauge"
+                id="gauge-semantic"
                 nrOfLevels={20}
-                percent={semantic_similarity}
-                textColor="#000"
-                needleColor="#345243"
-                colors={["#FF5F6D", "#FFC371", "#00C851"]}
+                percent={Math.min(Math.max(semantic_similarity, 0), 1)}
+                textColor="#0f172a"
+                needleColor="#334155"
+                colors={['#ef4444', '#f59e0b', '#22c55e']}
                 arcPadding={0.02}
-                animate={true}
+                animate
                 formatTextValue={() => `${Math.round(semantic_similarity * 100)}%`}
               />
-              <p className="gauge-label">Semantic Similarity</p>
+              <p className="fv-gauge-label">Semantic Similarity</p>
             </div>
           </div>
 
-          <h4>🟢 Matched Skills</h4>
-          <div className="tag-list">
-            {(matched_skills || []).map((skill, i) => (
-              <span key={i} className="tag tag-green">{skill}</span>
-            ))}
-          </div>
-
-          <h4>⚠️ Minor Gaps</h4>
-          <div className="tag-list">
-            {(gap_analysis?.minor || []).map((item, i) => (
-              <span key={i} className="tag tag-yellow">{item}</span>
-            ))}
-          </div>
-
-          <h4>🔴 Major Gaps</h4>
-          <div className="tag-list">
-            {(gap_analysis?.major || []).map((item, i) => (
-              <span key={i} className="tag tag-red">{item}</span>
-            ))}
-          </div>
-
-          <h4>🛠 Suggestions</h4>
-          {improvementsArray.length > 0 ? (
-            <ul className="suggestion-list">
-              {improvementsArray.map((suggestion, i) => (
-                <li key={i}>{suggestion}</li>
-              ))}
-            </ul>
-          ) : (
-            <p>No suggestions available.</p>
+          {/* Score breakdown pill (debug info, shown subtly) */}
+          {(cosine_component !== undefined && llm_component !== undefined) && (
+            <div className="fv-score-breakdown">
+              <span className="fv-breakdown-pill">
+                Cosine component: <strong>{cosine_component.toFixed(1)}</strong>
+              </span>
+              <span className="fv-breakdown-pill">
+                Skill analysis component: <strong>{llm_component.toFixed(1)}</strong>
+              </span>
+            </div>
           )}
 
-          {(suggestions?.skills_to_add?.length > 0) && (
-            <>
-              <h5>➕ Skills to Add</h5>
-              <div className="tag-list">
-                {suggestions.skills_to_add.map((skill, i) => (
-                  <span key={i} className="tag tag-blue">{skill}</span>
+          {/* ── Matched Skills ───────────────────────────────────────────── */}
+          <div className="fv-section">
+            <h4 className="fv-section-title">
+              <span className="fv-section-dot dot-green" />
+              Matched Skills
+              <span className="fv-count">{matched_skills.length}</span>
+            </h4>
+            {matched_skills.length > 0 ? (
+              <div className="fv-tags">
+                {matched_skills.map((s, i) => (
+                  <span key={i} className="fv-tag tag-green">{s}</span>
                 ))}
               </div>
-            </>
+            ) : (
+              <p className="fv-empty-note">No matched skills identified.</p>
+            )}
+          </div>
+
+          {/* ── Minor Gaps ───────────────────────────────────────────────── */}
+          <div className="fv-section">
+            <h4 className="fv-section-title">
+              <span className="fv-section-dot dot-yellow" />
+              Minor Gaps
+              <span className="fv-count">{minor.length}</span>
+            </h4>
+            {minor.length > 0 ? (
+              <div className="fv-tags">
+                {minor.map((s, i) => (
+                  <span key={i} className="fv-tag tag-yellow">{s}</span>
+                ))}
+              </div>
+            ) : (
+              <p className="fv-empty-note">No minor gaps identified.</p>
+            )}
+          </div>
+
+          {/* ── Major Gaps ───────────────────────────────────────────────── */}
+          <div className="fv-section">
+            <h4 className="fv-section-title">
+              <span className="fv-section-dot dot-red" />
+              Major Gaps
+              <span className="fv-count">{major.length}</span>
+            </h4>
+            {major.length > 0 ? (
+              <div className="fv-tags">
+                {major.map((s, i) => (
+                  <span key={i} className="fv-tag tag-red">{s}</span>
+                ))}
+              </div>
+            ) : (
+              <p className="fv-empty-note">No major gaps identified.</p>
+            )}
+          </div>
+
+          {/* ── Resume Improvement Suggestions ───────────────────────────── */}
+          <div className="fv-section">
+            <h4 className="fv-section-title">
+              <span className="fv-section-dot dot-blue" />
+              Resume Improvement Suggestions
+            </h4>
+            {improvements.length > 0 ? (
+              <ul className="fv-suggestion-list">
+                {improvements.map((s, i) => (
+                  <li key={i}>{s}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="fv-empty-note">No suggestions available.</p>
+            )}
+          </div>
+
+          {/* ── Skills to Add ─────────────────────────────────────────────── */}
+          {skillsToAdd.length > 0 && (
+            <div className="fv-section">
+              <h4 className="fv-section-title">
+                <span className="fv-section-dot dot-blue" />
+                Skills to Add
+              </h4>
+              <div className="fv-tags">
+                {skillsToAdd.map((s, i) => (
+                  <span key={i} className="fv-tag tag-blue">{s}</span>
+                ))}
+              </div>
+            </div>
           )}
 
-          <h4>📚 Learning Resources</h4>
-          <ul>
-            {(suggestions?.learning_resources || []).map((res, i) => {
-              const domain = res.resource?.replace(/^https?:\/\//, '').split('/')[0];
-              return (
-                <li key={i}>
-                  {res?.resource ? (
-                    <a href={res.resource} target="_blank" rel="noopener noreferrer">
-                      {res.skill} <FiExternalLink style={{ marginLeft: '5px' }} />
-                    </a>
-                  ) : (
-                    <span>{res?.skill || "Resource not available"}</span>
-                  )}
-                  {domain && <span style={{ marginLeft: '8px', color: '#666', fontSize: '0.9rem' }}>({domain})</span>}
-                </li>
-              );
-            })}
-          </ul>
-        </div>
+          {/* ── Learning Resources ────────────────────────────────────────── */}
+          <div className="fv-section">
+            <h4 className="fv-section-title">
+              <span className="fv-section-dot dot-purple" />
+              Learning Resources
+            </h4>
+            {resources.length > 0 ? (
+              <ul className="fv-resource-list">
+                {resources.map((res, i) => {
+                  const domain = res.resource
+                    ?.replace(/^https?:\/\//, '')
+                    .split('/')[0];
+                  return (
+                    <li key={i} className="fv-resource-item">
+                      {res.resource ? (
+                        <a
+                          href={res.resource}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="fv-resource-link"
+                        >
+                          {res.skill}
+                          <FiExternalLink className="fv-ext-icon" />
+                        </a>
+                      ) : (
+                        <span className="fv-resource-nolink">{res.skill || 'Resource unavailable'}</span>
+                      )}
+                      {domain && (
+                        <span className="fv-resource-domain">{domain}</span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="fv-empty-note">No resources available.</p>
+            )}
+          </div>
+
+        </div>{/* /fv-body */}
       </div>
     </div>
   );
