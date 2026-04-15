@@ -1,4 +1,4 @@
-/* General page styling */
+/* ── Page ─────────────────────────────────────────────────────────────── */
 .interview-page {
   padding: 2rem;
   font-family: 'Segoe UI', sans-serif;
@@ -6,173 +6,409 @@
   min-height: 100vh;
 }
 
-h2 {
-  font-size: 1.6rem;
-  margin-bottom: 1rem;
+.page-title {
+  font-size: 1.7rem;
+  font-weight: 700;
   color: #2d3e50;
+  margin-bottom: 1.5rem;
 }
 
-/* Dropdown styling */
+/* ── Banners ──────────────────────────────────────────────────────────── */
+.banner {
+  padding: 0.7rem 1rem;
+  border-radius: 8px;
+  font-size: 0.92rem;
+  margin-bottom: 1rem;
+}
+.banner-error   { background: #fff0f0; border: 1px solid #f5c6cb; color: #842029; }
+.banner-success { background: #d4edda; border: 1px solid #c3e6cb; color: #155724; }
+
+/* ── Role dropdown ────────────────────────────────────────────────────── */
+.field-label {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #666;
+  margin-bottom: 0.35rem;
+}
+
 .dropdown {
-  padding: 0.5rem 1rem;
-  margin-bottom: 1.5rem;
+  padding: 0.55rem 1rem;
   font-size: 1rem;
   border: 1px solid #ccc;
-  border-radius: 6px;
+  border-radius: 8px;
   background-color: #fff;
   cursor: pointer;
+  margin-bottom: 1.75rem;
+  min-width: 260px;
+  outline: none;
+  transition: border-color 0.2s;
 }
+.dropdown:focus { border-color: #1f78ff; box-shadow: 0 0 0 2px rgba(31,120,255,0.1); }
 
-/* Table styling */
-.candidate-table {
-  width: 100%;
-  border-collapse: collapse;
-  background-color: #fff;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
-  border-radius: 8px;
+/* ── Loading ──────────────────────────────────────────────────────────── */
+.loading-state {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: #666;
+  font-size: 0.95rem;
+  padding: 1rem 0;
+}
+.spinner {
+  width: 18px; height: 18px;
+  border: 2px solid #d0d9f0;
+  border-top-color: #1f78ff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Section cards ────────────────────────────────────────────────────── */
+.section-card {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
   overflow: hidden;
 }
 
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #eee;
+}
+.section-header h3 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0;
+  color: #2d3e50;
+}
+.section-icon { font-size: 1.1rem; }
+
+.pending-header   { background: #fffbe6; }
+.completed-header { background: #edfaf1; }
+
+.count-badge {
+  margin-left: auto;
+  background: #e0e7ff;
+  color: #3730a3;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: 999px;
+}
+
+/* ── Candidate table ──────────────────────────────────────────────────── */
+.candidate-table {
+  width: 100%;
+  border-collapse: collapse;
+}
 .candidate-table th,
 .candidate-table td {
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid #e0e0e0;
-  text-align: center;
+  padding: 0.85rem 1.1rem;
+  text-align: left;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 0.92rem;
+  vertical-align: middle;
+}
+.candidate-table th {
+  background: #f7f9fc;
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #555;
+}
+.candidate-table tr:last-child td { border-bottom: none; }
+.candidate-table tr:hover td { background: #fafbff; }
+
+.cand-name { font-weight: 600; color: #2d3e50; }
+.cand-id   { font-size: 0.78rem; color: #999; margin-top: 2px; }
+
+.empty-row { text-align: center; color: #aaa; padding: 2rem !important; }
+
+/* ── Status badges ────────────────────────────────────────────────────── */
+.status-badge {
+  display: inline-block;
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.status-l1 { background: #fff3cd; color: #856404; }
+.status-ln { background: #cfe2ff; color: #084298; }
+
+/* ── Round badges ─────────────────────────────────────────────────────── */
+.round-badges { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+
+.round-badge-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  background: #f0f4ff;
+  border-radius: 6px;
+  padding: 2px 4px 2px 8px;
+}
+
+.round-badge {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #1f4fa8;
+  white-space: nowrap;
+}
+
+.no-rounds { color: #bbb; font-size: 0.85rem; }
+
+.icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  line-height: 1;
+  transition: background 0.15s;
+}
+.icon-btn:hover { background: #e0e7ff; }
+
+/* ── Action buttons ───────────────────────────────────────────────────── */
+.link-btn {
+  color: #1f78ff;
+  font-size: 0.88rem;
+  text-decoration: underline;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+.link-btn:hover { color: #0056b3; }
+
+.btn-feedback {
+  background: #1f78ff;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.38rem 0.9rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.2s;
+}
+.btn-feedback:hover:not(:disabled) { background: #155ac6; }
+.btn-feedback:disabled { background: #d4dbe4; color: #8a95a0; cursor: not-allowed; }
+
+.btn-complete {
+  background: #20c96b;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.38rem 0.9rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.2s;
+}
+.btn-complete:hover:not(:disabled) { background: #17a85a; }
+.btn-complete:disabled { background: #d4dbe4; color: #8a95a0; cursor: not-allowed; }
+
+.btn-reopen {
+  background: #fff;
+  color: #e67e22;
+  border: 1px solid #e67e22;
+  border-radius: 6px;
+  padding: 0.35rem 0.85rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+.btn-reopen:hover { background: #fff4ea; }
+
+/* ── Avg score ────────────────────────────────────────────────────────── */
+.avg-score {
+  font-weight: 700;
+  color: #2d3e50;
   font-size: 0.95rem;
 }
 
-.candidate-table th {
-  background-color: #f0f2f5;
-  color: #333;
-  font-weight: 600;
+/* ── Hire badges ──────────────────────────────────────────────────────── */
+.hire-badge {
+  display: inline-block;
+  padding: 0.28rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
 }
+.hire-strong { background: #d1fae5; color: #065f46; }
+.hire-yes    { background: #dbeafe; color: #1e3a8a; }
+.hire-weak   { background: #fef9c3; color: #854d0e; }
+.hire-no     { background: #fee2e2; color: #991b1b; }
 
-/* Button styling */
-.btn-choose {
-  background-color: #1f78ff;
-  color: white;
-  padding: 0.4rem 0.9rem;
-  border: none;
-  border-radius: 5px;
-  font-size: 0.9rem;
-  cursor: pointer;
-  transition: background-color 0.3s ease;
-}
-
-.btn-choose:disabled {
-  background-color: #d4dbe4;
-  color: #6e7c8b;
-  cursor: not-allowed;
-}
-
-.btn-choose:hover:not(:disabled) {
-  background-color: #155ac6;
-}
-
-/* Modal styling */
+/* ── Modal ────────────────────────────────────────────────────────────── */
 .modal-backdrop {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(0, 0, 0, 0.45);
+  inset: 0;
+  background: rgba(0,0,0,0.45);
   z-index: 1000;
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding-top: 5%;
+  padding-top: 5vh;
 }
 
 .modal-content {
-  background-color: #fff;
-  border-radius: 10px;
-  padding: 2rem;
-  width: 650px; /* increased from 500px */
-  max-height: 90vh; /* added to allow for overflow */
-  overflow-y: auto; /* scroll if needed */
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
-  z-index: 1001;
-  position: relative;
-  animation: fadeIn 0.3s ease;
+  background: #fff;
+  border-radius: 12px;
+  padding: 1.75rem;
+  width: 580px;
+  max-width: 95vw;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.18);
+  animation: fadeIn 0.25s ease;
 }
 
-.modal-content h3 {
-  margin-bottom: 1rem;
-  color: #2d3e50;
-  font-size: 1.3rem;
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
-/* Form inputs */
-.modal-content select,
-.modal-content textarea,
-.modal-content input {
-  width: 100%;
-  margin-bottom: 1rem;
-  padding: 0.6rem 0.75rem;
-  font-size: 0.95rem;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  background-color: #fafafa;
-}
-
-.modal-content textarea {
-  resize: vertical;
-  min-height: 100px;
-}
-
-/* Ratings in one row */
-.ratings-row {
+.modal-header {
   display: flex;
-  gap: 1rem;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1.25rem;
+}
+.modal-header h3 {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #2d3e50;
+  margin: 0 0 0.2rem;
+}
+.modal-subtitle {
+  font-size: 0.88rem;
+  color: #777;
+  margin: 0;
+}
+.round-label {
+  background: #e0e7ff;
+  color: #3730a3;
+  font-weight: 700;
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-size: 0.82rem;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 1.1rem;
+  color: #999;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.modal-close:hover { color: #333; }
+
+/* ── Form fields ──────────────────────────────────────────────────────── */
+.field-group {
+  margin-bottom: 1rem;
+}
+.field-group .field-label {
+  margin-bottom: 0.3rem;
+}
+.scale-hint {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #aaa;
+  font-size: 0.78rem;
+}
+
+.field-group input,
+.field-group select,
+.field-group textarea {
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.93rem;
+  border: 1px solid #ccc;
+  border-radius: 7px;
+  background: #fafafa;
+  box-sizing: border-box;
+  transition: border-color 0.2s;
+}
+.field-group input:focus,
+.field-group select:focus,
+.field-group textarea:focus {
+  outline: none;
+  border-color: #1f78ff;
+  box-shadow: 0 0 0 2px rgba(31,120,255,0.1);
+}
+.field-group input:disabled,
+.field-group select:disabled,
+.field-group textarea:disabled {
+  background: #f5f5f5;
+  color: #555;
+  cursor: default;
+}
+.field-group textarea { resize: vertical; min-height: 90px; }
+
+.ratings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0.75rem;
   margin-bottom: 1rem;
 }
 
-.ratings-row select {
-  flex: 1;
-}
-
-/* Modal actions */
+/* ── Modal actions ────────────────────────────────────────────────────── */
 .modal-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 1rem;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
 }
 
-.modal-actions button {
-  padding: 0.5rem 1.2rem;
-  font-size: 0.9rem;
-  border-radius: 6px;
+.btn-submit {
+  background: #1f78ff;
+  color: #fff;
   border: none;
+  border-radius: 7px;
+  padding: 0.55rem 1.4rem;
+  font-size: 0.93rem;
+  font-weight: 600;
   cursor: pointer;
-  transition: all 0.25s ease-in-out;
+  transition: background 0.2s;
 }
+.btn-submit:hover:not(:disabled) { background: #155ac6; }
+.btn-submit:disabled { background: #a0b4d0; cursor: not-allowed; }
 
-.modal-actions button:first-child {
-  background-color: #1f78ff;
-  color: white;
+.btn-cancel {
+  background: #f0f0f0;
+  color: #444;
+  border: none;
+  border-radius: 7px;
+  padding: 0.55rem 1.2rem;
+  font-size: 0.93rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
 }
+.btn-cancel:hover { background: #ddd; }
 
-.modal-actions button:first-child:hover {
-  background-color: #155ac6;
-}
-
-.modal-actions button:last-child {
-  background-color: #eee;
-}
-
-.modal-actions button:last-child:hover {
-  background-color: #d2d2d2;
-}
-
-/* Animation */
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(-12px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+/* ── Responsive ───────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .interview-page { padding: 1rem; }
+  .ratings-grid { grid-template-columns: 1fr; }
+  .modal-content { padding: 1.25rem; }
+  .candidate-table th,
+  .candidate-table td { font-size: 0.82rem; padding: 0.65rem 0.75rem; }
 }

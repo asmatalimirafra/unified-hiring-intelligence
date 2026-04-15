@@ -71,10 +71,11 @@ function CompareCandidates() {
 
           const interviews = c.interviews || [];
 
-          const hasR1 = interviews.some(r => r.round === 1);
-          const hasR2 = interviews.some(r => r.round === 2);
+          // const hasR1 = interviews.some(r => r.round === 1);
+          // const hasR2 = interviews.some(r => r.round === 2);
 
-          if (hasR1 && hasR2) continue;
+          // if (hasR1 && hasR2) continue;
+          if (c.interview_completed === true) continue;
 
           try {
 

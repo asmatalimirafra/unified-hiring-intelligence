@@ -66,12 +66,13 @@ function FitmentScorer() {
         const roleCandidates = (res.data || []).filter(c => c.applied_role_id === selectedRoleId);
 
         // Only show candidates who haven't completed both rounds
-        const pending = roleCandidates.filter(c => {
-          const interviews = c.interviews || [];
-          const hasR1 = interviews.some(r => r.round === 1);
-          const hasR2 = interviews.some(r => r.round === 2);
-          return !(hasR1 && hasR2);
-        });
+        // const pending = roleCandidates.filter(c => {
+        //   const interviews = c.interviews || [];
+        //   const hasR1 = interviews.some(r => r.round === 1);
+        //   const hasR2 = interviews.some(r => r.round === 2);
+        //   return !(hasR1 && hasR2);
+        // });
+        const pending = roleCandidates.filter(c => c.interview_completed !== true);
 
         setCandidates(pending);
 

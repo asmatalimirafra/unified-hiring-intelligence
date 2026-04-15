@@ -320,41 +320,62 @@ async def aggregate_interviews(candidate_id: str):
 
     interviews = candidate["interviews"]
 
-    rounds = {interview["round"] for interview in interviews}
-    if not {1, 2}.issubset(rounds):
-        raise HTTPException(status_code=400, detail="Candidate must complete both rounds before aggregation.")
+    if len(interviews) < 1:
+        raise HTTPException(status_code=400, detail="Candidate must have at least one interview round.")
 
-    round1 = next((i for i in interviews if i["round"] == 1), None)
-    round2 = next((i for i in interviews if i["round"] == 2), None)
+    # Average across ALL rounds (L1-L10)
+    categories = ["communication", "problem_solving", "domain_knowledge"]
+    category_totals = {c: 0.0 for c in categories}
+    category_counts = {c: 0   for c in categories}
 
-    if not round1 or not round2:
-        raise HTTPException(status_code=400, detail="Both round 1 and round 2 must be completed for aggregation.")
+    for interview in interviews:
+        ratings = interview.get("ratings", {})
+        for cat in categories:
+            if cat in ratings:
+                category_totals[cat] += ratings[cat]
+                category_counts[cat] += 1
 
     average_scores = {}
-    categories = ["communication", "problem_solving", "domain_knowledge"]
-    for category in categories:
-        avg = (round1["ratings"][category] + round2["ratings"][category]) / 2.0
-        average_scores[category] = round(avg, 2)
+    for cat in categories:
+        if category_counts[cat] > 0:
+            average_scores[cat] = round(category_totals[cat] / category_counts[cat], 2)
+        else:
+            average_scores[cat] = 0.0
+
     overall_avg = round(sum(average_scores.values()) / len(categories), 2)
     average_scores["overall_average"] = overall_avg
 
-    combined_comments = f"Round 1 Comments: {round1['comments']}\nRound 2 Comments: {round2['comments']}"
+    # Hire verdict based on numeric average (your rules)
+    if overall_avg >= 4:
+        numeric_verdict = "Strong Hire"
+    elif overall_avg >= 3:
+        numeric_verdict = "Hire"
+    elif overall_avg >= 2.5:
+        numeric_verdict = "Weak Hire"
+    else:
+        numeric_verdict = "No Hire"
+
+    # Combined comments from all rounds
+    sorted_interviews = sorted(interviews, key=lambda i: i["round"])
+    combined_comments = "\n".join(
+        f"Round {i['round']} Comments: {i.get('comments', '')}"
+        for i in sorted_interviews
+    )
 
     prompt = build_aggregator_prompt(average_scores, combined_comments)
     raw_output = call_fitment_llm(prompt, max_tokens=300)
 
     json_match = re.search(r"\{[\s\S]*\}", raw_output)
-    if not json_match:
-        raise HTTPException(status_code=500, detail="LLM did not return valid JSON.")
-
-    try:
-        parsed = json.loads(json_match.group())
-    except Exception:
-        raise HTTPException(status_code=500, detail="Failed to parse LLM JSON output.")
+    parsed = {}
+    if json_match:
+        try:
+            parsed = json.loads(json_match.group())
+        except Exception:
+            parsed = {}
 
     aggregate_result = {
         "average_scores": average_scores,
-        "verdict": parsed.get("verdict", "Unknown"),
+        "verdict": numeric_verdict,
         "strengths": parsed.get("strengths", []),
         "weaknesses": parsed.get("weaknesses", []),
         "combined_comments": combined_comments,

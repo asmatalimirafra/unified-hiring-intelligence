@@ -9,99 +9,97 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import './FeedbackPage.css';
 
-export default function FeedbackPage() {
-  // const BASE_URL = 'http://localhost:8080';
-    const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
+const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
+const axiosConfig = { headers: { 'ngrok-skip-browser-warning': 'true' } };
 
-  const [roles, setRoles] = useState([]);
-  const [selectedRole, setSelectedRole] = useState('');
-  const [candidates, setCandidates] = useState([]);
-  const [loading, setLoading] = useState(false);
+// ── Helper: avg score for a single round ─────────────────────────────────
+function getRoundAvg(interviews = [], round) {
+  const r = interviews.find(i => i.round === round);
+  if (!r?.ratings) return '-';
+  const vals = Object.values(r.ratings);
+  return (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1);
+}
+
+// ── Helper: all unique sorted round numbers across a candidate list ───────
+function getAllRounds(candidates) {
+  const rounds = new Set();
+  candidates.forEach(c =>
+    (c.interviews || []).forEach(i => rounds.add(i.round))
+  );
+  return [...rounds].sort((a, b) => a - b);
+}
+
+// ── Helper: overall avg across ALL rounds ────────────────────────────────
+function getOverallAvg(interviews = []) {
+  if (!interviews.length) return null;
+  let total = 0, count = 0;
+  interviews.forEach(i => {
+    Object.values(i.ratings || {}).forEach(v => { total += v; count++; });
+  });
+  return count > 0 ? (total / count).toFixed(2) : null;
+}
+
+export default function FeedbackPage() {
+  const [roles, setRoles]                     = useState([]);
+  const [selectedRole, setSelectedRole]       = useState('');
+  const [candidates, setCandidates]           = useState([]);
+  const [loading, setLoading]                 = useState(false);
   const [selectedCandidate, setSelectedCandidate] = useState(null);
-  const [aggregate, setAggregate] = useState(null);
-  const [showModal, setShowModal] = useState(false);
+  const [aggregate, setAggregate]             = useState(null);
+  const [showModal, setShowModal]             = useState(false);
   const [fetchingAggregate, setFetchingAggregate] = useState(false);
 
+  // ── Fetch roles ──────────────────────────────────────────────────────────
   useEffect(() => {
-    const fetchRoles = async () => {
-      try {
-        // const res = await axios.get(`${BASE_URL}/get-roles/`);
-        // setRoles(res.data.filter((r) => r.status === 'open'));
-        const res = await axios.get(`${BASE_URL}/get-roles/`, {
-  headers: {
-    "ngrok-skip-browser-warning": "true"
-  }
-});
-
-console.log("Roles API:", res.data);
-
-const openRoles = Array.isArray(res.data)
-  ? res.data.filter(
-      (r) => r.status?.toLowerCase().trim() === "open"
-    )
-  : [];
-
-setRoles(openRoles);
-      } catch (err) {
-        console.error('❌ Failed to fetch roles:', err);
-      }
-    };
-    fetchRoles();
+    axios.get(`${BASE_URL}/get-roles/`, axiosConfig)
+      .then(res => {
+        const openRoles = Array.isArray(res.data)
+          ? res.data.filter(r => r.status?.toLowerCase().trim() === 'open')
+          : [];
+        setRoles(openRoles);
+      })
+      .catch(err => console.error('Failed to fetch roles:', err));
   }, []);
 
+  // ── Fetch candidates — only interview_completed ones ─────────────────────
   const fetchCandidates = async (roleId) => {
     setLoading(true);
     try {
-      // const res = await axios.get(`${BASE_URL}/get-candidates/`);
-      // const filtered = res.data.filter(
-      //   (c) => c.applied_role_id === roleId && (c.interviews || []).length >= 2
-      // );
-      const res = await axios.get(`${BASE_URL}/get-candidates/`, {
-  headers: {
-    "ngrok-skip-browser-warning": "true"
-  }
-});
-
-console.log("Candidates API:", res.data);
-
-const filtered = Array.isArray(res.data)
-  ? res.data.filter(
-      (c) => c.applied_role_id === roleId && (c.interviews || []).length >= 2
-    )
-  : [];
-
-setCandidates(filtered);
+      const res = await axios.get(`${BASE_URL}/get-candidates/`, axiosConfig);
+      const filtered = Array.isArray(res.data)
+        ? res.data.filter(
+            c => String(c.applied_role_id) === String(roleId) &&
+                 c.interview_completed === true
+          )
+        : [];
       setCandidates(filtered);
     } catch (err) {
-      console.error('❌ Failed to fetch candidates:', err);
+      console.error('Failed to fetch candidates:', err);
     } finally {
       setLoading(false);
     }
   };
 
+  // ── View aggregate modal ─────────────────────────────────────────────────
   const handleViewAggregate = async (candidate) => {
     setSelectedCandidate(candidate);
     setAggregate(null);
     setFetchingAggregate(true);
     setShowModal(true);
-
     try {
       const res = await axios.get(
-  `${BASE_URL}/aggregate-interviews/${candidate.candidate_id}?fresh=${Date.now()}`,
-  {
-    headers: {
-      "ngrok-skip-browser-warning": "true"
-    }
-  }
-);
+        `${BASE_URL}/aggregate-interviews/${candidate.candidate_id}?fresh=${Date.now()}`,
+        axiosConfig
+      );
       setAggregate(res.data);
     } catch (err) {
-      console.error('❌ Failed to fetch aggregate:', err);
+      console.error('Failed to fetch aggregate:', err);
     } finally {
       setFetchingAggregate(false);
     }
   };
 
+  // ── PDF export — dynamic rounds ──────────────────────────────────────────
   const handleDownloadPDF = () => {
     if (!aggregate || !selectedCandidate) return;
     const doc = new jsPDF();
@@ -111,30 +109,53 @@ setCandidates(filtered);
     doc.setFontSize(11);
     doc.text(
       `Candidate: ${selectedCandidate.name} (${selectedCandidate.candidate_id})`,
-      14,
-      25
+      14, 25
     );
     doc.text(`Verdict: ${aggregate.verdict}`, 14, 35);
 
+    // Average scores table
     autoTable(doc, {
       startY: 45,
       head: [['Metric', 'Score']],
       body: [
-        ['Communication', aggregate.average_scores.communication],
+        ['Communication',   aggregate.average_scores.communication],
         ['Problem Solving', aggregate.average_scores.problem_solving],
-        ['Domain Knowledge', aggregate.average_scores.domain_knowledge],
+        ['Domain Knowledge',aggregate.average_scores.domain_knowledge],
         ['Overall Average', aggregate.average_scores.overall_average],
       ],
     });
 
-    let finalY = doc.lastAutoTable.finalY || 70;
-    doc.text(`Strengths: ${aggregate.strengths.join(', ') || 'None'}`, 14, finalY + 15);
-    doc.text(`Weaknesses: ${aggregate.weaknesses.join(', ') || 'None'}`, 14, finalY + 25);
+    // Per-round breakdown
+    const interviews = selectedCandidate.interviews || [];
+    const sortedRounds = [...interviews].sort((a, b) => a.round - b.round);
+    if (sortedRounds.length > 0) {
+      let y = doc.lastAutoTable.finalY + 10;
+      doc.setFontSize(11);
+      doc.text('Per-Round Scores:', 14, y);
+      autoTable(doc, {
+        startY: y + 5,
+        head: [['Round', 'Communication', 'Domain Knowledge', 'Problem Solving', 'Avg']],
+        body: sortedRounds.map(i => {
+          const avg = getRoundAvg(interviews, i.round);
+          return [
+            `L${i.round}`,
+            i.ratings?.communication ?? '-',
+            i.ratings?.domain_knowledge ?? '-',
+            i.ratings?.problem_solving ?? '-',
+            avg,
+          ];
+        }),
+      });
+    }
 
-    doc.text('Comments:', 14, finalY + 40);
+    let finalY = doc.lastAutoTable.finalY || 70;
+    doc.setFontSize(11);
+    doc.text(`Strengths: ${(aggregate.strengths || []).join(', ') || 'None'}`, 14, finalY + 12);
+    doc.text(`Weaknesses: ${(aggregate.weaknesses || []).join(', ') || 'None'}`, 14, finalY + 22);
+    doc.text('Comments:', 14, finalY + 36);
     doc.setFont('times', 'normal');
     doc.setFontSize(10);
-    doc.text(aggregate.combined_comments, 14, finalY + 50, { maxWidth: 180 });
+    doc.text(aggregate.combined_comments || '', 14, finalY + 46, { maxWidth: 180 });
 
     doc.save(`${selectedCandidate.name}_Feedback.pdf`);
   };
@@ -145,18 +166,15 @@ setCandidates(filtered);
     setAggregate(null);
   };
 
-  // Handle ESC key to close modal
+  // ESC key closes modal
   useEffect(() => {
-    const handleEsc = (event) => {
-      if (event.keyCode === 27) {
-        closeModal();
-      }
-    };
+    const handleEsc = (e) => { if (e.keyCode === 27) closeModal(); };
     document.addEventListener('keydown', handleEsc);
-    return () => {
-      document.removeEventListener('keydown', handleEsc);
-    };
+    return () => document.removeEventListener('keydown', handleEsc);
   }, []);
+
+  // Dynamic round columns for the table
+  const allRounds = getAllRounds(candidates);
 
   return (
     <div className="container feedback-page mt-4">
@@ -174,7 +192,7 @@ setCandidates(filtered);
           }}
         >
           <option value="">-- Select a Role --</option>
-          {roles.map((r) => (
+          {roles.map(r => (
             <option key={r.role_id} value={r.role_id}>
               {r.role} ({r.role_id})
             </option>
@@ -188,80 +206,82 @@ setCandidates(filtered);
           <Spinner animation="border" />
           <p>Loading candidates...</p>
         </div>
-      ) : (
-        selectedRole && (
-          <Table bordered hover responsive className="feedback-table">
-            <thead className="table-light">
-              <tr>
-                <th>Candidate ID</th>
-                <th>Name</th>
-                <th>Round 1 Avg</th>
-                <th>Round 2 Avg</th>
-                <th>Resume</th>
-                <th>Aggregate</th>
-              </tr>
-            </thead>
-            <tbody>
-              {candidates.map((c) => (
-                <tr key={c.candidate_id}>
-                  <td>{c.candidate_id}</td>
-                  <td>{c.name}</td>
-                  <td>
-                    {c.interviews?.find((i) => i.round === 1)?.ratings
-                      ? (
-                          Object.values(c.interviews.find((i) => i.round === 1).ratings)
-                            .reduce((a, b) => a + b, 0) / 3
-                        ).toFixed(1)
-                      : '-'}
-                  </td>
-                  <td>
-                    {c.interviews?.find((i) => i.round === 2)?.ratings
-                      ? (
-                          Object.values(c.interviews.find((i) => i.round === 2).ratings)
-                            .reduce((a, b) => a + b, 0) / 3
-                        ).toFixed(1)
-                      : '-'}
-                  </td>
-                  <td>
-                    <Button
-                      variant="outline-primary"
-                      size="sm"
-                      onClick={() =>
-                        // window.open(`${BASE_URL}/get-resume/${c.candidate_id}`, '_blank')
-                        window.open(
-  `${BASE_URL}/get-resume/${c.candidate_id}?ngrok-skip-browser-warning=true`,
-  "_blank",
-  "noopener,noreferrer"
-)
-                      }
-                    >
-                      View Resume
-                    </Button>
-                  </td>
-                  <td>
-                    <Button variant="success" size="sm" onClick={() => handleViewAggregate(c)}>
-                      <FaEye /> View Aggregate
-                    </Button>
-                  </td>
+      ) : selectedRole && (
+        <>
+          {candidates.length === 0 ? (
+            <p className="text-muted">No completed candidates found for this role.</p>
+          ) : (
+            <Table bordered hover responsive className="feedback-table">
+              <thead className="table-light">
+                <tr>
+                  <th>Candidate ID</th>
+                  <th>Name</th>
+                  {/* Dynamic round columns */}
+                  {allRounds.map(r => (
+                    <th key={r}>L{r} Avg</th>
+                  ))}
+                  <th>Overall Avg</th>
+                  <th>Resume</th>
+                  <th>Aggregate</th>
                 </tr>
-              ))}
-            </tbody>
-          </Table>
-        )
+              </thead>
+              <tbody>
+                {candidates.map(c => {
+                  const overall = getOverallAvg(c.interviews || []);
+                  return (
+                    <tr key={c.candidate_id}>
+                      <td>{c.candidate_id}</td>
+                      <td>{c.name}</td>
+                      {allRounds.map(r => (
+                        <td key={r}>{getRoundAvg(c.interviews || [], r)}</td>
+                      ))}
+                      <td>
+                        {overall ? (
+                          <strong>{overall} / 5</strong>
+                        ) : '-'}
+                      </td>
+                      <td>
+                        <Button
+                          variant="outline-primary"
+                          size="sm"
+                          onClick={() =>
+                            window.open(
+                              `${BASE_URL}/get-resume/${c.candidate_id}?ngrok-skip-browser-warning=true`,
+                              '_blank',
+                              'noopener,noreferrer'
+                            )
+                          }
+                        >
+                          View Resume
+                        </Button>
+                      </td>
+                      <td>
+                        <Button variant="success" size="sm" onClick={() => handleViewAggregate(c)}>
+                          <FaEye /> View Aggregate
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </Table>
+          )}
+        </>
       )}
 
-      {/* Custom Full-Screen Modal */}
+      {/* Full-Screen Modal — unchanged styling */}
       {showModal && (
         <div className="custom-modal-overlay" onClick={closeModal}>
-          <div className="custom-modal-container" onClick={(e) => e.stopPropagation()}>
+          <div className="custom-modal-container" onClick={e => e.stopPropagation()}>
+
             {/* Modal Header */}
             <div
               className={`custom-modal-header ${
-                aggregate?.verdict === 'No Hire'
-                  ? 'header-nohire'
-                  : aggregate?.verdict === 'Hire'
-                  ? 'header-hire'
-                  : 'header-stronghire'
+                aggregate?.verdict === 'No Hire'     ? 'header-nohire'     :
+                aggregate?.verdict === 'Weak Hire'   ? 'header-weakhire'   :
+                aggregate?.verdict === 'Hire'        ? 'header-hire'       :
+                aggregate?.verdict === 'Strong Hire' ? 'header-stronghire' :
+                                                       'header-stronghire'
               }`}
             >
               <div className="header-content">
@@ -273,9 +293,7 @@ setCandidates(filtered);
                   <span className="verdict-badge">{aggregate.verdict}</span>
                 )}
               </div>
-              <button className="close-button" onClick={closeModal}>
-                <FaTimes />
-              </button>
+              <button className="close-button" onClick={closeModal}><FaTimes /></button>
             </div>
 
             {/* Modal Body */}
@@ -287,7 +305,48 @@ setCandidates(filtered);
                 </div>
               ) : aggregate ? (
                 <div className="aggregate-content">
-                  {/* Chart and Score Section */}
+
+                  {/* Per-round breakdown table — NEW */}
+                  {(selectedCandidate?.interviews || []).length > 0 && (
+                    <div className="rounds-breakdown-section">
+                      <h3>📋 Round-by-Round Breakdown</h3>
+                      <table className="rounds-table">
+                        <thead>
+                          <tr>
+                            <th>Round</th>
+                            <th>Communication</th>
+                            <th>Domain Knowledge</th>
+                            <th>Problem Solving</th>
+                            <th>Avg</th>
+                            <th>Comments</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[...(selectedCandidate.interviews || [])]
+                            .sort((a, b) => a.round - b.round)
+                            .map((interview, idx) => {
+                              const avg = getRoundAvg(
+                                selectedCandidate.interviews, interview.round
+                              );
+                              return (
+                                <tr key={idx}>
+                                  <td><span className="round-pill">L{interview.round}</span></td>
+                                  <td>{interview.ratings?.communication ?? '-'}</td>
+                                  <td>{interview.ratings?.domain_knowledge ?? '-'}</td>
+                                  <td>{interview.ratings?.problem_solving ?? '-'}</td>
+                                  <td><strong>{avg}</strong></td>
+                                  <td className="comment-cell">
+                                    {interview.comments || '—'}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {/* Chart and Score Section — unchanged */}
                   <div className="chart-score-section">
                     <div className="chart-container">
                       <h3>Skills Assessment</h3>
@@ -295,49 +354,37 @@ setCandidates(filtered);
                         <Radar
                           data={{
                             labels: ['Communication', 'Problem Solving', 'Domain Knowledge'],
-                            datasets: [
-                              {
-                                label: 'Average Scores',
-                                data: [
-                                  aggregate.average_scores.communication,
-                                  aggregate.average_scores.problem_solving,
-                                  aggregate.average_scores.domain_knowledge,
-                                ],
-                                backgroundColor: 'rgba(59, 130, 246, 0.3)',
-                                borderColor: 'rgba(59, 130, 246, 1)',
-                                borderWidth: 3,
-                                pointBackgroundColor: 'rgba(59, 130, 246, 1)',
-                                pointBorderColor: '#fff',
-                                pointBorderWidth: 3,
-                                pointRadius: 8,
-                              },
-                            ],
+                            datasets: [{
+                              label: 'Average Scores',
+                              data: [
+                                aggregate.average_scores.communication,
+                                aggregate.average_scores.problem_solving,
+                                aggregate.average_scores.domain_knowledge,
+                              ],
+                              backgroundColor: 'rgba(59, 130, 246, 0.3)',
+                              borderColor: 'rgba(59, 130, 246, 1)',
+                              borderWidth: 3,
+                              pointBackgroundColor: 'rgba(59, 130, 246, 1)',
+                              pointBorderColor: '#fff',
+                              pointBorderWidth: 3,
+                              pointRadius: 8,
+                            }],
                           }}
                           options={{
                             responsive: true,
                             maintainAspectRatio: false,
                             scales: {
                               r: {
-                                min: 0,
-                                max: 5,
-                                ticks: {
-                                  stepSize: 1,
-                                  font: { size: 14, weight: 'bold' },
-                                  color: '#64748b'
-                                },
+                                min: 0, max: 5,
+                                ticks: { stepSize: 1, font: { size: 14, weight: 'bold' }, color: '#64748b' },
                                 grid: { color: '#e2e8f0' },
                                 angleLines: { color: '#e2e8f0' }
                               },
                             },
                             plugins: {
                               legend: {
-                                display: true,
-                                position: 'bottom',
-                                labels: {
-                                  font: { size: 16, weight: 'bold' },
-                                  color: '#1e293b',
-                                  padding: 25
-                                }
+                                display: true, position: 'bottom',
+                                labels: { font: { size: 16, weight: 'bold' }, color: '#1e293b', padding: 25 }
                               }
                             }
                           }}
@@ -347,70 +394,59 @@ setCandidates(filtered);
 
                     <div className="score-container">
                       <div className="overall-score-display">
-                        <div className="score-number">
-                          {aggregate.average_scores.overall_average}
-                        </div>
+                        <div className="score-number">{aggregate.average_scores.overall_average}</div>
                         <div className="score-label">Overall Average</div>
                         <div className="score-out-of">/5.0</div>
                       </div>
-
                       <div className="progress-bar-container">
                         <div className="progress-bar-bg">
                           <div
                             className={`progress-bar-fill ${
                               aggregate.average_scores.overall_average >= 3
-                                ? 'progress-success'
-                                : 'progress-danger'
+                                ? 'progress-success' : 'progress-danger'
                             }`}
-                            style={{
-                              width: `${(aggregate.average_scores.overall_average / 5) * 100}%`,
-                            }}
-                          ></div>
+                            style={{ width: `${(aggregate.average_scores.overall_average / 5) * 100}%` }}
+                          />
                         </div>
                       </div>
-
                       <button className="download-report-btn" onClick={handleDownloadPDF}>
                         <FaDownload /> Download Report
                       </button>
                     </div>
                   </div>
 
-                  {/* Strengths and Weaknesses */}
+                  {/* Strengths & Weaknesses — unchanged */}
                   <div className="strengths-weaknesses-section">
                     <div className="strengths-container">
                       <h3>💪 Strengths</h3>
                       <div className="tags-wrapper">
-                        {aggregate.strengths.length > 0 ? (
-                          aggregate.strengths.map((s, i) => (
-                            <span className="strength-tag" key={i}>{s}</span>
-                          ))
-                        ) : (
-                          <span className="no-data">No specific strengths noted</span>
-                        )}
+                        {(aggregate.strengths || []).length > 0
+                          ? aggregate.strengths.map((s, i) => (
+                              <span className="strength-tag" key={i}>{s}</span>
+                            ))
+                          : <span className="no-data">No specific strengths noted</span>}
                       </div>
                     </div>
-
                     <div className="weaknesses-container">
                       <h3>⚠️ Areas for Improvement</h3>
                       <div className="tags-wrapper">
-                        {aggregate.weaknesses.length > 0 ? (
-                          aggregate.weaknesses.map((w, i) => (
-                            <span className="weakness-tag" key={i}>{w}</span>
-                          ))
-                        ) : (
-                          <span className="no-data">No specific weaknesses noted</span>
-                        )}
+                        {(aggregate.weaknesses || []).length > 0
+                          ? aggregate.weaknesses.map((w, i) => (
+                              <span className="weakness-tag" key={i}>{w}</span>
+                            ))
+                          : <span className="no-data">No specific weaknesses noted</span>}
                       </div>
                     </div>
                   </div>
 
-                  {/* Comments Section */}
+                  {/* Combined Comments — unchanged */}
                   <div className="comments-section">
                     <h3>📝 Detailed Feedback</h3>
                     <div className="comments-content">
-                      {aggregate.combined_comments || "No detailed comments available."}
+                      {aggregate.combined_comments || 'No detailed comments available.'}
                     </div>
                   </div>
+
                 </div>
               ) : (
                 <div className="no-data-container">
