@@ -118,7 +118,8 @@
 }
 
 .detail-panel.open {
-  max-height: 2000px;
+  /* FIX: Large enough to never clip content regardless of candidate count */
+  max-height: 9999px;
   margin-top: 2rem;
 }
 
@@ -129,11 +130,14 @@
   box-shadow: 0 1px 12px rgba(0, 0, 0, 0.04);
 }
 
+/* ── Skill Gap Table ──────────────────────────────────────────────────────── */
+
 .skill-table {
   width: 100%;
   margin-top: 1rem;
   border-collapse: collapse;
   font-size: 0.95rem;
+  table-layout: fixed;
 }
 
 .skill-table th,
@@ -142,7 +146,24 @@
   border-bottom: 1px solid #dbe4f0;
   text-align: left;
   vertical-align: top;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
+
+/* Candidate: 15% | Matched: 35% | Minor: 25% | Major: 25% */
+.skill-table th:nth-child(1),
+.skill-table td:nth-child(1) { width: 15%; }
+
+.skill-table th:nth-child(2),
+.skill-table td:nth-child(2) { width: 35%; }
+
+.skill-table th:nth-child(3),
+.skill-table td:nth-child(3) { width: 25%; }
+
+.skill-table th:nth-child(4),
+.skill-table td:nth-child(4) { width: 25%; }
+
+/* ── Tags ─────────────────────────────────────────────────────────────────── */
 
 .tag {
   display: inline-block;
@@ -151,7 +172,8 @@
   padding: 0.3rem 0.8rem;
   font-size: 0.8rem;
   margin: 0.2rem;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .tag-green {
@@ -169,9 +191,12 @@
   color: #842029;
 }
 
+/* ── Suggestions Grid ─────────────────────────────────────────────────────── */
+
 .suggestions-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  /* FIX: Always show all candidates in equal columns, min 200px each */
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 1.5rem;
   margin-top: 2rem;
 }
@@ -183,6 +208,8 @@
   border-left: 6px solid #4b7bec;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
   transition: transform 0.3s ease;
+  /* FIX: Prevent box from being clipped by parent overflow */
+  overflow: visible;
 }
 
 .suggestion-box:hover {

@@ -23,19 +23,38 @@ def get_hr_chat_response(user_query: str, chat_history: list = None, stream: boo
         chat_history = chat_history or []
 
         # ── 1. Resolve candidate from context ────────────────────────────────
+
+        def safe_name_search(text: str):
+            """
+            Extract candidate-name-like tokens from text and search MongoDB safely.
+            Uses $text search or plain string comparison to avoid regex injection.
+            """
+            # Extract only capitalized words (proper nouns), min 3 chars to avoid
+            # short words like 'Hi', 'He', 'His', 'Tell' hitting MongoDB
+            tokens = [w for w in re.findall(r'[A-Z][a-z]{2,}', text)]
+            if not tokens:
+                return None
+
+            # Fetch all candidates and do safe Python-side name matching
+            # This avoids MongoDB regex errors entirely for short/special strings
+            all_candidates = list(candidates_collection.find({}, {"name": 1, "candidate_id": 1}))
+            for token in tokens:
+                token_lower = token.lower()
+                for c in all_candidates:
+                    if token_lower in c.get("name", "").lower():
+                        # Fetch full candidate document
+                        return candidates_collection.find_one({"candidate_id": c["candidate_id"]})
+            return None
+
         # First try to find a name in the CURRENT query
-        candidate = candidates_collection.find_one(
-            {"name": {"$regex": user_query, "$options": "i"}}
-        )
+        candidate = safe_name_search(user_query)
 
         # If no name in current query, scan recent history for a name mention
         # (this is what fixes "tell me about HIS projects")
         if not candidate and chat_history:
             for past_msg in reversed(chat_history):
                 past_text = past_msg.get("text", "")
-                candidate = candidates_collection.find_one(
-                    {"name": {"$regex": past_text, "$options": "i"}}
-                )
+                candidate = safe_name_search(past_text)
                 if candidate:
                     break
 
@@ -62,7 +81,7 @@ def get_hr_chat_response(user_query: str, chat_history: list = None, stream: boo
             response = client.query_points(
                 collection_name="resumes",
                 query=query_vector,
-                limit=3,
+                limit=8,  # increased to surface more candidates
                 with_payload=True
             )
 
@@ -91,6 +110,8 @@ def get_hr_chat_response(user_query: str, chat_history: list = None, stream: boo
         prompt = f"""You are an HR assistant with access to candidate resumes. 
 Use the resume context and conversation history below to answer accurately.
 Always refer to the same candidate that was discussed in recent messages unless the HR explicitly asks about someone new.
+When listing items, use properly incrementing numbers: 1. first item 2. second item 3. third item and so on.
+Never repeat the same number. Never output 1. 1. or 1. 1. 1.
 
 RESUME CONTEXT:
 {final_context}

@@ -54,12 +54,15 @@ const RichText = ({ text }) => {
             continue;
         }
 
-        // Numbered list
+        // Numbered list — use explicit counter so display is always correct
+        // even if the LLM repeats "1." multiple times
         if (line.match(/^\d+\. /)) {
             const listItems = [];
+            let counter = 1;
             while (i < lines.length && lines[i].match(/^\d+\. /)) {
                 const content = lines[i].replace(/^\d+\. /, '');
-                listItems.push(<li key={i}>{parseInline(content)}</li>);
+                listItems.push(<li key={i} value={counter}>{parseInline(content)}</li>);
+                counter++;
                 i++;
             }
             elements.push(<ol key={`ol-${i}`} className="rt-ol">{listItems}</ol>);
@@ -77,7 +80,8 @@ const RichText = ({ text }) => {
 // Parses inline markdown: **bold**, `code`, *italic*
 const parseInline = (text) => {
     const parts = [];
-    const regex = /(\*\*(.+?)\*\*|`(.+?)`|\*(.+?)\*)/g;
+    // Order matters: links first, then bold, code, italic, bare URLs
+    const regex = /(\[(.+?)\]\((https?:\/\/[^\s)]+)\)|\*\*(.+?)\*\*|`(.+?)`|\*(.+?)\*|(https?:\/\/[^\s<>"')\]]+))/g;
     let last = 0;
     let match;
 
@@ -85,13 +89,29 @@ const parseInline = (text) => {
         if (match.index > last) {
             parts.push(text.slice(last, match.index));
         }
-        if (match[0].startsWith('**')) {
-            parts.push(<strong key={match.index}>{match[2]}</strong>);
+
+        if (match[0].startsWith('[')) {
+            // Markdown link: [label](url)
+            parts.push(
+                <a key={match.index} href={match[3]} target="_blank" rel="noopener noreferrer" className="rt-link">
+                    {match[2]}
+                </a>
+            );
+        } else if (match[0].startsWith('**')) {
+            parts.push(<strong key={match.index}>{match[4]}</strong>);
         } else if (match[0].startsWith('`')) {
-            parts.push(<code key={match.index} className="rt-code">{match[3]}</code>);
+            parts.push(<code key={match.index} className="rt-code">{match[5]}</code>);
         } else if (match[0].startsWith('*')) {
-            parts.push(<em key={match.index}>{match[4]}</em>);
+            parts.push(<em key={match.index}>{match[6]}</em>);
+        } else if (match[7]) {
+            // Bare URL: https://github.com/...
+            parts.push(
+                <a key={match.index} href={match[7]} target="_blank" rel="noopener noreferrer" className="rt-link">
+                    {match[7]}
+                </a>
+            );
         }
+
         last = match.index + match[0].length;
     }
 

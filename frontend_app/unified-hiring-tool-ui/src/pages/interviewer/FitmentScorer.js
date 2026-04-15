@@ -35,7 +35,7 @@ function FitmentScorer() {
   const [rescoringId, setRescoringId]         = useState(null);
 
   const [resumeModal, setResumeModal]         = useState({ open: false, candidateId: '', fileName: '' });
-  const [fitmentModal, setFitmentModal]       = useState({ open: false, data: null, loading: false, candidateId: null });
+  const [fitmentModal, setFitmentModal]       = useState({ open: false, data: null, loading: false, candidateId: null, candidateName: null });
 
   // ── Fetch roles ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -93,11 +93,11 @@ function FitmentScorer() {
   }, [selectedRoleId]);
 
   // ── View fitment (uses cache unless force_rescore) ────────────────────────
-  const fetchFitmentData = useCallback(async (candidateId, forceRescore = false) => {
+  const fetchFitmentData = useCallback(async (candidateId, forceRescore = false, candidateName = '') => {
     if (forceRescore) {
       setRescoringId(candidateId);
     }
-    setFitmentModal({ open: true, data: null, loading: true, candidateId });
+    setFitmentModal({ open: true, data: null, loading: true, candidateId, candidateName });
 
     try {
       const url = forceRescore
@@ -109,14 +109,15 @@ function FitmentScorer() {
       if (res.data?.fitment_score !== undefined) {
         setInlineScores(prev => ({ ...prev, [candidateId]: res.data.fitment_score }));
       }
-      setFitmentModal({ open: true, data: res.data, loading: false, candidateId });
+      setFitmentModal({ open: true, data: res.data, loading: false, candidateId, candidateName });
     } catch (err) {
       console.error('Fitment fetch failed:', err);
       setFitmentModal({
         open: true,
         data: { error: 'Fitment analysis failed. Please check backend logs.' },
         loading: false,
-        candidateId
+        candidateId,
+        candidateName
       });
     } finally {
       setRescoringId(null);
@@ -132,7 +133,7 @@ function FitmentScorer() {
   };
 
   const closeFitmentModal = () =>
-    setFitmentModal({ open: false, data: null, loading: false, candidateId: null });
+    setFitmentModal({ open: false, data: null, loading: false, candidateId: null, candidateName: null });
 
   const closeResumeModal = () =>
     setResumeModal({ open: false, candidateId: '', fileName: '' });
@@ -229,7 +230,7 @@ function FitmentScorer() {
                       <td className="actions-cell">
                         <button
                           className="btn-fitment"
-                          onClick={() => fetchFitmentData(candidate.candidate_id, false)}
+                          onClick={() => fetchFitmentData(candidate.candidate_id, false, candidate.name)}
                           disabled={isRescoring}
                         >
                           View Fitment
@@ -237,7 +238,7 @@ function FitmentScorer() {
                         <button
                           className="btn-rescore"
                           title="Force re-score (ignores cache)"
-                          onClick={() => fetchFitmentData(candidate.candidate_id, true)}
+                          onClick={() => fetchFitmentData(candidate.candidate_id, true, candidate.name)}
                           disabled={isRescoring}
                         >
                           ↺ Re-score
@@ -265,6 +266,7 @@ function FitmentScorer() {
         <FitmentViewer
           fitmentData={fitmentModal.data}
           loading={fitmentModal.loading}
+          candidateName={fitmentModal.candidateName}
           onClose={closeFitmentModal}
         />
       )}

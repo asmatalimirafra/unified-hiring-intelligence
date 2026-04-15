@@ -121,23 +121,28 @@ function CompareCandidates() {
   };
 
 
-  const fetchAndShowComparison = async () => {
+  // FIXED — attach name from candidates list
+const fetchAndShowComparison = async () => {
+  try {
+    const data = await Promise.all(
+      selectedCandidates.map(id =>
+        axios.get(`${BASE_URL}/score-fitment/${id}`, headers)
+      )
+    );
 
-    try {
+    const enriched = data.map(d => {
+      const match = candidates.find(c => c.candidate_id === d.data.candidate_id);
+      return {
+        ...d.data,
+        name: match ? `${match.name} (${match.candidate_id})` : d.data.candidate_id
+      };
+    });
 
-      const data = await Promise.all(
-        selectedCandidates.map(id =>
-          axios.get(`${BASE_URL}/score-fitment/${id}`, headers)
-        )
-      );
-
-      setComparisonData(data.map(d => d.data));
-
-    } catch (err) {
-      console.error('Comparison load failed:', err);
-    }
-
-  };
+    setComparisonData(enriched);
+  } catch (err) {
+    console.error('Comparison load failed:', err);
+  }
+};
 
 
   return (

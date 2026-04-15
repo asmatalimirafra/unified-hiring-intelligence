@@ -6,7 +6,7 @@ import { Oval } from 'react-loader-spinner';
 import html2pdf from 'html2pdf.js/dist/html2pdf.bundle.min.js';
 import { FiExternalLink } from 'react-icons/fi';
 
-function FitmentViewer({ fitmentData, onClose, loading }) {
+function FitmentViewer({ fitmentData, onClose, loading, candidateName }) {
   const contentRef = useRef();
 
   const handleDownload = () => {
@@ -100,8 +100,12 @@ function FitmentViewer({ fitmentData, onClose, loading }) {
         <div className="fv-header">
           <div>
             <h3 className="fv-title">Fitment Analysis</h3>
-            {fitmentData.candidate_id && (
-              <p className="fv-subtitle">{fitmentData.candidate_id}</p>
+            {(candidateName || fitmentData.candidate_id) && (
+              <p className="fv-subtitle">
+                {candidateName
+                  ? `${candidateName} (${fitmentData.candidate_id})`
+                  : fitmentData.candidate_id}
+              </p>
             )}
           </div>
           <div className="fv-header-actions">
