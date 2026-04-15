@@ -66,7 +66,7 @@
     flex-shrink: 0;
 }
 
-/* Thread info row — title + rename button side by side */
+/* Thread info row — title + action buttons side by side */
 .thread-info {
     display: flex;
     align-items: center;
@@ -86,26 +86,50 @@
     color: #ececf1;
 }
 
-/* Rename pencil button — hidden until hover */
+/* Action buttons group — hidden until hover */
+.thread-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity 0.15s;
+    flex-shrink: 0;
+}
+
+.thread-item:hover .thread-actions {
+    opacity: 1;
+}
+
+/* Rename pencil button */
 .rename-btn {
     background: none;
     border: none;
     cursor: pointer;
     padding: 2px 4px;
     font-size: 12px;
-    opacity: 0;
-    transition: opacity 0.15s;
-    flex-shrink: 0;
     line-height: 1;
     border-radius: 3px;
-}
-
-.thread-item:hover .rename-btn {
-    opacity: 1;
+    color: white;
 }
 
 .rename-btn:hover {
     background: rgba(255, 255, 255, 0.1);
+}
+
+/* Delete button */
+.delete-thread-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px 4px;
+    font-size: 12px;
+    line-height: 1;
+    border-radius: 3px;
+    color: white;
+}
+
+.delete-thread-btn:hover {
+    background: rgba(239, 68, 68, 0.25);
 }
 
 /* Inline rename input inside sidebar */
@@ -322,4 +346,108 @@
         padding-left: 5%;
         padding-right: 5%;
     }
+}
+
+/* ── Message Actions (Edit / Copy) ───────────────────────────────────────── */
+.message-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.msg-actions {
+    display: flex;
+    gap: 6px;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.message-bubble:hover .msg-actions {
+    opacity: 1;
+}
+
+.msg-action-btn {
+    background: none;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    padding: 3px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    color: #6b7280;
+    transition: all 0.15s;
+    white-space: nowrap;
+}
+
+.msg-action-btn:hover {
+    background: #f3f4f6;
+    color: #1f2937;
+    border-color: #d1d5db;
+}
+
+.copy-btn.msg-action-btn:hover {
+    background: #eff6ff;
+    color: #2563eb;
+    border-color: #bfdbfe;
+}
+
+/* Edit textarea */
+.edit-area {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+}
+
+.edit-textarea {
+    width: 100%;
+    min-height: 80px;
+    padding: 10px 12px;
+    border: 2px solid #3b82f6;
+    border-radius: 8px;
+    font-size: 15px;
+    font-family: inherit;
+    line-height: 1.6;
+    resize: vertical;
+    outline: none;
+    color: #1f2937;
+    background: #ffffff;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.edit-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.edit-save-btn {
+    padding: 6px 18px;
+    background: #3b82f6;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.edit-save-btn:hover {
+    background: #2563eb;
+}
+
+.edit-cancel-btn {
+    padding: 6px 18px;
+    background: white;
+    color: #6b7280;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.edit-cancel-btn:hover {
+    background: #f9fafb;
+    color: #374151;
 }

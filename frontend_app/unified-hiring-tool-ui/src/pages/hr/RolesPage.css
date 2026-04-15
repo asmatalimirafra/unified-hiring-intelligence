@@ -113,20 +113,26 @@ h2 {
 
 /* ✅ JD Preview Column */
 .jd-preview-cell {
-  text-align: left;
+  text-align: center;
   min-width: 280px;
   max-width: 420px;
 }
 
+/* ✅ JD Preview Text — 3 lines with ellipsis */
 .jd-preview-text {
   font-size: 0.85rem;
   color: #555;
   overflow: hidden;
-  white-space: nowrap;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
   text-overflow: ellipsis;
-  display: inline-block;
   max-width: 350px;
   vertical-align: middle;
+  text-align: center;
+  line-height: 1.5;
 }
 
 /* Empty Message */
@@ -135,6 +141,38 @@ h2 {
   font-style: italic;
   color: #888;
   margin: 2rem 0;
+}
+
+/* ✅ View JD Modal — extra large, no horizontal scroll */
+.modal-xl {
+  max-width: 90vw !important;
+  margin: 1.75rem auto !important;
+}
+
+/* ✅ Center the View JD modal */
+.modal.d-block {
+  display: flex !important;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.modal-xl {
+  max-width: 90vw !important;
+  margin: 1.75rem auto !important;
+  left: 0 !important;
+  right: 0 !important;
+}
+
+/* ✅ JD View Content inside modal */
+.jd-view-content {
+  font-family: 'Segoe UI', sans-serif;
+  font-size: 1rem;
+  line-height: 1.8;
+  color: #333;
+  padding: 1rem;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
 }
 
 /* Responsive Tweaks */
@@ -167,5 +205,11 @@ h2 {
 
   .jd-preview-text {
     max-width: 180px;
+    -webkit-line-clamp: 3;
+  }
+
+  /* ✅ Full width modal on mobile */
+  .modal-xl {
+    max-width: 98vw !important;
   }
 }

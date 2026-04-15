@@ -225,9 +225,9 @@ async def delete_candidate_api(candidate_id: str):
         raise HTTPException(status_code=404, detail="Candidate not found.")
 
 @app.get("/score-fitment/{candidate_id}")
-async def score_fitment(candidate_id: str):
+async def score_fitment(candidate_id: str, force_rescore: bool = False):
     try:
-        result = score_fitment_logic(candidate_id)
+        result = score_fitment_logic(candidate_id, force_rescore=force_rescore)
         if result:
             return result
         else:
@@ -482,6 +482,15 @@ async def rename_hr_thread(thread_id: str, body: dict = Body(...)):
         {"$set": {"custom_title": new_title}}
     )
     return {"message": "Thread renamed successfully."}
+
+
+@app.delete("/hr/threads/{thread_id}")
+async def delete_hr_thread(thread_id: str):
+    """Delete all messages belonging to a thread."""
+    result = chat_collection.delete_many({"thread_id": thread_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Thread not found.")
+    return {"message": f"Thread {thread_id} deleted ({result.deleted_count} messages removed)."}
 
 
 @app.post("/hr-chat/")

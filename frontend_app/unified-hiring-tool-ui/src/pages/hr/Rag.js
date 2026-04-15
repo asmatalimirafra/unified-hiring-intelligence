@@ -116,6 +116,13 @@ const RagChat = () => {
     const renameInputRef = useRef(null);
     const chatEndRef = useRef(null);
 
+
+    // Edit message state
+    const [editingIndex, setEditingIndex] = useState(null);
+    const [editValue, setEditValue] = useState('');
+
+    // Copy feedback state
+    const [copiedIndex, setCopiedIndex] = useState(null);
     const user = JSON.parse(localStorage.getItem('user')) || {};
     const userEmail = user.email || user.user_email || "admin@company.com";
 
@@ -279,6 +286,60 @@ const RagChat = () => {
         if (e.key === 'Escape') setRenamingThreadId(null);
     };
 
+    // ── Delete handler ─────────────────────────────────────────────────────
+    const handleDeleteThread = async (e, threadId) => {
+        e.stopPropagation();
+        if (!window.confirm('Delete this conversation? This cannot be undone.')) return;
+
+        // Optimistically remove from sidebar
+        setThreads(prev => prev.filter(t => t.id !== threadId));
+
+        // If the deleted thread is currently open, clear the chat
+        if (activeThreadId === threadId) {
+            setActiveThreadId(null);
+            setMessages([]);
+        }
+
+        // Persist to backend
+        try {
+            await fetch(`${BASE_URL}/hr/threads/${threadId}`, {
+                method: 'DELETE',
+                headers: { ...NGROK_HEADERS }
+            });
+        } catch (err) {
+            console.error("❌ Failed to delete thread:", err);
+            fetchThreads(); // revert on failure
+        }
+    };
+
+
+    // ── Edit handlers ─────────────────────────────────────────────────────
+    const startEdit = (index, text) => {
+        setEditingIndex(index);
+        setEditValue(text);
+    };
+
+    const submitEdit = async () => {
+        if (!editValue.trim() || editingIndex === null) return;
+
+        // Replace the user message and remove all subsequent messages
+        const updatedMessages = messages.slice(0, editingIndex);
+        setMessages(updatedMessages);
+        setEditingIndex(null);
+        setInput(editValue.trim());
+        setEditValue('');
+    };
+
+    // ── Copy handler ───────────────────────────────────────────────────────
+    const handleCopy = async (index, text) => {
+        try {
+            await navigator.clipboard.writeText(text);
+            setCopiedIndex(index);
+            setTimeout(() => setCopiedIndex(null), 2000);
+        } catch (err) {
+            console.error('❌ Copy failed:', err);
+        }
+    };
     const startNewChat = () => {
         setActiveThreadId(`temp_${Date.now()}`);
         setMessages([]);
@@ -318,13 +379,22 @@ const RagChat = () => {
                                 ) : (
                                     <div className="thread-info">
                                         <p className="thread-title">{thread.title}</p>
-                                        <button
-                                            className="rename-btn"
-                                            title="Rename chat"
-                                            onClick={e => startRename(e, thread)}
-                                        >
-                                            ✏️
-                                        </button>
+                                        <div className="thread-actions">
+                                            <button
+                                                className="rename-btn"
+                                                title="Rename chat"
+                                                onClick={e => startRename(e, thread)}
+                                            >
+                                                ✏️
+                                            </button>
+                                            <button
+                                                className="delete-thread-btn"
+                                                title="Delete chat"
+                                                onClick={e => handleDeleteThread(e, thread.id)}
+                                            >
+                                                🗑️
+                                            </button>
+                                        </div>
                                     </div>
                                 )}
                             </div>
@@ -347,11 +417,56 @@ const RagChat = () => {
                             {messages.map((msg, index) => (
                                 <div key={index} className={`message-bubble ${msg.sender}`}>
                                     <div className="avatar">{msg.sender === 'user' ? 'HR' : ' '}</div>
-                                    <div className="message-text">
-                                        {msg.sender === 'bot'
-                                            ? <RichText text={msg.text} />
-                                            : msg.text
-                                        }
+                                    <div className="message-content">
+                                        {/* Message text or edit input */}
+                                        {msg.sender === 'user' && editingIndex === index ? (
+                                            <div className="edit-area">
+                                                <textarea
+                                                    className="edit-textarea"
+                                                    value={editValue}
+                                                    onChange={e => setEditValue(e.target.value)}
+                                                    onKeyDown={e => {
+                                                        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitEdit(); }
+                                                        if (e.key === 'Escape') setEditingIndex(null);
+                                                    }}
+                                                    autoFocus
+                                                />
+                                                <div className="edit-actions">
+                                                    <button className="edit-save-btn" onClick={submitEdit}>Send</button>
+                                                    <button className="edit-cancel-btn" onClick={() => setEditingIndex(null)}>Cancel</button>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="message-text">
+                                                {msg.sender === 'bot'
+                                                    ? <RichText text={msg.text} />
+                                                    : msg.text
+                                                }
+                                            </div>
+                                        )}
+                                        {/* Action buttons — shown on hover */}
+                                        {editingIndex !== index && (
+                                            <div className="msg-actions">
+                                                {msg.sender === 'user' && (
+                                                    <button
+                                                        className="msg-action-btn"
+                                                        title="Edit message"
+                                                        onClick={() => startEdit(index, msg.text)}
+                                                    >
+                                                        ✏️ Edit
+                                                    </button>
+                                                )}
+                                                {msg.sender === 'bot' && msg.text && (
+                                                    <button
+                                                        className="msg-action-btn copy-btn"
+                                                        title="Copy response"
+                                                        onClick={() => handleCopy(index, msg.text)}
+                                                    >
+                                                        {copiedIndex === index ? '✅ Copied!' : '📋 Copy'}
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             ))}

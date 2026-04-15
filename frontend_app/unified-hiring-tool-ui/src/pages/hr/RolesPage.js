@@ -217,18 +217,24 @@ function RolesPage() {
 
             {/* ✅ JD preview — strips HTML tags and entities */}
             <td className="jd-preview-cell">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span className="jd-preview-text">
-                  {stripHtml(role.job_description).substring(0, 150) + '...'}
-                </span>
-                <FaEye
-                  className="icon view"
-                  onClick={() => handleViewJD(role.job_description)}
-                  title="View Full JD"
-                  style={{ cursor: 'pointer', flexShrink: 0 }}
-                />
-              </div>
-            </td>
+  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
+    {/* Role Name as bold heading */}
+    <span style={{ fontWeight: 'bold', fontSize: '0.95rem', color: '#222', textAlign: 'center' }}>
+      {role.role}
+    </span>
+    {/* First 1-2 lines of JD */}
+    <span className="jd-preview-text" style={{ textAlign: 'center' }}>
+      {stripHtml(role.job_description).substring(0, 100).trim() + '...'}
+    </span>
+    {/* Eye icon centered below */}
+    <FaEye
+      className="icon view"
+      onClick={() => handleViewJD(role.job_description)}
+      title="View Full JD"
+      style={{ cursor: 'pointer', marginTop: '4px' }}
+    />
+  </div>
+</td>
 
             <td>{role.positions}</td>
             <td className="action-buttons">
