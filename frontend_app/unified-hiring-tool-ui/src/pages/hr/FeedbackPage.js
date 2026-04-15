@@ -13,9 +13,18 @@ const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 const axiosConfig = { headers: { 'ngrok-skip-browser-warning': 'true' } };
 
 // ── Helper: avg score for a single round ─────────────────────────────────
+// function getRoundAvg(interviews = [], round) {
+//   const r = interviews.find(i => i.round === round);
+//   if (!r?.ratings) return '-';
+//   const vals = Object.values(r.ratings);
+//   return (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1);
+// }
 function getRoundAvg(interviews = [], round) {
   const r = interviews.find(i => i.round === round);
-  if (!r?.ratings) return '-';
+  if (!r?.ratings) {
+    const maxRound = Math.max(...interviews.map(i => i.round), 0);
+    return round > maxRound ? 'No Need' : '-';
+  }
   const vals = Object.values(r.ratings);
   return (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1);
 }

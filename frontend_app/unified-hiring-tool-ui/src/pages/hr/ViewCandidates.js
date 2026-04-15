@@ -37,13 +37,23 @@ function ViewCandidates() {
     }
   };
 
+  // const getAvgScore = (candidate, round) => {
+  //   if (!candidate || !Array.isArray(candidate.interviews)) return '-';
+  //   const roundData = candidate.interviews.find(i => i.round === round);
+  //   if (!roundData?.ratings) return '-';
+  //   const vals = Object.values(roundData.ratings);
+  //   return vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1) : '-';
+  // };
   const getAvgScore = (candidate, round) => {
-    if (!candidate || !Array.isArray(candidate.interviews)) return '-';
-    const roundData = candidate.interviews.find(i => i.round === round);
-    if (!roundData?.ratings) return '-';
-    const vals = Object.values(roundData.ratings);
-    return vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1) : '-';
-  };
+  if (!candidate || !Array.isArray(candidate.interviews)) return '-';
+  const roundData = candidate.interviews.find(i => i.round === round);
+  if (!roundData?.ratings) {
+    const maxRound = Math.max(...candidate.interviews.map(i => i.round), 0);
+    return round > maxRound ? 'No Need' : '-';
+  }
+  const vals = Object.values(roundData.ratings);
+  return vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1) : '-';
+};
 
   // ── Overall avg across ALL rounds ──────────────────────────────────────
   const getOverallAvg = (interviews = []) => {

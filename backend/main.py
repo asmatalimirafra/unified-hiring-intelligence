@@ -309,13 +309,16 @@ async def add_interview(
     }
 
 @app.get("/aggregate-interviews/{candidate_id}")
-async def aggregate_interviews(candidate_id: str):
+# async def aggregate_interviews(candidate_id: str):
+async def aggregate_interviews(candidate_id: str, force: bool = True):
     candidate = get_candidate_interviews(candidate_id)
 
     if not candidate or "interviews" not in candidate:
         raise HTTPException(status_code=404, detail=f"No interviews found for candidate ID '{candidate_id}'.")
 
-    if "interview_aggregate" in candidate and candidate["interview_aggregate"]:
+    # if "interview_aggregate" in candidate and candidate["interview_aggregate"]:
+    #     return candidate["interview_aggregate"]
+    if "interview_aggregate" in candidate and candidate["interview_aggregate"] and not force:
         return candidate["interview_aggregate"]
 
     interviews = candidate["interviews"]
