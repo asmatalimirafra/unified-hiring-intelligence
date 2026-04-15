@@ -225,13 +225,9 @@ async def delete_candidate_api(candidate_id: str):
         raise HTTPException(status_code=404, detail="Candidate not found.")
 
 @app.get("/score-fitment/{candidate_id}")
-async def score_fitment(candidate_id: str, force_rescore: bool = False):
-    """
-    Score candidate fitment against their applied role.
-    Pass ?force_rescore=true to bypass the MongoDB cache and recompute fresh.
-    """
+async def score_fitment(candidate_id: str):
     try:
-        result = score_fitment_logic(candidate_id, force_rescore=force_rescore)
+        result = score_fitment_logic(candidate_id)
         if result:
             return result
         else:
@@ -453,7 +449,8 @@ async def get_hr_threads(user_email: str):
         {"$group": {
             "_id": "$thread_id",
             "title": {"$first": "$text"},
-            "custom_title": {"$last": "$custom_title"},   # preserve rename
+            # $max picks the non-null custom_title over null from newer messages
+            "custom_title": {"$max": "$custom_title"},
             "last_updated": {"$last": "$timestamp"}
         }},
         {"$sort": {"last_updated": -1}}
@@ -461,7 +458,6 @@ async def get_hr_threads(user_email: str):
     threads = list(chat_collection.aggregate(pipeline))
     result = []
     for t in threads:
-        # Use custom_title if it was renamed, otherwise use auto-generated title
         display_title = t.get("custom_title") or t["title"]
         result.append({"id": t["_id"], "title": display_title[:40] + ("..." if len(display_title) > 40 else "")})
     return result
@@ -509,13 +505,21 @@ async def hr_chat(request: dict):
     # ✅ Load full conversation history before calling LLM
     chat_history = load_thread_history(thread_id)
 
+    # Carry forward custom_title if thread was already renamed
+    existing = chat_collection.find_one(
+        {"thread_id": thread_id, "custom_title": {"$exists": True, "$ne": None}},
+        {"custom_title": 1}
+    )
+    custom_title = existing.get("custom_title") if existing else None
+
     chat_collection.insert_one({
         "thread_id": thread_id,
         "user_email": user_email,
         "sender": "user",
         "text": query,
         "context": "hr",
-        "timestamp": datetime.utcnow()
+        "timestamp": datetime.utcnow(),
+        **({"custom_title": custom_title} if custom_title else {})
     })
 
     def stream_generator():
@@ -531,7 +535,8 @@ async def hr_chat(request: dict):
             "sender": "bot",
             "text": full_response,
             "context": "hr",
-            "timestamp": datetime.utcnow()
+            "timestamp": datetime.utcnow(),
+            **({"custom_title": custom_title} if custom_title else {})
         })
 
     return StreamingResponse(
@@ -551,7 +556,7 @@ async def get_interviewer_threads(user_email: str):
         {"$group": {
             "_id": "$thread_id",
             "title": {"$first": "$text"},
-            "custom_title": {"$last": "$custom_title"},
+            "custom_title": {"$max": "$custom_title"},
             "last_updated": {"$last": "$timestamp"}
         }},
         {"$sort": {"last_updated": -1}}
