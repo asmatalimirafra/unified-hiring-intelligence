@@ -20,6 +20,7 @@ export default function AddCandidate() {
     resume_file: null,
   });
   const [candidateId, setCandidateId] = useState('');
+  const [addedOn,     setAddedOn]     = useState('');
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
   const [statusType, setStatusType] = useState('');
@@ -158,6 +159,10 @@ const res = await axios.post(`${BASE_URL}/add-candidate/`, data, {
       const added = res.data;
       console.log('✅ Candidate added successfully:', added);
       setCandidateId(added.candidate_id);
+      setAddedOn(new Date().toLocaleDateString('en-IN', {
+        day: '2-digit', month: 'short', year: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+      }));
 
       // Fetch the updated candidate details
       setStatusMsg('Fetching extracted details...');
@@ -284,6 +289,7 @@ const res = await axios.post(`${BASE_URL}/add-candidate/`, data, {
           resume_file: null,
         });
         setCandidateId('');
+        setAddedOn('');
         setStatusMsg('');
         setStatusType('');
       }, 2000);
@@ -316,6 +322,7 @@ const res = await axios.post(`${BASE_URL}/add-candidate/`, data, {
         resume_file: null,
       });
       setCandidateId('');
+      setAddedOn('');
       setStatusMsg('');
       setStatusType('');
     }
@@ -391,6 +398,11 @@ const res = await axios.post(`${BASE_URL}/add-candidate/`, data, {
         <div className="review-form">
           <h3>Review & Edit Candidate Details</h3>
           <p className="review-note">Please review the extracted information and make any necessary corrections:</p>
+          {addedOn && (
+            <div className="timestamp-badge">
+              🕐 Added on: <strong>{addedOn}</strong>
+            </div>
+          )}
           
           <div className="form-group">
             <label htmlFor="review-name">Name *</label>

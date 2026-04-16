@@ -150,7 +150,7 @@ function ViewCandidates() {
   );
 
   return (
-    <div className="container mt-4">
+    <div className="page-wrapper">
       <h3>View Candidates</h3>
       <div className="form-group mb-3">
         <label>Select Role:</label>

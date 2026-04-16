@@ -41,6 +41,18 @@ const stripHtml = (html) => {
     .trim();
 };
 
+// ✅ Helper to format timestamps — handles ISO string or MongoDB $date wrapper
+const formatTimestamp = (ts) => {
+  if (!ts) return '—';
+  const raw = (ts && typeof ts === 'object' && ts.$date) ? ts.$date : ts;
+  const d = new Date(raw);
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('en-IN', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit'
+  });
+};
+
 function RolesPage() {
   const [openRoles, setOpenRoles] = useState([]);
   const [closedRoles, setClosedRoles] = useState([]);
@@ -206,6 +218,7 @@ function RolesPage() {
           <th>Position</th>
           <th>Job Description</th>
           <th>Vacancies</th>
+          <th>{isClosed ? 'Closed On' : 'Created On'}</th>
           <th>Actions</th>
         </tr>
       </thead>
@@ -237,6 +250,11 @@ function RolesPage() {
 </td>
 
             <td>{role.positions}</td>
+            <td style={{ fontSize: '0.82rem', color: '#555', whiteSpace: 'nowrap' }}>
+              {isClosed
+                ? formatTimestamp(role.closed_on)
+                : formatTimestamp(role.created_at || role.timestamp)}
+            </td>
             <td className="action-buttons">
               <div className="icon-group">
                 {!isClosed ? (
@@ -257,7 +275,7 @@ function RolesPage() {
   );
 
   return (
-    <div className="container mt-5">
+    <div className="page-wrapper">
       <div className="d-flex justify-content-between align-items-center mb-4">
         <h1>Role Management</h1>
         <button className="btn btn-success" onClick={() => setShowAddModal(true)}>

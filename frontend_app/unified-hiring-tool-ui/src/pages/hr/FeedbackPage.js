@@ -186,7 +186,7 @@ export default function FeedbackPage() {
   const allRounds = getAllRounds(candidates);
 
   return (
-    <div className="container feedback-page mt-4">
+    <div className="page-wrapper feedback-page">
       <h2 className="mb-4">Interview Feedback Summary</h2>
 
       {/* Role Selection */}
@@ -266,7 +266,7 @@ export default function FeedbackPage() {
                       </td>
                       <td>
                         <Button variant="success" size="sm" onClick={() => handleViewAggregate(c)}>
-                          <FaEye /> View Aggregate
+                          <FaEye /> Check Verdict
                         </Button>
                       </td>
                     </tr>

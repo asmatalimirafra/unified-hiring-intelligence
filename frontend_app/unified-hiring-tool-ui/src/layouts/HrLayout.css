@@ -1,6 +1,31 @@
-/* src/layouts/HrLayout.css */
+/* ── Full-width page wrapper (replaces Bootstrap .container) ── */
+.full-screen-wrapper,
+.page-wrapper {
+  width: 100%;
+  padding: 2rem 2.5rem;
+  box-sizing: border-box;
+}
 
-.hr-outlet-wrapper {
-  padding: 1rem 1.5rem;
-  max-width: 100%;
+/* ── AddCandidate page — remove max-width constraint ── */
+.add-candidate-container {
+  width: 100%;
+  max-width: 100% !important;
+  padding: 2rem 2.5rem;
+  box-sizing: border-box;
+}
+
+/* ── Full-width page wrapper (replaces Bootstrap .container) ── */
+.full-screen-wrapper,
+.page-wrapper {
+  width: 100%;
+  padding: 2rem 2.5rem;
+  box-sizing: border-box;
+}
+
+/* ── AddCandidate page ── */
+.add-candidate-container {
+  width: 100%;
+  max-width: 100% !important;
+  padding: 2rem 2.5rem;
+  box-sizing: border-box;
 }
