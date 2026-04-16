@@ -26,6 +26,7 @@ def get_role_id_by_name(role_name):
 
 def store_job_description(role_id, role, positions, jd_text, filename):
     """Insert a new job role into MongoDB."""
+    from datetime import datetime
     try:
         result = roles_collection.insert_one({
             "role_id": role_id,
@@ -33,10 +34,11 @@ def store_job_description(role_id, role, positions, jd_text, filename):
             "positions": positions,
             "job_description": jd_text,
             "jd_filename": filename,
-            "status": "open"
+            "status": "open",
+            "created_at": datetime.now()
         })
         return str(result.inserted_id)
-    except DuplicateKeyError:  # ✅ NEW: catch MongoDB duplicate key error
+    except DuplicateKeyError:  # ✅ catch MongoDB duplicate key error
         return None
 
 def store_candidate(candidate_id, name, applied_role, applied_role_id, resume_text, file_bytes, stored_file_name,
@@ -165,18 +167,18 @@ def add_user(user_id, name, email, hashed_password, role, department):
 
 def close_role(role_id):
     """Close a role if it's open and log the closure."""
+    from datetime import datetime
     role = roles_collection.find_one({"role_id": role_id})
     if not role or role.get("status") != "open":
         return None
 
-    # Update role status
+    # Update role status and store closed_on directly on the role document
     roles_collection.update_one(
         {"role_id": role_id},
-        {"$set": {"status": "closed"}}
+        {"$set": {"status": "closed", "closed_on": datetime.now()}}
     )
 
     # Log closure in closed_roles collection
-    from datetime import datetime
     closed_roles_collection.insert_one({
         "role_id": role["role_id"],
         "role": role["role"],
