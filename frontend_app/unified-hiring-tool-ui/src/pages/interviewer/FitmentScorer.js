@@ -6,11 +6,8 @@ import ResumeViewer from '../../components/ResumeViewer';
 import FitmentViewer from '../../components/FitmentViewer';
 
 const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
-const HEADERS = {
-  headers: { 'ngrok-skip-browser-warning': 'true' }
-};
+const HEADERS = { headers: { 'ngrok-skip-browser-warning': 'true' } };
 
-// ── Score badge helper ────────────────────────────────────────────────────────
 function ScoreBadge({ score }) {
   if (score === null || score === undefined) return <span className="badge badge-unscored">—</span>;
   if (score >= 75) return <span className="badge badge-high">{score.toFixed(1)}%</span>;
@@ -19,64 +16,67 @@ function ScoreBadge({ score }) {
 }
 
 function FitmentScorer() {
-  const [roles, setRoles]                     = useState([]);
-  const [rolesLoading, setRolesLoading]       = useState(true);
+  // ── Logged-in interviewer's email ────────────────────────────────────────
+  const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+  const interviewerEmail = storedUser.email || '';
 
-  const [selectedRoleId, setSelectedRoleId]   = useState('');
+  const [roles, setRoles]                       = useState([]);
+  const [rolesLoading, setRolesLoading]         = useState(true);
+  const [selectedRoleId, setSelectedRoleId]     = useState('');
   const [selectedRoleName, setSelectedRoleName] = useState('');
-
-  const [candidates, setCandidates]           = useState([]);
+  const [candidates, setCandidates]             = useState([]);
   const [candidatesLoading, setCandidatesLoading] = useState(false);
+  const [inlineScores, setInlineScores]         = useState({});
+  const [rescoringId, setRescoringId]           = useState(null);
+  const [resumeModal, setResumeModal]           = useState({ open: false, candidateId: '', fileName: '' });
+  const [fitmentModal, setFitmentModal]         = useState({ open: false, data: null, loading: false, candidateId: null, candidateName: null });
 
-  // track inline cached scores so table updates without reopening modal
-  const [inlineScores, setInlineScores]       = useState({});
+  // ── HR name lookup map (hr_id → name) ────────────────────────────────────
+  const [hrMap, setHrMap] = useState({});
 
-  // which candidate is currently being re-scored (shows spinner in that row)
-  const [rescoringId, setRescoringId]         = useState(null);
-
-  const [resumeModal, setResumeModal]         = useState({ open: false, candidateId: '', fileName: '' });
-  const [fitmentModal, setFitmentModal]       = useState({ open: false, data: null, loading: false, candidateId: null, candidateName: null });
+  // ── Fetch all users to build HR name map ─────────────────────────────────
+  useEffect(() => {
+    axios.get(`${BASE_URL}/get-users/`, HEADERS)
+      .then(res => {
+        const map = {};
+        (res.data || []).forEach(u => {
+          if (u.role === 'HR') map[u.user_id] = u.name;
+        });
+        setHrMap(map);
+      })
+      .catch(() => {}); // non-critical, fail silently
+  }, []);
 
   // ── Fetch roles ──────────────────────────────────────────────────────────
   useEffect(() => {
-    const fetchRoles = async () => {
-      try {
-        const res = await axios.get(`${BASE_URL}/get-roles/`, HEADERS);
-        const openRoles = (res.data || []).filter(r => r.status === 'open');
-        setRoles(openRoles);
-      } catch (err) {
-        console.error('Failed to fetch roles:', err);
-      } finally {
-        setRolesLoading(false);
-      }
-    };
-    fetchRoles();
+    axios.get(`${BASE_URL}/get-roles/`, HEADERS)
+      .then(res => {
+        setRoles((res.data || []).filter(r => r.status === 'open'));
+      })
+      .catch(err => console.error('Failed to fetch roles:', err))
+      .finally(() => setRolesLoading(false));
   }, []);
 
-  // ── Fetch candidates for selected role ───────────────────────────────────
+  // ── Fetch candidates assigned to this interviewer for selected role ───────
   useEffect(() => {
-    if (!selectedRoleId) {
+    if (!selectedRoleId || !interviewerEmail) {
       setCandidates([]);
       return;
     }
     const fetchCandidates = async () => {
       setCandidatesLoading(true);
       try {
-        const res = await axios.get(`${BASE_URL}/get-candidates/`, HEADERS);
-        const roleCandidates = (res.data || []).filter(c => c.applied_role_id === selectedRoleId);
-
-        // Only show candidates who haven't completed both rounds
-        // const pending = roleCandidates.filter(c => {
-        //   const interviews = c.interviews || [];
-        //   const hasR1 = interviews.some(r => r.round === 1);
-        //   const hasR2 = interviews.some(r => r.round === 2);
-        //   return !(hasR1 && hasR2);
-        // });
+        // Only fetch candidates assigned to this interviewer
+        const res = await axios.get(
+          `${BASE_URL}/get-interviewer-candidates/${encodeURIComponent(interviewerEmail)}`,
+          HEADERS
+        );
+        const roleCandidates = (res.data || []).filter(
+          c => String(c.applied_role_id) === String(selectedRoleId)
+        );
         const pending = roleCandidates.filter(c => c.interview_completed !== true);
-
         setCandidates(pending);
 
-        // Pre-populate inline scores from any cached results
         const scoreMap = {};
         pending.forEach(c => {
           if (c.results?.fitment_score !== undefined) {
@@ -91,22 +91,16 @@ function FitmentScorer() {
       }
     };
     fetchCandidates();
-  }, [selectedRoleId]);
+  }, [selectedRoleId, interviewerEmail]);
 
-  // ── View fitment (uses cache unless force_rescore) ────────────────────────
   const fetchFitmentData = useCallback(async (candidateId, forceRescore = false, candidateName = '') => {
-    if (forceRescore) {
-      setRescoringId(candidateId);
-    }
+    if (forceRescore) setRescoringId(candidateId);
     setFitmentModal({ open: true, data: null, loading: true, candidateId, candidateName });
-
     try {
       const url = forceRescore
         ? `${BASE_URL}/score-fitment/${candidateId}?force_rescore=true`
         : `${BASE_URL}/score-fitment/${candidateId}`;
       const res = await axios.get(url, HEADERS);
-
-      // Update inline score in table too
       if (res.data?.fitment_score !== undefined) {
         setInlineScores(prev => ({ ...prev, [candidateId]: res.data.fitment_score }));
       }
@@ -116,9 +110,7 @@ function FitmentScorer() {
       setFitmentModal({
         open: true,
         data: { error: 'Fitment analysis failed. Please check backend logs.' },
-        loading: false,
-        candidateId,
-        candidateName
+        loading: false, candidateId, candidateName
       });
     } finally {
       setRescoringId(null);
@@ -128,30 +120,19 @@ function FitmentScorer() {
   const handleRoleChange = (e) => {
     const roleId = e.target.value;
     setSelectedRoleId(roleId);
-    const role = roles.find(r => r.role_id === roleId);
-    setSelectedRoleName(role?.role || '');
+    setSelectedRoleName(roles.find(r => r.role_id === roleId)?.role || '');
     setInlineScores({});
   };
 
-  const closeFitmentModal = () =>
-    setFitmentModal({ open: false, data: null, loading: false, candidateId: null, candidateName: null });
-
-  const closeResumeModal = () =>
-    setResumeModal({ open: false, candidateId: '', fileName: '' });
-
-  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="fitment-page">
-
-      {/* Header */}
       <div className="page-header">
         <div>
           <h2 className="page-title">Fitment Scorer</h2>
-          <p className="page-subtitle">Evaluate candidate–role alignment using semantic + skill analysis</p>
+          <p className="page-subtitle">Evaluate candidate–role alignment — your assigned candidates only</p>
         </div>
       </div>
 
-      {/* Role selector */}
       <div className="role-selector-wrap">
         <label className="selector-label">Select Role</label>
         {rolesLoading ? (
@@ -166,7 +147,6 @@ function FitmentScorer() {
         )}
       </div>
 
-      {/* Candidate table */}
       {selectedRoleName && (
         <div className="table-section">
           <div className="table-header-row">
@@ -188,7 +168,7 @@ function FitmentScorer() {
           ) : candidates.length === 0 ? (
             <div className="empty-state">
               <span className="empty-icon">🔍</span>
-              <p>No pending candidates found for this role.</p>
+              <p>No candidates assigned to you for this role.</p>
             </div>
           ) : (
             <table className="candidate-table">
@@ -196,6 +176,8 @@ function FitmentScorer() {
                 <tr>
                   <th>Candidate ID</th>
                   <th>Name</th>
+                  <th>Assigned By (HR)</th>
+                  <th>Scheduled Date</th>
                   <th>Resume</th>
                   <th>Fitment Score</th>
                   <th>Actions</th>
@@ -203,13 +185,21 @@ function FitmentScorer() {
               </thead>
               <tbody>
                 {candidates.map(candidate => {
-                  const cachedScore = inlineScores[candidate.candidate_id];
-                  const isRescoring = rescoringId === candidate.candidate_id;
+                  const cachedScore  = inlineScores[candidate.candidate_id];
+                  const isRescoring  = rescoringId === candidate.candidate_id;
+                  const hrName       = hrMap[candidate.hr_id] || candidate.hr_id || '—';
+                  const scheduledDate = candidate.interview_details?.scheduled_date
+                    ? new Date(candidate.interview_details.scheduled_date).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })
+                    : '—';
 
                   return (
                     <tr key={candidate.candidate_id}>
                       <td className="id-cell">{candidate.candidate_id}</td>
                       <td className="name-cell">{candidate.name}</td>
+                      <td>
+                        <span className="hr-tag">👤 {hrName}</span>
+                      </td>
+                      <td>{scheduledDate}</td>
                       <td>
                         <button
                           className="btn-resume"
@@ -254,12 +244,11 @@ function FitmentScorer() {
         </div>
       )}
 
-      {/* Modals */}
       {resumeModal.open && (
         <ResumeViewer
           candidateId={resumeModal.candidateId}
           fileName={resumeModal.fileName}
-          onClose={closeResumeModal}
+          onClose={() => setResumeModal({ open: false, candidateId: '', fileName: '' })}
         />
       )}
 
@@ -268,7 +257,7 @@ function FitmentScorer() {
           fitmentData={fitmentModal.data}
           loading={fitmentModal.loading}
           candidateName={fitmentModal.candidateName}
-          onClose={closeFitmentModal}
+          onClose={() => setFitmentModal({ open: false, data: null, loading: false, candidateId: null, candidateName: null })}
         />
       )}
     </div>

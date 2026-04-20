@@ -271,6 +271,16 @@ async def get_resume(candidate_id: str):
     )
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# USERS  (used by interviewer portal to show which HR sent a candidate)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/get-users/")
+async def get_users():
+    """Returns all users (name, user_id, role only — no password hashes)."""
+    users = list(users_collection.find({}, {"_id": 0, "password_hash": 0}))
+    return users
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # SCHEDULE INTERVIEW  (HR schedules → candidate goes to specific interviewer)
 # ═══════════════════════════════════════════════════════════════════════════════
 
