@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { Radar } from 'react-chartjs-2';
 import { Button, Table, Spinner } from 'react-bootstrap';
-import { FaEye, FaDownload, FaTimes } from 'react-icons/fa';
+import { FaEye, FaDownload, FaTimes, FaFileAlt } from 'react-icons/fa'; // Added FaFileAlt
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import './FeedbackPage.css';
@@ -13,12 +13,6 @@ const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 const axiosConfig = { headers: { 'ngrok-skip-browser-warning': 'true' } };
 
 // ── Helper: avg score for a single round ─────────────────────────────────
-// function getRoundAvg(interviews = [], round) {
-//   const r = interviews.find(i => i.round === round);
-//   if (!r?.ratings) return '-';
-//   const vals = Object.values(r.ratings);
-//   return (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1);
-// }
 function getRoundAvg(interviews = [], round) {
   const r = interviews.find(i => i.round === round);
   if (!r?.ratings) {
@@ -108,7 +102,7 @@ export default function FeedbackPage() {
     }
   };
 
-  // ── PDF export — dynamic rounds ──────────────────────────────────────────
+  // ── PDF export — Feedback Report ─────────────────────────────────────────
   const handleDownloadPDF = () => {
     if (!aggregate || !selectedCandidate) return;
     const doc = new jsPDF();
@@ -167,6 +161,51 @@ export default function FeedbackPage() {
     doc.text(aggregate.combined_comments || '', 14, finalY + 46, { maxWidth: 180 });
 
     doc.save(`${selectedCandidate.name}_Feedback.pdf`);
+  };
+
+  // ── NEW: Generate Offer Letter PDF ───────────────────────────────────────
+  const handleGenerateOffer = (candidate) => {
+    const doc = new jsPDF();
+    const today = new Date().toLocaleDateString();
+    
+    // Find the actual role name from the roles state based on selectedRole ID
+    const roleName = roles.find(r => String(r.role_id) === String(selectedRole))?.role || 'the specified role';
+
+    // Letterhead
+    doc.setFontSize(22);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Mirafra Technologies', 105, 25, { align: 'center' });
+    
+    doc.setFontSize(14);
+    doc.text('OFFER OF EMPLOYMENT', 105, 40, { align: 'center' });
+
+    // Date & Salutation
+    doc.setFontSize(12);
+    doc.setFont('times', 'normal');
+    doc.text(`Date: ${today}`, 15, 60);
+    doc.text(`Dear ${candidate.name},`, 15, 75);
+
+    // Body Text
+    const bodyText = `We are delighted to offer you the position of ${roleName} at Mirafra Technologies.\n\nFollowing your recent interviews, our team was highly impressed by your technical expertise, problem-solving skills, and the strong cultural fit you bring to our organization. We are confident that you will be a valuable addition to our team and will thrive in our fast-paced environment.\n\nYour compensation package, benefits details, and onboarding schedule will be shared in a follow-up email. Please review this preliminary offer letter and sign below to indicate your acceptance.\n\nWe look forward to welcoming you to Mirafra Technologies!`;
+
+    doc.text(bodyText, 15, 90, { maxWidth: 180, lineHeightFactor: 1.5 });
+
+    // Signatures
+    doc.setFont('helvetica', 'bold');
+    doc.text('Sincerely,', 15, 170);
+    doc.setFont('times', 'normal');
+    doc.text('Human Resources', 15, 180);
+    doc.text('Mirafra Technologies', 15, 186);
+
+    // Acceptance Section
+    doc.setFont('helvetica', 'bold');
+    doc.text('Accepted By:', 130, 170);
+    doc.line(130, 182, 185, 182); // Signature Line
+    doc.setFont('times', 'normal');
+    doc.text('Signature & Date', 130, 188);
+
+    // Download PDF
+    doc.save(`${candidate.name}_Offer_Letter.pdf`);
   };
 
   const closeModal = () => {
@@ -232,6 +271,7 @@ export default function FeedbackPage() {
                   <th>Overall Avg</th>
                   <th>Resume</th>
                   <th>Aggregate</th>
+                  <th>Offer</th> {/* NEW COLUMN HEADER */}
                 </tr>
               </thead>
               <tbody>
@@ -267,6 +307,12 @@ export default function FeedbackPage() {
                       <td>
                         <Button variant="success" size="sm" onClick={() => handleViewAggregate(c)}>
                           <FaEye /> Check Verdict
+                        </Button>
+                      </td>
+                      {/* NEW BUTTON COLUMN */}
+                      <td>
+                        <Button variant="primary" size="sm" onClick={() => handleGenerateOffer(c)}>
+                          <FaFileAlt /> Generate Offer
                         </Button>
                       </td>
                     </tr>
@@ -315,7 +361,7 @@ export default function FeedbackPage() {
               ) : aggregate ? (
                 <div className="aggregate-content">
 
-                  {/* Per-round breakdown table — NEW */}
+                  {/* Per-round breakdown table */}
                   {(selectedCandidate?.interviews || []).length > 0 && (
                     <div className="rounds-breakdown-section">
                       <h3>📋 Round-by-Round Breakdown</h3>
@@ -355,7 +401,7 @@ export default function FeedbackPage() {
                     </div>
                   )}
 
-                  {/* Chart and Score Section — unchanged */}
+                  {/* Chart and Score Section */}
                   <div className="chart-score-section">
                     <div className="chart-container">
                       <h3>Skills Assessment</h3>
@@ -424,7 +470,7 @@ export default function FeedbackPage() {
                     </div>
                   </div>
 
-                  {/* Strengths & Weaknesses — unchanged */}
+                  {/* Strengths & Weaknesses */}
                   <div className="strengths-weaknesses-section">
                     <div className="strengths-container">
                       <h3>💪 Strengths</h3>
@@ -448,7 +494,7 @@ export default function FeedbackPage() {
                     </div>
                   </div>
 
-                  {/* Combined Comments — unchanged */}
+                  {/* Combined Comments */}
                   <div className="comments-section">
                     <h3>📝 Detailed Feedback</h3>
                     <div className="comments-content">

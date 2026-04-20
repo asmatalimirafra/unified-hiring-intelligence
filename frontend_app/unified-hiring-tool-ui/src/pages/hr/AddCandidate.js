@@ -1,14 +1,16 @@
 // src/pages/hr/AddCandidate.js
-
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './AddCandidate.css';
 import { FaCheckCircle } from 'react-icons/fa';
 
-// const BASE_URL = 'http://localhost:8080';
 const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 
 export default function AddCandidate() {
+  // ── Read logged-in HR's user_id ──────────────────────────────────────────
+  const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+  const hrId = storedUser.user_id || null;
+
   const [roles, setRoles] = useState([]);
   const [formData, setFormData] = useState({
     name: '',
@@ -20,161 +22,89 @@ export default function AddCandidate() {
     resume_file: null,
   });
   const [candidateId, setCandidateId] = useState('');
-  const [addedOn,     setAddedOn]     = useState('');
+  const [addedOn, setAddedOn] = useState('');
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
   const [statusType, setStatusType] = useState('');
   const [step, setStep] = useState(1);
 
-  // useEffect(() => {
-  //   const fetchRoles = async () => {
-  //     try {
-  //       const res = await axios.get(`${BASE_URL}/get-roles/`);
-  //       setRoles(res.data.filter((r) => r.status === 'open'));
-  //     } catch (err) {
-  //       console.error('❌ Failed to fetch roles', err);
-  //     }
-  //   };
-  //   fetchRoles();
-  // }, []);
-useEffect(() => {
-
-  const fetchRoles = async () => {
-
-    try {
-
-      const res = await axios.get(`${BASE_URL}/get-roles/`, {
-        headers: {
-          "ngrok-skip-browser-warning": "true"
+  useEffect(() => {
+    const fetchRoles = async () => {
+      try {
+        // ── Fetch only this HR's roles ──────────────────────────────────────
+        const params = hrId ? { hr_id: hrId } : {};
+        const res = await axios.get(`${BASE_URL}/get-roles/`, {
+          headers: { "ngrok-skip-browser-warning": "true" },
+          params
+        });
+        if (Array.isArray(res.data)) {
+          setRoles(res.data.filter((r) => r.status?.toLowerCase().trim() === "open"));
         }
-      });
-
-      console.log("Roles API response:", res.data);
-
-      if (Array.isArray(res.data)) {
-
-        const openRoles = res.data.filter(
-          (r) => r.status?.toLowerCase().trim() === "open"
-        );
-
-        setRoles(openRoles);
-
-      } else {
-
-        console.error("Roles API did not return array:", res.data);
-
+      } catch (err) {
+        console.error("❌ Failed to fetch roles", err);
       }
+    };
+    fetchRoles();
+  }, []); // eslint-disable-line
 
-    } catch (err) {
-
-      console.error("❌ Failed to fetch roles", err);
-
-    }
-
-  };
-
-  fetchRoles();
-
-}, []);
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
-      // Validate file type
       const allowedTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
       const allowedExtensions = ['.pdf', '.docx'];
-      
       const fileExtension = '.' + file.name.split('.').pop().toLowerCase();
-      
       if (!allowedTypes.includes(file.type) && !allowedExtensions.includes(fileExtension)) {
         setStatusType('error');
         setStatusMsg('Please upload only PDF or DOCX files.');
         return;
       }
-      
-      // Clear any previous error messages
       setStatusMsg('');
       setStatusType('');
     }
-    
     setFormData({ ...formData, resume_file: file });
   };
 
   const handleUpload = async (e) => {
     e.preventDefault();
-    
-    // Validation
-    if (!formData.name.trim()) {
-      setStatusType('error');
-      setStatusMsg('Please enter candidate name.');
-      return;
-    }
-    
-    if (!formData.applied_role) {
-      setStatusType('error');
-      setStatusMsg('Please select an applied role.');
-      return;
-    }
-    
-    if (!formData.resume_file) {
-      setStatusType('error');
-      setStatusMsg('Please upload a resume file.');
-      return;
-    }
+
+    if (!formData.name.trim()) { setStatusType('error'); setStatusMsg('Please enter candidate name.'); return; }
+    if (!formData.applied_role) { setStatusType('error'); setStatusMsg('Please select an applied role.'); return; }
+    if (!formData.resume_file) { setStatusType('error'); setStatusMsg('Please upload a resume file.'); return; }
 
     setLoading(true);
     setStatusMsg('Extracting details from resume...');
     setStatusType('info');
 
     try {
-      // Create FormData - this is the key fix
       const data = new FormData();
       data.append('name', formData.name.trim());
       data.append('applied_role', formData.applied_role);
-      
-      // ✅ FIXED: Append the original file directly (no conversion needed)
       data.append('resume_file', formData.resume_file);
+      // ── Tag candidate with HR account ─────────────────────────────────────
+      if (hrId) data.append('hr_id', hrId);
 
-      console.log('📤 Uploading candidate data:', {
-        name: formData.name,
-        applied_role: formData.applied_role,
-        fileName: formData.resume_file.name,
-        fileSize: formData.resume_file.size,
-        fileType: formData.resume_file.type
+      const res = await axios.post(`${BASE_URL}/add-candidate/`, data, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+          "ngrok-skip-browser-warning": "true"
+        },
+        timeout: 30000
       });
 
-      // const res = await axios.post(`${BASE_URL}/add-candidate/`, data, {
-      //   headers: { 
-      //     'Content-Type': 'multipart/form-data'
-      //   },
-      //   timeout: 30000 // 30 second timeout for large files
-      // });
-const res = await axios.post(`${BASE_URL}/add-candidate/`, data, {
-  headers: {
-    "Content-Type": "multipart/form-data",
-    "ngrok-skip-browser-warning": "true"
-  },
-  timeout: 30000
-});
-      
       const added = res.data;
-      console.log('✅ Candidate added successfully:', added);
       setCandidateId(added.candidate_id);
       setAddedOn(new Date().toLocaleDateString('en-IN', {
         day: '2-digit', month: 'short', year: 'numeric',
         hour: '2-digit', minute: '2-digit'
       }));
 
-      // Fetch the updated candidate details
       setStatusMsg('Fetching extracted details...');
-      // const allCandidates = await axios.get(`${BASE_URL}/get-candidates/`);
+      const params = hrId ? { hr_id: hrId } : {};
       const allCandidates = await axios.get(`${BASE_URL}/get-candidates/`, {
-  headers: {
-    "ngrok-skip-browser-warning": "true"
-  }
-});
-      const newCandidate = allCandidates.data.find(
-        (c) => c.candidate_id === added.candidate_id
-      );
+        headers: { "ngrok-skip-browser-warning": "true" },
+        params
+      });
+      const newCandidate = allCandidates.data.find((c) => c.candidate_id === added.candidate_id);
 
       if (newCandidate) {
         setFormData((prev) => ({
@@ -184,7 +114,6 @@ const res = await axios.post(`${BASE_URL}/add-candidate/`, data, {
           github: newCandidate.github || '',
           location: newCandidate.location || '',
         }));
-        
         setStatusType('success');
         setStatusMsg('✅ Resume processed successfully! Please review the extracted details.');
       }
@@ -192,36 +121,21 @@ const res = await axios.post(`${BASE_URL}/add-candidate/`, data, {
       setStep(2);
     } catch (err) {
       console.error('❌ Upload error:', err);
-      
       let errorMessage = '❌ Upload failed. Please try again.';
-      
       if (err.response) {
-        // Server responded with error status
         switch (err.response.status) {
-          case 400:
-            errorMessage = err.response.data?.detail || '❌ Invalid file format. Please upload PDF or DOCX files only.';
-            break;
-          case 404:
-            errorMessage = '❌ Selected role not found. Please refresh and try again.';
-            break;
-          case 409:
-            errorMessage = '❌ Candidate already exists with this information.';
-            break;
-          case 413:
-            errorMessage = '❌ File too large. Please upload a smaller file.';
-            break;
-          case 500:
-            errorMessage = '❌ Server error. Please try again later.';
-            break;
-          default:
-            errorMessage = `❌ Upload failed: ${err.response.data?.detail || err.response.statusText}`;
+          case 400: errorMessage = err.response.data?.detail || '❌ Invalid file format.'; break;
+          case 404: errorMessage = '❌ Selected role not found. Please refresh and try again.'; break;
+          case 409: errorMessage = '❌ Candidate already exists with this information.'; break;
+          case 413: errorMessage = '❌ File too large. Please upload a smaller file.'; break;
+          case 500: errorMessage = '❌ Server error. Please try again later.'; break;
+          default: errorMessage = `❌ Upload failed: ${err.response.data?.detail || err.response.statusText}`;
         }
       } else if (err.code === 'ECONNABORTED') {
-        errorMessage = '❌ Upload timeout. Please try with a smaller file or check your connection.';
+        errorMessage = '❌ Upload timeout. Please try with a smaller file.';
       } else if (err.message.includes('Network Error')) {
-        errorMessage = '❌ Network error. Please check your connection and try again.';
+        errorMessage = '❌ Network error. Please check your connection.';
       }
-      
       setStatusType('error');
       setStatusMsg(errorMessage);
     } finally {
@@ -231,11 +145,9 @@ const res = await axios.post(`${BASE_URL}/add-candidate/`, data, {
 
   const handleUpdate = async () => {
     if (!candidateId) return;
-    
     setLoading(true);
     setStatusMsg('Updating candidate...');
     setStatusType('info');
-    
     try {
       await axios.put(`${BASE_URL}/update-candidate/${candidateId}`, {
         name: formData.name.trim(),
@@ -244,14 +156,12 @@ const res = await axios.post(`${BASE_URL}/add-candidate/`, data, {
         phone: formData.phone.trim(),
         github: formData.github.trim(),
         location: formData.location.trim(),
-      });
-      
+      }, { headers: { "ngrok-skip-browser-warning": "true" } });
       setStatusType('success');
       setStatusMsg('✅ Candidate updated successfully!');
     } catch (err) {
-      console.error('❌ Update error:', err);
       setStatusType('error');
-      setStatusMsg('❌ Failed to update candidate. Please try again.');
+      setStatusMsg('❌ Failed to update candidate.');
     } finally {
       setLoading(false);
     }
@@ -259,68 +169,38 @@ const res = await axios.post(`${BASE_URL}/add-candidate/`, data, {
 
   const handleDelete = async () => {
     if (!candidateId) return;
-    
-    const confirmed = window.confirm(
-      `Are you sure you want to delete candidate "${formData.name}"?\n\nThis action cannot be undone.`
-    );
-    
-    if (!confirmed) return;
-    
+    if (!window.confirm(`Are you sure you want to delete candidate "${formData.name}"?\n\nThis action cannot be undone.`)) return;
     setLoading(true);
-    setStatusMsg('Deleting candidate...');
-    setStatusType('info');
-    
     try {
-      await axios.delete(`${BASE_URL}/delete-candidate/${candidateId}`);
-      
+      await axios.delete(`${BASE_URL}/delete-candidate/${candidateId}`, {
+        headers: { "ngrok-skip-browser-warning": "true" }
+      });
       setStatusType('success');
       setStatusMsg('🗑 Candidate deleted successfully.');
-      
-      // Reset form
       setTimeout(() => {
         setStep(1);
-        setFormData({
-          name: '',
-          applied_role: '',
-          email: '',
-          phone: '',
-          github: '',
-          location: '',
-          resume_file: null,
-        });
+        setFormData({ name: '', applied_role: '', email: '', phone: '', github: '', location: '', resume_file: null });
         setCandidateId('');
         setAddedOn('');
         setStatusMsg('');
         setStatusType('');
       }, 2000);
-      
     } catch (err) {
-      console.error('❌ Delete error:', err);
       setStatusType('error');
-      setStatusMsg('❌ Failed to delete candidate. Please try again.');
+      setStatusMsg('❌ Failed to delete candidate.');
     } finally {
       setLoading(false);
     }
   };
 
   const handleSaveAndExit = () => {
-    if (window.confirm('Are you sure you want to save and exit? Any unsaved changes will be lost.')) {
-      window.location.reload();
-    }
+    if (window.confirm('Are you sure you want to save and exit?')) window.location.reload();
   };
 
   const handleReset = () => {
-    if (window.confirm('Are you sure you want to reset the form? All entered data will be lost.')) {
+    if (window.confirm('Are you sure you want to reset the form?')) {
       setStep(1);
-      setFormData({
-        name: '',
-        applied_role: '',
-        email: '',
-        phone: '',
-        github: '',
-        location: '',
-        resume_file: null,
-      });
+      setFormData({ name: '', applied_role: '', email: '', phone: '', github: '', location: '', resume_file: null });
       setCandidateId('');
       setAddedOn('');
       setStatusMsg('');
@@ -340,9 +220,7 @@ const res = await axios.post(`${BASE_URL}/add-candidate/`, data, {
               id="name"
               type="text"
               value={formData.name}
-              onChange={(e) =>
-                setFormData({ ...formData, name: e.target.value })
-              }
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               placeholder="Enter candidate's full name"
               required
             />
@@ -353,9 +231,7 @@ const res = await axios.post(`${BASE_URL}/add-candidate/`, data, {
             <select
               id="role"
               value={formData.applied_role}
-              onChange={(e) =>
-                setFormData({ ...formData, applied_role: e.target.value })
-              }
+              onChange={(e) => setFormData({ ...formData, applied_role: e.target.value })}
               required
             >
               <option value="">-- Select Role --</option>
@@ -399,92 +275,36 @@ const res = await axios.post(`${BASE_URL}/add-candidate/`, data, {
           <h3>Review & Edit Candidate Details</h3>
           <p className="review-note">Please review the extracted information and make any necessary corrections:</p>
           {addedOn && (
-            <div className="timestamp-badge">
-              🕐 Added on: <strong>{addedOn}</strong>
-            </div>
+            <div className="timestamp-badge">🕐 Added on: <strong>{addedOn}</strong></div>
           )}
-          
-          <div className="form-group">
-            <label htmlFor="review-name">Name *</label>
-            <input
-              id="review-name"
-              type="text"
-              value={formData.name}
-              onChange={(e) =>
-                setFormData({ ...formData, name: e.target.value })
-              }
-              required
-            />
-          </div>
 
           <div className="form-group">
-            <label htmlFor="review-role">Applied Role *</label>
-            <select
-              id="review-role"
-              value={formData.applied_role}
-              onChange={(e) =>
-                setFormData({ ...formData, applied_role: e.target.value })
-              }
-              required
-            >
+            <label>Name *</label>
+            <input type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} required />
+          </div>
+          <div className="form-group">
+            <label>Applied Role *</label>
+            <select value={formData.applied_role} onChange={(e) => setFormData({ ...formData, applied_role: e.target.value })} required>
               {roles.map((role) => (
-                <option key={role.role_id} value={role.role}>
-                  {role.role} ({role.role_id})
-                </option>
+                <option key={role.role_id} value={role.role}>{role.role} ({role.role_id})</option>
               ))}
             </select>
           </div>
-
           <div className="form-group">
-            <label htmlFor="review-email">Email</label>
-            <input
-              id="review-email"
-              type="email"
-              value={formData.email}
-              onChange={(e) =>
-                setFormData({ ...formData, email: e.target.value })
-              }
-              placeholder="candidate@example.com"
-            />
+            <label>Email</label>
+            <input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} placeholder="candidate@example.com" />
           </div>
-
           <div className="form-group">
-            <label htmlFor="review-phone">Phone</label>
-            <input
-              id="review-phone"
-              type="tel"
-              value={formData.phone}
-              onChange={(e) =>
-                setFormData({ ...formData, phone: e.target.value })
-              }
-              placeholder="+1 (555) 123-4567"
-            />
+            <label>Phone</label>
+            <input type="tel" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} />
           </div>
-
           <div className="form-group">
-            <label htmlFor="review-github">GitHub Profile</label>
-            <input
-              id="review-github"
-              type="url"
-              value={formData.github}
-              onChange={(e) =>
-                setFormData({ ...formData, github: e.target.value })
-              }
-              placeholder="https://github.com/username"
-            />
+            <label>GitHub Profile</label>
+            <input type="url" value={formData.github} onChange={(e) => setFormData({ ...formData, github: e.target.value })} placeholder="https://github.com/username" />
           </div>
-
           <div className="form-group">
-            <label htmlFor="review-location">Location</label>
-            <input
-              id="review-location"
-              type="text"
-              value={formData.location}
-              onChange={(e) =>
-                setFormData({ ...formData, location: e.target.value })
-              }
-              placeholder="City, State, Country"
-            />
+            <label>Location</label>
+            <input type="text" value={formData.location} onChange={(e) => setFormData({ ...formData, location: e.target.value })} placeholder="City, State, Country" />
           </div>
 
           <div className="action-buttons">
@@ -499,9 +319,7 @@ const res = await axios.post(`${BASE_URL}/add-candidate/`, data, {
       )}
 
       {statusMsg && (
-        <div className={`status-msg ${statusType}`}>
-          {statusMsg}
-        </div>
+        <div className={`status-msg ${statusType}`}>{statusMsg}</div>
       )}
     </div>
   );

@@ -3,19 +3,16 @@ import React, { useState, useEffect } from "react";
 import axios from "axios";
 import "./InterviewPage.css";
 
-// const BASE_URL = process.env.REACT_APP_API_URL || "http://localhost:8000";
 const BASE_URL = "https://unwithering-unattentively-herbert.ngrok-free.dev";
 const axiosConfig = { headers: { "ngrok-skip-browser-warning": "true" } };
 
-// ── Hire recommendation based on overall average ──────────────────────────
 function getHireLabel(avg) {
-  if (avg >= 4)    return { label: "Strong Hire", cls: "hire-strong" };
-  if (avg >= 3)    return { label: "Hire",        cls: "hire-yes"    };
-  if (avg >= 2.5)  return { label: "Weak Hire",   cls: "hire-weak"   };
-  return                  { label: "No Hire",     cls: "hire-no"     };
+  if (avg >= 4)   return { label: "Strong Hire", cls: "hire-strong" };
+  if (avg >= 3)   return { label: "Hire",        cls: "hire-yes"    };
+  if (avg >= 2.5) return { label: "Weak Hire",   cls: "hire-weak"   };
+  return                 { label: "No Hire",     cls: "hire-no"     };
 }
 
-// ── Overall average across all rounds ────────────────────────────────────
 function getOverallAvg(interviews = []) {
   if (interviews.length === 0) return null;
   let total = 0, count = 0;
@@ -27,7 +24,6 @@ function getOverallAvg(interviews = []) {
   return count > 0 ? total / count : null;
 }
 
-// ── Average for a single round ────────────────────────────────────────────
 function getRoundAvg(interviews = [], round) {
   const r = interviews.filter(i => i.round === round);
   if (r.length === 0) return null;
@@ -38,7 +34,6 @@ function getRoundAvg(interviews = [], round) {
   return (total / (r.length * 3)).toFixed(1);
 }
 
-// ── Format date ───────────────────────────────────────────────────────────
 function formatDate(dt) {
   if (!dt) return "—";
   return new Date(dt).toLocaleDateString("en-IN", {
@@ -50,19 +45,20 @@ function InterviewPage() {
   const storedUser = localStorage.getItem("user");
   const parsedUser = storedUser ? JSON.parse(storedUser) : null;
   const interviewerId = parsedUser?.user_id || "";
+  // ── Use the interviewer's email to fetch assigned candidates ─────────────
+  const interviewerEmail = parsedUser?.email || "";
 
-  const [roles, setRoles]                 = useState([]);
+  const [roles, setRoles] = useState([]);
   const [selectedRoleId, setSelectedRoleId] = useState("");
-  const [pendingCandidates, setPendingCandidates]     = useState([]);
+  const [pendingCandidates, setPendingCandidates] = useState([]);
   const [completedCandidates, setCompletedCandidates] = useState([]);
-  const [loading, setLoading]             = useState(false);
-  const [errorMsg, setErrorMsg]           = useState("");
-  const [successMsg, setSuccessMsg]       = useState("");
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [successMsg, setSuccessMsg] = useState("");
 
-  // Feedback modal
   const [modal, setModal] = useState({
     open: false,
-    mode: "add",        // "add" | "edit" | "view"
+    mode: "add",
     candidate: null,
     roundNum: null,
   });
@@ -76,14 +72,13 @@ function InterviewPage() {
     comments: "",
   });
   const [submitting, setSubmitting] = useState(false);
-  const [formError, setFormError]   = useState("");
+  const [formError, setFormError] = useState("");
 
-  // ── Auth check ──────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!interviewerId) setErrorMsg("Interviewer not logged in properly.");
-  }, [interviewerId]);
+    if (!interviewerEmail) setErrorMsg("Interviewer email not found. Please log in again.");
+  }, [interviewerEmail]);
 
-  // ── Fetch roles ─────────────────────────────────────────────────────────
+  // ── Fetch all open roles (for the dropdown filter) ────────────────────────
   useEffect(() => {
     axios.get(`${BASE_URL}/get-roles/`, axiosConfig)
       .then(res => {
@@ -93,20 +88,22 @@ function InterviewPage() {
       .catch(() => setErrorMsg("Failed to load roles."));
   }, []);
 
-  // ── Fetch & split candidates ────────────────────────────────────────────
+  // ── Fetch candidates assigned to this interviewer, then filter by role ───
   const fetchCandidates = async (roleId) => {
+    if (!interviewerEmail) return;
     setLoading(true);
     setErrorMsg("");
     try {
-      const res = await axios.get(`${BASE_URL}/get-candidates/`, axiosConfig);
-      const all = Array.isArray(res.data) ? res.data : res.data.candidates || [];
+      // Only gets candidates scheduled for THIS interviewer's email
+      const res = await axios.get(
+        `${BASE_URL}/get-interviewer-candidates/${encodeURIComponent(interviewerEmail)}`,
+        axiosConfig
+      );
+      const all = Array.isArray(res.data) ? res.data : [];
       const role = all.filter(c => String(c.applied_role_id) === String(roleId));
 
-      const pending   = role.filter(c => !(c.interview_completed === true));
-      const completed = role.filter(c =>   c.interview_completed === true);
-
-      setPendingCandidates(pending);
-      setCompletedCandidates(completed);
+      setPendingCandidates(role.filter(c => !(c.interview_completed === true)));
+      setCompletedCandidates(role.filter(c =>   c.interview_completed === true));
     } catch {
       setErrorMsg("Failed to load candidates.");
     } finally {
@@ -118,7 +115,6 @@ function InterviewPage() {
     if (selectedRoleId) fetchCandidates(selectedRoleId);
   }, [selectedRoleId]); // eslint-disable-line
 
-  // ── Mark interview complete ──────────────────────────────────────────────
   const markCompleted = async (candidate) => {
     try {
       await axios.put(
@@ -133,7 +129,6 @@ function InterviewPage() {
     }
   };
 
-  // ── Move back to pending ─────────────────────────────────────────────────
   const moveToPending = async (candidate) => {
     try {
       await axios.put(
@@ -148,15 +143,12 @@ function InterviewPage() {
     }
   };
 
-  // ── Open modal helpers ───────────────────────────────────────────────────
   const openAddModal = (candidate) => {
     const interviews = candidate.interviews || [];
     const usedRounds = interviews.map(i => i.round);
-    // Next round = smallest number 1..10 not yet used
     let nextRound = 1;
     while (usedRounds.includes(nextRound) && nextRound <= 10) nextRound++;
     if (nextRound > 10) { setErrorMsg("Max 10 rounds reached."); return; }
-
     setForm({
       round: nextRound,
       date: new Date().toISOString().split("T")[0],
@@ -207,34 +199,48 @@ function InterviewPage() {
 
   const closeModal = () => setModal({ open: false, mode: "add", candidate: null, roundNum: null });
 
-  // ── Submit feedback ──────────────────────────────────────────────────────
   const handleSubmit = async () => {
     const { communication, domain_knowledge, problem_solving, comments, date } = form;
-    if (!communication || !domain_knowledge || !problem_solving) {
-      setFormError("Please fill in all three rating fields.");
+    const c = Number(communication), d = Number(domain_knowledge), p = Number(problem_solving);
+    if (!c || !d || !p || !comments.trim()) {
+      setFormError("Please fill all rating fields and add comments.");
       return;
     }
-    if (!comments.trim()) {
-      setFormError("Please add a comment before submitting.");
+    if ([c, d, p].some(v => v < 1 || v > 5)) {
+      setFormError("All ratings must be between 1 and 5.");
       return;
     }
 
     setSubmitting(true);
     setFormError("");
 
-    const payload = new FormData();
-    payload.append("candidate_id", modal.candidate.candidate_id);
-    payload.append("round_num", form.round);
-    payload.append("interviewer_id", interviewerId);
-    payload.append("communication", communication);
-    payload.append("domain_knowledge", domain_knowledge);
-    payload.append("problem_solving", problem_solving);
-    payload.append("comments", comments);
-    // Store date as part of comments if backend doesn't support it directly
-    if (date) payload.append("interview_date", date);
-
     try {
-      await axios.post(`${BASE_URL}/add-interview/`, payload, axiosConfig);
+      const fd = new FormData();
+      fd.append("candidate_id", modal.candidate.candidate_id);
+      fd.append("round_num", form.round);
+      fd.append("interviewer_id", interviewerId);
+      fd.append("communication", c);
+      fd.append("domain_knowledge", d);
+      fd.append("problem_solving", p);
+      fd.append("comments", comments.trim());
+
+      if (modal.mode === "edit") {
+        // Patch existing round
+        await axios.put(
+          `${BASE_URL}/update-candidate/${modal.candidate.candidate_id}`,
+          {
+            interviews: modal.candidate.interviews.map(iv =>
+              iv.round === modal.roundNum
+                ? { ...iv, ratings: { communication: c, domain_knowledge: d, problem_solving: p }, comments: comments.trim(), datetime: date }
+                : iv
+            )
+          },
+          axiosConfig
+        );
+      } else {
+        await axios.post(`${BASE_URL}/add-interview/`, fd, axiosConfig);
+      }
+
       showSuccess("Feedback submitted successfully!");
       closeModal();
       fetchCandidates(selectedRoleId);
@@ -245,93 +251,73 @@ function InterviewPage() {
     }
   };
 
-  // ── Toast helper ─────────────────────────────────────────────────────────
   const showSuccess = (msg) => {
     setSuccessMsg(msg);
-    setTimeout(() => setSuccessMsg(""), 3500);
+    setTimeout(() => setSuccessMsg(""), 3000);
   };
 
-  // ── Round badges for a candidate ─────────────────────────────────────────
-  const RoundBadges = ({ candidate, editable = false }) => {
+  // ── Round badges component ─────────────────────────────────────────────
+  function RoundBadges({ candidate, editable }) {
     const interviews = candidate.interviews || [];
-    const usedRounds = interviews.map(i => i.round).sort((a, b) => a - b);
-    if (usedRounds.length === 0) return <span className="no-rounds">—</span>;
+    if (!interviews.length) return <span className="no-rounds">No rounds yet</span>;
     return (
       <div className="round-badges">
-        {usedRounds.map(r => {
-          const avg = getRoundAvg(interviews, r);
-          return (
-            <div key={r} className="round-badge-group">
-              <span className="round-badge">L{r}: {avg}/5</span>
-              {editable && (
-                <>
-                  <button
-                    className="icon-btn edit-btn"
-                    title={`Edit L${r}`}
-                    onClick={() => openEditModal(candidate, r)}
-                  >✏️</button>
-                  <button
-                    className="icon-btn view-btn"
-                    title={`View L${r}`}
-                    onClick={() => openViewModal(candidate, r)}
-                  >👁️</button>
-                </>
-              )}
-              {!editable && (
-                <button
-                  className="icon-btn view-btn"
-                  title={`View L${r}`}
-                  onClick={() => openViewModal(candidate, r)}
-                >👁️</button>
-              )}
-            </div>
-          );
-        })}
+        {interviews.map(iv => (
+          <button
+            key={iv.round}
+            className={`round-badge ${editable ? 'clickable' : ''}`}
+            onClick={() => editable ? openEditModal(candidate, iv.round) : openViewModal(candidate, iv.round)}
+            title={`Round ${iv.round} avg: ${getRoundAvg(interviews, iv.round)}`}
+          >
+            L{iv.round} · {getRoundAvg(interviews, iv.round) ?? '—'}
+          </button>
+        ))}
+        {editable && (
+          <button
+            className="round-badge add-round"
+            onClick={() => openAddModal(candidate)}
+            title="Add new round"
+          >
+            + Round
+          </button>
+        )}
       </div>
     );
-  };
+  }
 
-  // ── Pending status badge ──────────────────────────────────────────────────
-  const pendingStatus = (c) => {
-    const rounds = (c.interviews || []).map(i => i.round);
-    if (rounds.length === 0) return <span className="status-badge status-l1">Pending L1</span>;
-    const next = Math.max(...rounds) + 1;
-    return <span className="status-badge status-ln">Pending L{next}</span>;
-  };
-
-  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="interview-page">
-      <h2 className="page-title">Interview Management</h2>
+      <h2 className="page-title">Interview Feedback</h2>
 
-      {errorMsg && <div className="banner banner-error">{errorMsg}</div>}
+      {errorMsg  && <div className="banner banner-error">{errorMsg}</div>}
       {successMsg && <div className="banner banner-success">{successMsg}</div>}
 
-      <label className="field-label">Select Role</label>
-      <select
-        className="dropdown"
-        value={selectedRoleId}
-        onChange={e => { setSelectedRoleId(e.target.value); }}
-      >
-        <option value="">-- Choose a Role --</option>
-        {roles.map(r => (
-          <option key={r.role_id} value={r.role_id}>{r.role}</option>
-        ))}
-      </select>
+      {/* Role selector */}
+      <div className="role-selector">
+        <label className="field-label">Filter by Role</label>
+        <select
+          className="role-select"
+          value={selectedRoleId}
+          onChange={e => setSelectedRoleId(e.target.value)}
+        >
+          <option value="">— Select a role —</option>
+          {roles.map(r => (
+            <option key={r.role_id} value={r.role_id}>
+              {r.role} ({r.role_id})
+            </option>
+          ))}
+        </select>
+      </div>
 
-      {loading && (
-        <div className="loading-state">
-          <div className="spinner" /> Loading candidates…
-        </div>
-      )}
+      {loading && <div className="loading-bar">Loading candidates…</div>}
 
       {selectedRoleId && !loading && (
         <>
-          {/* ── PENDING SECTION ─────────────────────────────────────── */}
+          {/* ── PENDING SECTION ─────────────────────────────────────────── */}
           <section className="section-card">
             <div className="section-header pending-header">
-              <span className="section-icon">🕐</span>
-              <h3>Interviews Pending</h3>
+              <span className="section-icon">⏳</span>
+              <h3>Pending Interviews</h3>
               <span className="count-badge">{pendingCandidates.length}</span>
             </div>
 
@@ -339,68 +325,50 @@ function InterviewPage() {
               <thead>
                 <tr>
                   <th>Candidate</th>
-                  <th>Status</th>
                   <th>Resume</th>
+                  <th>Scheduled Date</th>
                   <th>Rounds</th>
-                  <th>Give Feedback</th>
                   <th>Mark Complete</th>
                 </tr>
               </thead>
               <tbody>
                 {pendingCandidates.length === 0 ? (
-                  <tr><td colSpan="6" className="empty-row">No pending candidates.</td></tr>
+                  <tr><td colSpan="5" className="empty-row">No pending candidates assigned to you.</td></tr>
                 ) : (
-                  pendingCandidates.map(c => {
-                    const usedRounds = (c.interviews || []).map(i => i.round);
-                    const canAddMore = usedRounds.length < 10;
-                    return (
-                      <tr key={c.candidate_id}>
-                        <td>
-                          <div className="cand-name">{c.name}</div>
-                          <div className="cand-id">{c.candidate_id}</div>
-                        </td>
-                        <td>{pendingStatus(c)}</td>
-                        <td>
-                          <a
-                            href={`${BASE_URL}/get-resume/${c.candidate_id}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="link-btn"
-                          >
-                            View PDF
-                          </a>
-                        </td>
-                        <td>
-                          <RoundBadges candidate={c} editable={true} />
-                        </td>
-                        <td>
-                          <button
-                            className="btn-feedback"
-                            disabled={!canAddMore}
-                            onClick={() => openAddModal(c)}
-                          >
-                            Add Interview and Give Feedback
-                          </button>
-                        </td>
-                        <td>
-                          <button
-                            className="btn-complete"
-                            disabled={(c.interviews || []).length < 2}
-                            title={(c.interviews || []).length < 2 ? "At least one interview round required" : ""}
-                            onClick={() => markCompleted(c)}
-                          >
-                            ✓ Complete
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
+                  pendingCandidates.map(c => (
+                    <tr key={c.candidate_id}>
+                      <td>
+                        <div className="cand-name">{c.name}</div>
+                        <div className="cand-id">{c.candidate_id}</div>
+                      </td>
+                      <td>
+                        <a
+                          href={`${BASE_URL}/get-resume/${c.candidate_id}`}
+                          target="_blank" rel="noopener noreferrer"
+                          className="link-btn"
+                        >
+                          View PDF
+                        </a>
+                      </td>
+                      <td>
+                        {c.interview_details?.scheduled_date
+                          ? formatDate(c.interview_details.scheduled_date)
+                          : '—'}
+                      </td>
+                      <td><RoundBadges candidate={c} editable={true} /></td>
+                      <td>
+                        <button className="btn-complete" onClick={() => markCompleted(c)}>
+                          ✓ Complete
+                        </button>
+                      </td>
+                    </tr>
+                  ))
                 )}
               </tbody>
             </table>
           </section>
 
-          {/* ── COMPLETED SECTION ───────────────────────────────────── */}
+          {/* ── COMPLETED SECTION ───────────────────────────────────────── */}
           <section className="section-card" style={{ marginTop: "2rem" }}>
             <div className="section-header completed-header">
               <span className="section-icon">✅</span>
@@ -435,33 +403,21 @@ function InterviewPage() {
                         <td>
                           <a
                             href={`${BASE_URL}/get-resume/${c.candidate_id}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                            target="_blank" rel="noopener noreferrer"
                             className="link-btn"
                           >
                             View PDF
                           </a>
                         </td>
+                        <td><RoundBadges candidate={c} editable={false} /></td>
                         <td>
-                          <RoundBadges candidate={c} editable={false} />
+                          {avg !== null ? <span className="avg-score">{avg.toFixed(2)} / 5</span> : "—"}
                         </td>
                         <td>
-                          {avg !== null ? (
-                            <span className="avg-score">{avg.toFixed(2)} / 5</span>
-                          ) : "—"}
+                          {hire ? <span className={`hire-badge ${hire.cls}`}>{hire.label}</span> : "—"}
                         </td>
                         <td>
-                          {hire ? (
-                            <span className={`hire-badge ${hire.cls}`}>{hire.label}</span>
-                          ) : "—"}
-                        </td>
-                        <td>
-                          <button
-                            className="btn-reopen"
-                            onClick={() => moveToPending(c)}
-                          >
-                            ↩ Reopen
-                          </button>
+                          <button className="btn-reopen" onClick={() => moveToPending(c)}>↩ Reopen</button>
                         </td>
                       </tr>
                     );
@@ -473,12 +429,10 @@ function InterviewPage() {
         </>
       )}
 
-      {/* ── MODAL ─────────────────────────────────────────────────────── */}
+      {/* ── MODAL ──────────────────────────────────────────────────────── */}
       {modal.open && modal.candidate && (
         <div className="modal-backdrop" onClick={closeModal}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
-
-            {/* Header */}
             <div className="modal-header">
               <div>
                 <h3>
@@ -496,7 +450,6 @@ function InterviewPage() {
 
             {formError && <div className="banner banner-error">{formError}</div>}
 
-            {/* Date */}
             <div className="field-group">
               <label className="field-label">Interview Date</label>
               <input
@@ -507,64 +460,28 @@ function InterviewPage() {
               />
             </div>
 
-            {/* Ratings */}
             <div className="ratings-grid">
-              <div className="field-group">
-                <label className="field-label">Communication <span className="scale-hint">(1–5)</span></label>
-                <select
-                  value={form.communication}
-                  disabled={modal.mode === "view"}
-                  onChange={e => setForm({ ...form, communication: e.target.value })}
-                >
-                  <option value="">Select rating</option>
-                  {[
-                    [1, "1 — Poor"],
-                    [2, "2 — Below Average"],
-                    [3, "3 — Average"],
-                    [4, "4 — Good"],
-                    [5, "5 — Excellent"],
-                  ].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </select>
-              </div>
-
-              <div className="field-group">
-                <label className="field-label">Domain Knowledge <span className="scale-hint">(1–5)</span></label>
-                <select
-                  value={form.domain_knowledge}
-                  disabled={modal.mode === "view"}
-                  onChange={e => setForm({ ...form, domain_knowledge: e.target.value })}
-                >
-                  <option value="">Select rating</option>
-                  {[
-                    [1, "1 — Poor"],
-                    [2, "2 — Below Average"],
-                    [3, "3 — Average"],
-                    [4, "4 — Good"],
-                    [5, "5 — Excellent"],
-                  ].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </select>
-              </div>
-
-              <div className="field-group">
-                <label className="field-label">Problem Solving <span className="scale-hint">(1–5)</span></label>
-                <select
-                  value={form.problem_solving}
-                  disabled={modal.mode === "view"}
-                  onChange={e => setForm({ ...form, problem_solving: e.target.value })}
-                >
-                  <option value="">Select rating</option>
-                  {[
-                    [1, "1 — Poor"],
-                    [2, "2 — Below Average"],
-                    [3, "3 — Average"],
-                    [4, "4 — Good"],
-                    [5, "5 — Excellent"],
-                  ].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </select>
-              </div>
+              {[
+                ["communication", "Communication"],
+                ["domain_knowledge", "Domain Knowledge"],
+                ["problem_solving", "Problem Solving"],
+              ].map(([field, label]) => (
+                <div className="field-group" key={field}>
+                  <label className="field-label">{label} <span className="scale-hint">(1–5)</span></label>
+                  <select
+                    value={form[field]}
+                    disabled={modal.mode === "view"}
+                    onChange={e => setForm({ ...form, [field]: e.target.value })}
+                  >
+                    <option value="">Select rating</option>
+                    {[[1,"1 — Poor"],[2,"2 — Below Average"],[3,"3 — Average"],[4,"4 — Good"],[5,"5 — Excellent"]].map(([v,l]) =>
+                      <option key={v} value={v}>{l}</option>
+                    )}
+                  </select>
+                </div>
+              ))}
             </div>
 
-            {/* Comments */}
             <div className="field-group">
               <label className="field-label">Comments</label>
               <textarea
@@ -576,14 +493,9 @@ function InterviewPage() {
               />
             </div>
 
-            {/* Actions */}
             <div className="modal-actions">
               {modal.mode !== "view" && (
-                <button
-                  className="btn-submit"
-                  onClick={handleSubmit}
-                  disabled={submitting}
-                >
+                <button className="btn-submit" onClick={handleSubmit} disabled={submitting}>
                   {submitting ? "Submitting…" : "Submit Feedback"}
                 </button>
               )}

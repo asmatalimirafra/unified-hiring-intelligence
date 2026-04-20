@@ -3,7 +3,7 @@ import re
 from datetime import datetime
 from typing import Optional
 
-from fastapi import FastAPI, UploadFile, Form, HTTPException, Body
+from fastapi import FastAPI, UploadFile, Form, HTTPException, Body, Query
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -18,6 +18,7 @@ from services.mongo_service import (
     delete_candidate,
     get_all_roles,
     get_all_candidates,
+    get_candidates_for_interviewer,
     store_interviewer,
     get_all_interviewers,
     add_interview_to_candidate,
@@ -70,11 +71,16 @@ app.add_middleware(
     expose_headers=["X-Thread-Id"]
 )
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# ROLES
+# ═══════════════════════════════════════════════════════════════════════════════
+
 @app.post("/add-role/", status_code=201)
 async def add_role(
     role_id: str = Form(...),
     role: str = Form(...),
     positions: int = Form(...),
+    hr_id: Optional[str] = Form(None),          # ← NEW: HR account isolation
     jd_text: Optional[str] = Form(None),
     jd_file: Optional[UploadFile] = Form(None)
 ):
@@ -104,7 +110,7 @@ async def add_role(
         else:
             raise HTTPException(status_code=400, detail="Only PDF and DOCX files are supported.")
 
-    mongo_status = store_job_description(role_id, role, positions, jd_text, filename)
+    mongo_status = store_job_description(role_id, role, positions, jd_text, filename, hr_id=hr_id)
 
     if mongo_status is None:
         raise HTTPException(
@@ -122,8 +128,12 @@ async def add_role(
     }
 
 @app.get("/get-roles/")
-async def get_roles():
-    return get_all_roles()
+async def get_roles(hr_id: Optional[str] = Query(None)):
+    """
+    Returns roles filtered by hr_id when provided.
+    Called by HR portal (with hr_id) and Interviewer portal (without — sees all open roles for dropdown).
+    """
+    return get_all_roles(hr_id=hr_id)
 
 @app.put("/update-role/{role_id}")
 async def update_role_api(role_id: str, update_data: dict = Body(...)):
@@ -142,11 +152,28 @@ async def delete_role_api(role_id: str):
     else:
         raise HTTPException(status_code=404, detail="Role not found.")
 
+@app.post("/close-role/{role_id}")
+async def close_role_api(role_id: str):
+    success = close_role(role_id)
+    if success:
+        return {"message": f"Role {role_id} successfully closed."}
+    else:
+        raise HTTPException(status_code=400, detail="Role not found or already closed.")
+
+@app.get("/roles-closed/")
+async def get_roles_closed():
+    return get_all_closed_roles()
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CANDIDATES
+# ═══════════════════════════════════════════════════════════════════════════════
+
 @app.post("/add-candidate/", status_code=201)
 async def add_candidate(
     name: str = Form(...),
     applied_role: str = Form(...),
-    resume_file: UploadFile = Form(...)
+    resume_file: UploadFile = Form(...),
+    hr_id: Optional[str] = Form(None)           # ← NEW: tag candidate to HR
 ):
     if not resume_file.filename.endswith((".pdf", ".docx")):
         raise HTTPException(status_code=400, detail="Only PDF and DOCX files are supported.")
@@ -187,7 +214,8 @@ async def add_candidate(
         github=github,
         location=location,
         phone=phone,
-        timestamp=datetime.now()
+        timestamp=datetime.now(),
+        hr_id=hr_id                             # ← pass through
     )
 
     if mongo_status is None:
@@ -204,8 +232,12 @@ async def add_candidate(
     }
 
 @app.get("/get-candidates/")
-async def get_candidates():
-    return get_all_candidates()
+async def get_candidates(hr_id: Optional[str] = Query(None)):
+    """
+    HR portal calls this with ?hr_id=HR-001 → sees only their own candidates.
+    No hr_id → returns all (kept for backwards compat / admin use).
+    """
+    return get_all_candidates(hr_id=hr_id)
 
 @app.put("/update-candidate/{candidate_id}")
 async def update_candidate_api(candidate_id: str, update_data: dict = Body(...)):
@@ -224,18 +256,85 @@ async def delete_candidate_api(candidate_id: str):
     else:
         raise HTTPException(status_code=404, detail="Candidate not found.")
 
-@app.get("/score-fitment/{candidate_id}")
-async def score_fitment(candidate_id: str):
-    try:
-        result = score_fitment_logic(candidate_id)
-        if result:
-            return result
-        else:
-            return {"error": "Fitment returned empty result"}
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return {"error": str(e)}
+@app.get("/get-resume/{candidate_id}")
+async def get_resume(candidate_id: str):
+    candidate = candidates_collection.find_one({"candidate_id": candidate_id})
+    if not candidate or "resume_file" not in candidate:
+        raise HTTPException(status_code=404, detail="Resume not found")
+
+    file_name = candidate.get("file_name", f"{candidate_id}.pdf")
+
+    return StreamingResponse(
+        io.BytesIO(candidate["resume_file"]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{file_name}"'}
+    )
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SCHEDULE INTERVIEW  (HR schedules → candidate goes to specific interviewer)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/schedule-interview/", status_code=200)
+async def schedule_interview(
+    candidate_id: str = Body(...),
+    interviewer_email: str = Body(...),
+    scheduled_date: Optional[str] = Body(None)
+):
+    """
+    HR schedules a candidate for a specific interviewer.
+    Sets status=Scheduled and stores interviewer_email so the interviewer
+    portal can query /get-interviewer-candidates/{email}.
+    """
+    candidate = candidates_collection.find_one({"candidate_id": candidate_id})
+    if not candidate:
+        raise HTTPException(status_code=404, detail=f"Candidate '{candidate_id}' not found.")
+
+    # Verify the interviewer email exists in users
+    interviewer = users_collection.find_one({"email": interviewer_email, "role": "Interviewer"})
+    if not interviewer:
+        raise HTTPException(status_code=404, detail=f"No interviewer found with email '{interviewer_email}'.")
+
+    update_data = {
+        "status": "Scheduled",
+        "interview_details": {
+            "interviewer_email": interviewer_email,
+            "interviewer_id": interviewer.get("user_id"),
+            "interviewer_name": interviewer.get("name"),
+            "scheduled_date": scheduled_date
+        }
+    }
+
+    candidates_collection.update_one(
+        {"candidate_id": candidate_id},
+        {"$set": update_data}
+    )
+
+    return {
+        "message": f"Candidate {candidate_id} scheduled for {interviewer_email}.",
+        "candidate_id": candidate_id,
+        "interviewer_email": interviewer_email
+    }
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# INTERVIEWER — fetch only assigned candidates
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/get-interviewer-candidates/{email}")
+async def get_interviewer_candidates(email: str):
+    """
+    Interviewer portal: returns only candidates scheduled for this interviewer.
+    Uses interviewer's login email.
+    """
+    candidates = get_candidates_for_interviewer(email)
+    return candidates
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# INTERVIEWERS LIST  (HR uses this to pick interviewer when scheduling)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/get-interviewers/")
+async def list_interviewers():
+    return get_all_interviewers()
 
 @app.post("/add-interviewer/", status_code=201)
 async def add_interviewer(
@@ -253,9 +352,9 @@ async def add_interviewer(
         "mongo_status": mongo_status
     }
 
-@app.get("/get-interviewers/")
-async def list_interviewers():
-    return get_all_interviewers()
+# ═══════════════════════════════════════════════════════════════════════════════
+# INTERVIEW FEEDBACK
+# ═══════════════════════════════════════════════════════════════════════════════
 
 @app.post("/add-interview/", status_code=201)
 async def add_interview(
@@ -309,15 +408,12 @@ async def add_interview(
     }
 
 @app.get("/aggregate-interviews/{candidate_id}")
-# async def aggregate_interviews(candidate_id: str):
 async def aggregate_interviews(candidate_id: str, force: bool = True):
     candidate = get_candidate_interviews(candidate_id)
 
     if not candidate or "interviews" not in candidate:
         raise HTTPException(status_code=404, detail=f"No interviews found for candidate ID '{candidate_id}'.")
 
-    # if "interview_aggregate" in candidate and candidate["interview_aggregate"]:
-    #     return candidate["interview_aggregate"]
     if "interview_aggregate" in candidate and candidate["interview_aggregate"] and not force:
         return candidate["interview_aggregate"]
 
@@ -326,7 +422,6 @@ async def aggregate_interviews(candidate_id: str, force: bool = True):
     if len(interviews) < 1:
         raise HTTPException(status_code=400, detail="Candidate must have at least one interview round.")
 
-    # Average across ALL rounds (L1-L10)
     categories = ["communication", "problem_solving", "domain_knowledge"]
     category_totals = {c: 0.0 for c in categories}
     category_counts = {c: 0   for c in categories}
@@ -348,7 +443,6 @@ async def aggregate_interviews(candidate_id: str, force: bool = True):
     overall_avg = round(sum(average_scores.values()) / len(categories), 2)
     average_scores["overall_average"] = overall_avg
 
-    # Hire verdict based on numeric average (your rules)
     if overall_avg >= 4:
         numeric_verdict = "Strong Hire"
     elif overall_avg >= 3:
@@ -358,7 +452,6 @@ async def aggregate_interviews(candidate_id: str, force: bool = True):
     else:
         numeric_verdict = "No Hire"
 
-    # Combined comments from all rounds
     sorted_interviews = sorted(interviews, key=lambda i: i["round"])
     combined_comments = "\n".join(
         f"Round {i['round']} Comments: {i.get('comments', '')}"
@@ -392,6 +485,27 @@ async def aggregate_interviews(candidate_id: str, force: bool = True):
 
     return aggregate_result
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# FITMENT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/score-fitment/{candidate_id}")
+async def score_fitment(candidate_id: str):
+    try:
+        result = score_fitment_logic(candidate_id)
+        if result:
+            return result
+        else:
+            return {"error": "Fitment returned empty result"}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e)}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AUTH
+# ═══════════════════════════════════════════════════════════════════════════════
+
 @app.post("/login/")
 async def login_user(email: str = Form(...), password: str = Form(...)):
     user = users_collection.find_one({"email": email})
@@ -409,35 +523,9 @@ async def login_user(email: str = Form(...), password: str = Form(...)):
     return {
         "user_id": user["user_id"],
         "name": user["name"],
-        "role": user["role"]
+        "role": user["role"],
+        "email": user["email"]       # ← ensure email is returned for interviewer filtering
     }
-
-@app.get("/get-resume/{candidate_id}")
-async def get_resume(candidate_id: str):
-    candidate = candidates_collection.find_one({"candidate_id": candidate_id})
-    if not candidate or "resume_file" not in candidate:
-        raise HTTPException(status_code=404, detail="Resume not found")
-
-    file_name = candidate.get("file_name", f"{candidate_id}.pdf")
-
-    return StreamingResponse(
-        io.BytesIO(candidate["resume_file"]),
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{file_name}"'}
-    )
-
-@app.post("/close-role/{role_id}")
-async def close_role_api(role_id: str):
-    success = close_role(role_id)
-    if success:
-        return {"message": f"Role {role_id} successfully closed."}
-    else:
-        raise HTTPException(status_code=400, detail="Role not found or already closed.")
-
-@app.get("/roles-closed/")
-async def get_roles_closed():
-    return get_all_closed_roles()
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CHAT SYSTEM
@@ -450,10 +538,6 @@ chat_collection = db["chat_history"]
 
 
 def load_thread_history(thread_id: str) -> list:
-    """
-    Loads the full conversation for a thread from MongoDB.
-    Returns list of {sender, text} dicts, oldest first.
-    """
     messages = list(
         chat_collection.find(
             {"thread_id": thread_id},
@@ -463,7 +547,7 @@ def load_thread_history(thread_id: str) -> list:
     return messages
 
 
-# ── HR Endpoints ──────────────────────────────────────────────────────────────
+# ── HR Chat ──────────────────────────────────────────────────────────────────
 
 @app.get("/hr/threads/{user_email}")
 async def get_hr_threads(user_email: str):
@@ -473,7 +557,6 @@ async def get_hr_threads(user_email: str):
         {"$group": {
             "_id": "$thread_id",
             "title": {"$first": "$text"},
-            # $max picks the non-null custom_title over null from newer messages
             "custom_title": {"$max": "$custom_title"},
             "last_updated": {"$last": "$timestamp"}
         }},
@@ -497,7 +580,6 @@ async def get_hr_history(thread_id: str):
 
 @app.patch("/hr/threads/{thread_id}/rename")
 async def rename_hr_thread(thread_id: str, body: dict = Body(...)):
-    """Rename a chat thread. Stores custom_title on all messages in the thread."""
     new_title = body.get("title", "").strip()
     if not new_title:
         raise HTTPException(status_code=400, detail="Title cannot be empty.")
@@ -510,7 +592,6 @@ async def rename_hr_thread(thread_id: str, body: dict = Body(...)):
 
 @app.delete("/hr/threads/{thread_id}")
 async def delete_hr_thread(thread_id: str):
-    """Delete all messages belonging to a thread."""
     result = chat_collection.delete_many({"thread_id": thread_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Thread not found.")
@@ -526,10 +607,8 @@ async def hr_chat(request: dict):
     if not thread_id or thread_id == "null":
         thread_id = str(uuid4())
 
-    # ✅ Load full conversation history before calling LLM
     chat_history = load_thread_history(thread_id)
 
-    # Carry forward custom_title if thread was already renamed
     existing = chat_collection.find_one(
         {"thread_id": thread_id, "custom_title": {"$exists": True, "$ne": None}},
         {"custom_title": 1}
@@ -548,7 +627,6 @@ async def hr_chat(request: dict):
 
     def stream_generator():
         full_response = ""
-        # ✅ Pass history so LLM understands pronouns and follow-up questions
         for chunk in get_hr_chat_response(query, chat_history=chat_history, stream=True):
             full_response += chunk
             yield chunk
@@ -570,7 +648,7 @@ async def hr_chat(request: dict):
     )
 
 
-# ── Interviewer Endpoints ─────────────────────────────────────────────────────
+# ── Interviewer Chat ──────────────────────────────────────────────────────────
 
 @app.get("/interviewer/threads/{user_email}")
 async def get_interviewer_threads(user_email: str):
@@ -610,7 +688,6 @@ async def interviewer_chat(request: dict):
     if not thread_id or thread_id == "null":
         thread_id = str(uuid4())
 
-    # ✅ Load full conversation history before calling LLM
     chat_history = load_thread_history(thread_id)
 
     chat_collection.insert_one({
@@ -624,7 +701,6 @@ async def interviewer_chat(request: dict):
 
     def stream_generator():
         full_response = ""
-        # ✅ Pass history so LLM understands pronouns and follow-up questions
         for chunk in get_hr_chat_response(query, chat_history=chat_history, stream=True):
             full_response += chunk
             yield chunk
@@ -643,14 +719,3 @@ async def interviewer_chat(request: dict):
         media_type="text/plain",
         headers={"X-Thread-Id": thread_id}
     )
-
-@app.get("/get-interviewer-candidates/{email}")
-async def get_interviewer_candidates(email: str):
-    """Fetch only candidates scheduled for a specific interviewer."""
-    # Find candidates where the status is Scheduled AND the email matches
-    candidates = list(candidates_collection.find({
-        "status": "Scheduled",
-        "interview_details.interviewer_email": email
-    }, {"_id": 0})) 
-    
-    return candidates

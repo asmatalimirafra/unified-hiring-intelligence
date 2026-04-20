@@ -5,7 +5,6 @@ import { FaEye, FaEdit, FaTrashAlt, FaTimesCircle, FaUndo } from 'react-icons/fa
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
 
-// ✅ Full toolbar configuration
 const quillModules = {
   toolbar: [
     [{ 'font': [] }, { 'size': ['small', false, 'large', 'huge'] }],
@@ -27,7 +26,6 @@ const quillFormats = [
   'link'
 ];
 
-// ✅ Helper to strip HTML tags and entities for plain text preview
 const stripHtml = (html) => {
   if (!html) return 'No description available';
   return html
@@ -41,7 +39,6 @@ const stripHtml = (html) => {
     .trim();
 };
 
-// ✅ Helper to format timestamps — handles ISO string or MongoDB $date wrapper
 const formatTimestamp = (ts) => {
   if (!ts) return '—';
   const raw = (ts && typeof ts === 'object' && ts.$date) ? ts.$date : ts;
@@ -54,13 +51,16 @@ const formatTimestamp = (ts) => {
 };
 
 function RolesPage() {
+  // ── Get logged-in HR's user_id from localStorage ──────────────────────────
+  const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+  const hrId = storedUser.user_id || null;
+
   const [openRoles, setOpenRoles] = useState([]);
   const [closedRoles, setClosedRoles] = useState([]);
   const [selectedJD, setSelectedJD] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
 
-  // ✅ editVacancyData holds all editable fields
   const [editVacancyData, setEditVacancyData] = useState({
     role_id: '',
     role: '',
@@ -76,20 +76,21 @@ function RolesPage() {
     jd_text: ''
   });
 
-  // ✅ State to hold duplicate Role ID error message
   const [roleIdError, setRoleIdError] = useState('');
 
-  // const BASE_URL = 'http://localhost:8080';
   const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 
   useEffect(() => {
     fetchRoles();
-  }, []);
+  }, []); // eslint-disable-line
 
   const fetchRoles = async () => {
     try {
+      // ── Pass hr_id so we only fetch THIS HR's roles ──────────────────────
+      const params = hrId ? { 'hr_id': hrId } : {};
       const response = await axios.get(`${BASE_URL}/get-roles/`, {
-        headers: { "ngrok-skip-browser-warning": "true" }
+        headers: { "ngrok-skip-browser-warning": "true" },
+        params
       });
       const roles = response.data;
       setOpenRoles(roles.filter(role => role.status === "open"));
@@ -104,7 +105,6 @@ function RolesPage() {
     setShowModal(true);
   };
 
-  // ✅ No longer sets positions to 0 on close
   const handleClose = async (role_id) => {
     if (window.confirm('Are you sure you want to close this position?')) {
       try {
@@ -129,7 +129,6 @@ function RolesPage() {
     }
   };
 
-  // ✅ Populate all fields when opening edit modal
   const handleEdit = (role) => {
     setEditVacancyData({
       role_id: role.role_id,
@@ -140,7 +139,6 @@ function RolesPage() {
     setShowEditModal(true);
   };
 
-  // ✅ Save all fields to backend
   const saveVacancyUpdate = async () => {
     try {
       await axios.put(`${BASE_URL}/update-role/${editVacancyData.role_id}`, {
@@ -157,12 +155,9 @@ function RolesPage() {
     }
   };
 
-  // ✅ No longer hardcodes positions to 1 on reopen
   const handleReopenRole = async (roleId) => {
     try {
-      await axios.put(`${BASE_URL}/update-role/${roleId}`, {
-        status: 'open',
-      });
+      await axios.put(`${BASE_URL}/update-role/${roleId}`, { status: 'open' });
       fetchRoles();
       alert("Role reopened successfully.");
     } catch (err) {
@@ -170,7 +165,6 @@ function RolesPage() {
     }
   };
 
-  // ✅ String comparison on both sides to handle numeric role_id from MongoDB
   const handleRoleIdChange = (e) => {
     const value = e.target.value;
     setNewRoleData({ ...newRoleData, role_id: value });
@@ -183,8 +177,6 @@ function RolesPage() {
 
   const handleAddRole = async (e) => {
     e.preventDefault();
-
-    // ✅ Block submission if frontend already detected a duplicate
     if (roleIdError) return;
 
     const formData = new FormData();
@@ -192,9 +184,13 @@ function RolesPage() {
     formData.append('role', newRoleData.role);
     formData.append('positions', newRoleData.positions);
     formData.append('jd_text', newRoleData.jd_text);
+    // ── Tag role with HR account ──────────────────────────────────────────
+    if (hrId) formData.append('hr_id', hrId);
 
     try {
-      await axios.post(`${BASE_URL}/add-role/`, formData);
+      await axios.post(`${BASE_URL}/add-role/`, formData, {
+        headers: { "ngrok-skip-browser-warning": "true" }
+      });
       alert('Role added successfully!');
       setShowAddModal(false);
       setNewRoleData({ role_id: '', role: '', positions: 1, jd_text: '' });
@@ -228,45 +224,47 @@ function RolesPage() {
             <td>{role.role_id}</td>
             <td>{role.role}</td>
 
-            {/* ✅ JD preview — strips HTML tags and entities */}
             <td className="jd-preview-cell">
-  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
-    {/* Role Name as bold heading */}
-    <span style={{ fontWeight: 'bold', fontSize: '0.95rem', color: '#222', textAlign: 'center' }}>
-      {role.role}
-    </span>
-    {/* First 1-2 lines of JD */}
-    <span className="jd-preview-text" style={{ textAlign: 'center' }}>
-      {stripHtml(role.job_description).substring(0, 100).trim() + '...'}
-    </span>
-    {/* Eye icon centered below */}
-    <FaEye
-      className="icon view"
-      onClick={() => handleViewJD(role.job_description)}
-      title="View Full JD"
-      style={{ cursor: 'pointer', marginTop: '4px' }}
-    />
-  </div>
-</td>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
+                <strong style={{ fontSize: '0.85rem' }}>{role.role}</strong>
+                <p style={{ fontSize: '0.78rem', color: '#555', margin: 0, textAlign: 'center' }}>
+                  {stripHtml(role.job_description).slice(0, 80)}...
+                </p>
+                <button
+                  className="btn btn-outline-secondary btn-sm"
+                  onClick={() => handleViewJD(role.job_description)}
+                >
+                  <FaEye /> View Full JD
+                </button>
+              </div>
+            </td>
 
             <td>{role.positions}</td>
-            <td style={{ fontSize: '0.82rem', color: '#555', whiteSpace: 'nowrap' }}>
-              {isClosed
-                ? formatTimestamp(role.closed_on)
-                : formatTimestamp(role.created_at || role.timestamp)}
-            </td>
-            <td className="action-buttons">
-              <div className="icon-group">
-                {!isClosed ? (
-                  <>
-                    <FaEdit className="icon edit" onClick={() => handleEdit(role)} title="Edit Role" />
-                    <FaTimesCircle className="icon close" onClick={() => handleClose(role.role_id)} title="Close Role" />
-                  </>
-                ) : (
-                  <FaUndo className="icon edit" onClick={() => handleReopenRole(role.role_id)} title="Reopen Role" />
-                )}
-                <FaTrashAlt className="icon delete" onClick={() => handleDelete(role.role_id)} title="Delete Role" />
-              </div>
+            <td>{isClosed ? formatTimestamp(role.closed_on) : formatTimestamp(role.created_at)}</td>
+
+            <td>
+              {!isClosed ? (
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  <button className="btn btn-outline-primary btn-sm" onClick={() => handleEdit(role)}>
+                    <FaEdit /> Edit
+                  </button>
+                  <button className="btn btn-outline-warning btn-sm" onClick={() => handleClose(role.role_id)}>
+                    <FaTimesCircle /> Close
+                  </button>
+                  <button className="btn btn-outline-danger btn-sm" onClick={() => handleDelete(role.role_id)}>
+                    <FaTrashAlt /> Delete
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  <button className="btn btn-outline-success btn-sm" onClick={() => handleReopenRole(role.role_id)}>
+                    <FaUndo /> Reopen
+                  </button>
+                  <button className="btn btn-outline-danger btn-sm" onClick={() => handleDelete(role.role_id)}>
+                    <FaTrashAlt /> Delete
+                  </button>
+                </div>
+              )}
             </td>
           </tr>
         ))}
@@ -289,7 +287,7 @@ function RolesPage() {
       <h2 className="mt-5">Closed Positions</h2>
       {renderTable(closedRoles, true)}
 
-      {/* ✅ View JD Modal — modal-xl for larger size */}
+      {/* View JD Modal */}
       {showModal && (
         <div className="modal d-block" tabIndex="-1" onClick={() => setShowModal(false)}>
           <div className="modal-dialog modal-xl" onClick={(e) => e.stopPropagation()}>
@@ -302,38 +300,26 @@ function RolesPage() {
                 />
               </div>
               <div className="modal-body">
-                <div
-                  className="jd-view-content"
-                  dangerouslySetInnerHTML={{ __html: selectedJD }}
-                />
+                <div className="jd-view-content" dangerouslySetInnerHTML={{ __html: selectedJD }} />
               </div>
               <div className="modal-footer">
                 <button
                   className="btn btn-primary"
                   onClick={() => {
                     const newTab = window.open();
-                    newTab.document.write(`
-                      <html>
-                        <head><title>Job Description</title></head>
-                        <body style="font-family: Segoe UI, sans-serif; padding: 2rem;">
-                          ${selectedJD}
-                        </body>
-                      </html>
-                    `);
+                    newTab.document.write(`<html><head><title>Job Description</title></head><body style="font-family: Segoe UI, sans-serif; padding: 2rem;">${selectedJD}</body></html>`);
                   }}
                 >
                   Open in New Tab
                 </button>
-                <button className="btn btn-secondary" onClick={() => setShowModal(false)}>
-                  Close
-                </button>
+                <button className="btn btn-secondary" onClick={() => setShowModal(false)}>Close</button>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* ✅ Edit Role Modal — all fields editable except Role ID */}
+      {/* Edit Role Modal */}
       {showEditModal && (
         <div className="modal show d-block" tabIndex="-1">
           <div className="modal-dialog modal-lg">
@@ -351,8 +337,6 @@ function RolesPage() {
                 />
               </div>
               <div className="modal-body">
-
-                {/* Role Name */}
                 <div className="mb-3">
                   <label className="form-label">Role Name</label>
                   <input
@@ -362,8 +346,6 @@ function RolesPage() {
                     onChange={(e) => setEditVacancyData({ ...editVacancyData, role: e.target.value })}
                   />
                 </div>
-
-                {/* Number of Vacancies */}
                 <div className="mb-3">
                   <label className="form-label">Number of Vacancies</label>
                   <input
@@ -374,8 +356,6 @@ function RolesPage() {
                     min="0"
                   />
                 </div>
-
-                {/* Job Description — React Quill */}
                 <div className="mb-3">
                   <label className="form-label">Job Description</label>
                   <ReactQuill
@@ -387,28 +367,17 @@ function RolesPage() {
                     style={{ height: '200px', marginBottom: '50px' }}
                   />
                 </div>
-
               </div>
               <div className="modal-footer">
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => setShowEditModal(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  className="btn btn-primary"
-                  onClick={saveVacancyUpdate}
-                >
-                  Save Changes
-                </button>
+                <button className="btn btn-secondary" onClick={() => setShowEditModal(false)}>Cancel</button>
+                <button className="btn btn-primary" onClick={saveVacancyUpdate}>Save Changes</button>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Add New Role Modal with React Quill */}
+      {/* Add New Role Modal */}
       {showAddModal && (
         <div className="modal show d-block" tabIndex="-1">
           <div className="modal-dialog modal-lg">
@@ -417,10 +386,7 @@ function RolesPage() {
                 <h5 className="modal-title">Create New Job Role</h5>
                 <FaTimesCircle
                   style={{ cursor: "pointer", fontSize: "22px", color: "#dc3545" }}
-                  onClick={() => {
-                    setShowAddModal(false);
-                    setRoleIdError('');
-                  }}
+                  onClick={() => { setShowAddModal(false); setRoleIdError(''); }}
                 />
               </div>
               <form onSubmit={handleAddRole}>
@@ -458,8 +424,6 @@ function RolesPage() {
                       onChange={(e) => setNewRoleData({ ...newRoleData, positions: e.target.value })}
                     />
                   </div>
-
-                  {/* ✅ React Quill Rich Text Editor */}
                   <div className="mb-3">
                     <label className="form-label">Job Description</label>
                     <ReactQuill
@@ -471,24 +435,16 @@ function RolesPage() {
                       style={{ height: '200px', marginBottom: '50px' }}
                     />
                   </div>
-
                 </div>
                 <div className="modal-footer">
                   <button
                     type="button"
                     className="btn btn-secondary"
-                    onClick={() => {
-                      setShowAddModal(false);
-                      setRoleIdError('');
-                    }}
+                    onClick={() => { setShowAddModal(false); setRoleIdError(''); }}
                   >
                     Cancel
                   </button>
-                  <button
-                    type="submit"
-                    className="btn btn-success"
-                    disabled={!!roleIdError}
-                  >
+                  <button type="submit" className="btn btn-success" disabled={!!roleIdError}>
                     Save Role
                   </button>
                 </div>

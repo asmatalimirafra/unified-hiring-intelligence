@@ -18,7 +18,6 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
 const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 const HEADERS  = { headers: { 'ngrok-skip-browser-warning': 'true' } };
 
-/* ── safe date parser — handles ISO string or MongoDB {$date:...} ── */
 const parseDate = (dt) => {
   if (!dt) return null;
   const raw = (dt && typeof dt === 'object' && dt.$date) ? dt.$date : dt;
@@ -26,7 +25,7 @@ const parseDate = (dt) => {
   return isNaN(d.getTime()) ? null : d;
 };
 
-const todayStr  = () => new Date().toLocaleDateString('en-CA');
+const todayStr   = () => new Date().toLocaleDateString('en-CA');
 const monthStart = () => new Date(new Date().getFullYear(), new Date().getMonth(), 1).toLocaleDateString('en-CA');
 const monthEnd   = () => new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toLocaleDateString('en-CA');
 
@@ -36,6 +35,7 @@ const inRange = (dateStr, from, to) => {
   const s = d.toLocaleDateString('en-CA');
   return s >= from && s <= to;
 };
+
 const getInitials = (name = '') =>
   name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
 
@@ -70,11 +70,16 @@ function InterviewerDashboard() {
     const fetchAll = async () => {
       try {
         const localUser = JSON.parse(localStorage.getItem('user') || '{}');
-        const activeId  = userId || localUser.user_id || localUser.interviewer_id || localUser.id;
+        const activeId    = userId || localUser.user_id || localUser.interviewer_id || localUser.id;
+        // ── Use the interviewer's email from localStorage ─────────────────
+        const activeEmail = localUser.email || '';
 
         const [interviewersRes, candidatesRes] = await Promise.all([
           axios.get(`${BASE_URL}/get-interviewers/`, HEADERS),
-          axios.get(`${BASE_URL}/get-candidates/`,   HEADERS),
+          // ── Fetch only candidates assigned to this interviewer ───────────
+          activeEmail
+            ? axios.get(`${BASE_URL}/get-interviewer-candidates/${encodeURIComponent(activeEmail)}`, HEADERS)
+            : Promise.resolve({ data: [] }),
         ]);
 
         const candidates = candidatesRes.data || [];
@@ -97,7 +102,7 @@ function InterviewerDashboard() {
     fetchAll();
   }, [userId]);
 
-  /* all MY interviews flattened from candidates */
+  /* all MY interviews flattened from assigned candidates */
   const myInterviews = useMemo(() => {
     if (!myId) return [];
     return allCandidates.flatMap(c =>
@@ -120,14 +125,13 @@ function InterviewerDashboard() {
     }).length;
   }, [myInterviews]);
 
-  // Pending = candidates where interview_completed is NOT true (matches InterviewPage logic exactly)
+  // Pending = assigned candidates where interview_completed is NOT true
   const pendingCandidatesList = useMemo(() =>
     allCandidates.filter(c => !(c.interview_completed === true)),
     [allCandidates]
   );
   const pendingFeedbackCount = pendingCandidatesList.length;
 
-  // For the row-2 card: show each pending candidate's name + role
   const pendingFeedbackList = useMemo(() =>
     pendingCandidatesList.slice(0, 8).map(c => ({
       candidateName: c.name,
@@ -185,165 +189,149 @@ function InterviewerDashboard() {
   const verdicts = useMemo(() => {
     const counts = { strongHire: 0, hire: 0, weakHire: 0, noHire: 0 };
     allCandidates.forEach(c => {
-      // Only count candidates in the Completed section (interview_completed === true)
       if (c.interview_completed !== true) return;
       const wasMe = (c.interviews || []).some(iv =>
         String(iv.interviewer_id) === myId &&
         inRange(iv.datetime, rangeVerdicts.from, rangeVerdicts.to)
       );
       if (!wasMe) return;
-      const v = c.interview_aggregate?.verdict;
-      if      (v === 'Strong Hire') counts.strongHire++;
-      else if (v === 'Hire')        counts.hire++;
-      else if (v === 'Weak Hire')   counts.weakHire++;
-      else if (v === 'No Hire')     counts.noHire++;
+      const agg = c.interview_aggregate;
+      if (!agg) return;
+      const v = agg.verdict;
+      if (v === 'Strong Hire') counts.strongHire++;
+      else if (v === 'Hire')   counts.hire++;
+      else if (v === 'Weak Hire') counts.weakHire++;
+      else counts.noHire++;
     });
     return counts;
   }, [allCandidates, myId, rangeVerdicts]);
 
-  const weeklyData = useMemo(() => {
-    const counts = [0, 0, 0, 0];
-    myInterviews
-      .filter(iv => inRange(iv.datetime, rangeMonth.from, rangeMonth.to))
-      .forEach(iv => {
-        const d = parseDate(iv.datetime);
-        if (!d) return;
-        counts[Math.min(Math.floor((d.getDate() - 1) / 7), 3)]++;
-      });
-    return counts;
+  // ── Chart ─────────────────────────────────────────────────────────────────
+  const chartData = useMemo(() => {
+    const days = [];
+    const counts = [];
+    const start = new Date(rangeMonth.from);
+    const end   = new Date(rangeMonth.to);
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 7)) {
+      const label = d.toLocaleDateString('en-CA');
+      days.push(label);
+      counts.push(myInterviews.filter(iv => {
+        const dt = parseDate(iv.datetime);
+        return dt && dt.toLocaleDateString('en-CA') === label;
+      }).length);
+    }
+    return {
+      labels: days,
+      datasets: [{
+        label: 'Interviews',
+        data: counts,
+        backgroundColor: '#0055ff44',
+        borderColor: '#0055ff',
+        borderWidth: 2,
+        borderRadius: 6,
+      }]
+    };
   }, [myInterviews, rangeMonth]);
 
-  const currentWeekIndex = Math.min(Math.floor((new Date().getDate() - 1) / 7), 3);
-  const chartColors = weeklyData.map((_, i) => i === currentWeekIndex ? '#0055ff' : '#93b8ff');
-
-  const currentWeekCount  = weeklyData[currentWeekIndex] ?? 0;
-  const previousWeekCount = currentWeekIndex > 0 ? (weeklyData[currentWeekIndex - 1] ?? 0) : 0;
-
-  const percentGrowth = (() => {
-    if (currentWeekCount === 0 && previousWeekCount === 0) return 0;          // both zero — no change
-    if (previousWeekCount === 0 && currentWeekCount > 0)  return 100;         // new activity this week — 100% up
-    if (currentWeekCount === 0 && previousWeekCount > 0)  return -100;        // dropped to zero — 100% down
-    return Math.round(((currentWeekCount - previousWeekCount) / previousWeekCount) * 100);
-  })();
-
-  const chartData = {
-    labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
-    datasets: [{
-      label: 'Interviews',
-      data: weeklyData,
-      backgroundColor: chartColors,
-      borderRadius: 8,
-      barThickness: 36,
-    }],
-  };
   const chartOptions = {
     responsive: true,
-    plugins: {
-      legend: { display: false },
-      tooltip: { callbacks: { label: ctx => ` ${ctx.raw} interviews` } },
-    },
-    scales: {
-      y: { beginAtZero: true, ticks: { stepSize: 1, color: '#666' }, grid: { color: '#f0f0f0' } },
-      x: { ticks: { color: '#666' }, grid: { display: false } },
-    },
+    plugins: { legend: { display: false } },
+    scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
   };
 
-  const ScoreBar = ({ label, value, color }) => (
-    <div className="score-bar-row">
-      <span className="score-bar-label">{label}</span>
-      <div className="score-bar-track">
-        <div className="score-bar-fill" style={{ width: `${(value / 5) * 100}%`, background: color }} />
-      </div>
-      <span className="score-bar-val">{value > 0 ? value.toFixed(1) : '—'}</span>
-    </div>
-  );
+  const thisWeekCount = useMemo(() => {
+    const now = new Date();
+    const weekAgo = new Date(now); weekAgo.setDate(now.getDate() - 7);
+    return myInterviews.filter(iv => {
+      const d = parseDate(iv.datetime);
+      return d && d >= weekAgo && d <= now;
+    }).length;
+  }, [myInterviews]);
 
-  const dateLabel = new Date().toLocaleDateString('en-US', {
-    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-  });
+  const lastWeekCount = useMemo(() => {
+    const now = new Date();
+    const weekAgo  = new Date(now); weekAgo.setDate(now.getDate() - 7);
+    const twoWeeks = new Date(now); twoWeeks.setDate(now.getDate() - 14);
+    return myInterviews.filter(iv => {
+      const d = parseDate(iv.datetime);
+      return d && d >= twoWeeks && d < weekAgo;
+    }).length;
+  }, [myInterviews]);
 
-  if (loading) {
+  const percentGrowth = lastWeekCount === 0
+    ? (thisWeekCount > 0 ? 100 : 0)
+    : Math.round(((thisWeekCount - lastWeekCount) / lastWeekCount) * 100);
+
+  function ScoreBar({ label, value, color }) {
     return (
-      <div className="dash-loading">
-        <div className="dash-spinner" />
-        <p>Loading dashboard…</p>
+      <div className="score-bar-row">
+        <span className="score-bar-label">{label}</span>
+        <div className="score-bar-track">
+          <div className="score-bar-fill" style={{ width: `${(value / 5) * 100}%`, background: color }} />
+        </div>
+        <span className="score-bar-val">{value > 0 ? value : '—'}</span>
       </div>
     );
   }
 
+  if (loading) return <div className="dash-loading">Loading dashboard…</div>;
+
+  const name = interviewerData?.name || 'Interviewer';
+
   return (
     <div className="interviewer-dashboard">
-
       <div className="dash-header">
         <div>
-          <h2 className="dash-welcome">
-            👋 Welcome back,{' '}
-            <span className="dash-username">{interviewerData?.name || 'Interviewer'}</span>
-          </h2>
-          <p className="dash-date">{dateLabel}</p>
+          <h1 className="dash-title">Welcome back, {name.split(' ')[0]} 👋</h1>
+          <p className="dash-sub">Here's your interview activity overview — assigned candidates only.</p>
         </div>
-        {pendingFeedbackCount > 0 && (
-          <div className="feedback-alert"
-            onClick={() => navigate(`/interviewer/${userId}/interviews`)}>
-            ⚠️ {pendingFeedbackCount} candidate{pendingFeedbackCount > 1 ? 's' : ''} pending interview completion
-          </div>
-        )}
       </div>
 
-      {/* ── Stat cards ─────────────────────────────────────────── */}
-      <div className="stat-grid">
-
-        <div className="stat-card" style={{ '--accent': '#0055ff' }}>
-          <div className="stat-icon" style={{ background: '#e6eeff' }}>
-            <i className="bi bi-check2-circle" style={{ color: '#0055ff' }} />
+      {/* ── Row 1 ──────────────────────────────────────────────── */}
+      <div className="dash-row1">
+        <div className="dash-card stat-card">
+          <div className="stat-icon blue"><i className="bi bi-calendar-check" /></div>
+          <div className="stat-body">
+            <div className="stat-num">{interviewsToday}</div>
+            <div className="stat-lbl">Today's Interviews</div>
           </div>
-          <div className="stat-val">{interviewsToday}</div>
-          <div className="stat-lbl">Interviews today</div>
-          <div className="stat-sub">Fixed to today</div>
         </div>
-
-        <div className="stat-card" style={{ '--accent': '#f5b800' }}>
-          <div className="stat-icon" style={{ background: '#fff8d6' }}>
-            <i className="bi bi-hourglass-split" style={{ color: '#c49200' }} />
+        <div className="dash-card stat-card">
+          <div className="stat-icon purple"><i className="bi bi-graph-up" /></div>
+          <div className="stat-body">
+            <DateRangePicker
+              from={rangeMonth.from} to={rangeMonth.to}
+              onChange={(f, t) => setRangeMonth({ from: f, to: t })}
+            />
+            <div className="stat-num">{interviewsInRange}</div>
+            <div className="stat-lbl">Interviews in Range</div>
           </div>
-          <div className="stat-val">{pendingFeedbackCount}</div>
-          <div className="stat-lbl">Pending candidates</div>
-          <div className="stat-sub">interview_completed ≠ true</div>
         </div>
-
-        <div className="stat-card stat-card-tall" style={{ '--accent': '#00b894' }}>
-          <div className="stat-icon" style={{ background: '#e0f7f2' }}>
-            <i className="bi bi-bar-chart-line" style={{ color: '#00b894' }} />
+        <div className="dash-card stat-card">
+          <div className="stat-icon green"><i className="bi bi-star-half" /></div>
+          <div className="stat-body">
+            <DateRangePicker
+              from={rangeAvg.from} to={rangeAvg.to}
+              onChange={(f, t) => setRangeAvg({ from: f, to: t })}
+            />
+            <div className="stat-num">{avgScoreInRange ?? '—'}</div>
+            <div className="stat-lbl">Avg Score / 5</div>
           </div>
-          <div className="stat-val">{interviewsInRange}</div>
-          <div className="stat-lbl">Interviews in range</div>
-          <DateRangePicker
-            from={rangeMonth.from} to={rangeMonth.to}
-            onChange={(f, t) => setRangeMonth({ from: f, to: t })}
-          />
         </div>
-
-        <div className="stat-card stat-card-tall" style={{ '--accent': '#7c6ff7' }}>
-          <div className="stat-icon" style={{ background: '#eeecff' }}>
-            <i className="bi bi-star-half" style={{ color: '#7c6ff7' }} />
+        <div className="dash-card stat-card">
+          <div className="stat-icon orange"><i className="bi bi-people" /></div>
+          <div className="stat-body">
+            <div className="stat-num">{allCandidates.length}</div>
+            <div className="stat-lbl">Assigned Candidates</div>
           </div>
-          <div className="stat-val">{avgScoreInRange !== null ? avgScoreInRange : '—'}</div>
-          <div className="stat-lbl">Avg score given</div>
-          <DateRangePicker
-            from={rangeAvg.from} to={rangeAvg.to}
-            onChange={(f, t) => setRangeAvg({ from: f, to: t })}
-          />
         </div>
       </div>
 
       {/* ── Row 2 ──────────────────────────────────────────────── */}
       <div className="dash-row2">
-
         <div className="dash-card">
           <div className="card-header">
-            <span className="card-title">
-              <i className="bi bi-calendar2-check" /> Interviews
-            </span>
+            <span className="card-title"><i className="bi bi-clock" /> Today's schedule</span>
           </div>
           <DateRangePicker
             from={rangeToday.from} to={rangeToday.to}
@@ -385,7 +373,7 @@ function InterviewerDashboard() {
               <span className="card-tag danger">{pendingFeedbackCount} not completed</span>
             )}
           </div>
-          <div className="card-sub">Candidates not yet completed — across all roles</div>
+          <div className="card-sub">Your assigned candidates with pending interviews</div>
 
           {pendingFeedbackList.length === 0 ? (
             <div className="empty-state success">
@@ -410,7 +398,6 @@ function InterviewerDashboard() {
 
       {/* ── Row 3 ──────────────────────────────────────────────── */}
       <div className="dash-row3">
-
         <div className="dash-card">
           <div className="card-header">
             <span className="card-title"><i className="bi bi-sliders" /> My scoring breakdown</span>
@@ -436,7 +423,10 @@ function InterviewerDashboard() {
 
         <div className="dash-card">
           <div className="card-header">
-            <span className="card-title"><i className="bi bi-clipboard2-check" /> Verdicts <span style={{fontSize:'0.68rem',color:'#00b894',fontWeight:600}}>completed only</span></span>
+            <span className="card-title">
+              <i className="bi bi-clipboard2-check" /> Verdicts
+              <span style={{ fontSize:'0.68rem', color:'#00b894', fontWeight:600 }}> completed only</span>
+            </span>
           </div>
           <DateRangePicker
             from={rangeVerdicts.from} to={rangeVerdicts.to}
@@ -462,26 +452,21 @@ function InterviewerDashboard() {
           </div>
         </div>
 
-        {/* Quick actions — all routes include userId */}
         <div className="dash-card">
           <div className="card-header">
             <span className="card-title"><i className="bi bi-lightning-charge" /> Quick actions</span>
           </div>
           <div className="quick-grid">
-            <button className="quick-btn"
-              onClick={() => navigate(`/interviewer/${userId}/interviews`)}>
+            <button className="quick-btn" onClick={() => navigate(`/interviewer/${userId}/interviews`)}>
               <i className="bi bi-pencil" /><span>Submit feedback</span>
             </button>
-            <button className="quick-btn"
-              onClick={() => navigate(`/interviewer/${userId}/fitment`)}>
+            <button className="quick-btn" onClick={() => navigate(`/interviewer/${userId}/fitment`)}>
               <i className="bi bi-graph-up-arrow" /><span>Score fitment</span>
             </button>
-            <button className="quick-btn"
-              onClick={() => navigate(`/interviewer/${userId}/compare`)}>
+            <button className="quick-btn" onClick={() => navigate(`/interviewer/${userId}/compare`)}>
               <i className="bi bi-people" /><span>Compare candidates</span>
             </button>
-            <button className="quick-btn"
-              onClick={() => navigate(`/interviewer/${userId}/assistant`)}>
+            <button className="quick-btn" onClick={() => navigate(`/interviewer/${userId}/assistant`)}>
               <i className="bi bi-chat-dots" /><span>Ask RAG</span>
             </button>
           </div>
@@ -490,7 +475,6 @@ function InterviewerDashboard() {
 
       {/* ── Row 4 ──────────────────────────────────────────────── */}
       <div className="dash-row4">
-
         <div className="dash-card">
           <div className="card-header">
             <span className="card-title"><i className="bi bi-bar-chart" /> Interview trend</span>
@@ -524,9 +508,7 @@ function InterviewerDashboard() {
                   <div className="activity-row" key={idx}>
                     <div className="activity-dot" />
                     <div className="activity-info">
-                      <div className="activity-text">
-                        Interviewed {iv.candidateName} — Round {iv.round}
-                      </div>
+                      <div className="activity-text">Interviewed {iv.candidateName} — Round {iv.round}</div>
                       <div className="activity-role">{iv.candidateRole}</div>
                     </div>
                     <div className="activity-time">{timeLabel}</div>
@@ -536,7 +518,6 @@ function InterviewerDashboard() {
           )}
         </div>
       </div>
-
     </div>
   );
 }

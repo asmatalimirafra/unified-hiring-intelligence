@@ -1,0 +1,127 @@
+/* ScheduleInterview.css */
+
+.schedule-container {
+  max-width: 1200px;
+  margin: 2rem auto;
+  padding: 2rem;
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  font-family: 'Segoe UI', sans-serif;
+}
+
+.schedule-container h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #222;
+  margin-bottom: 1.5rem;
+  border-bottom: 2px solid #007bff;
+  padding-bottom: 0.5rem;
+}
+
+.schedule-container h4 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #444;
+  margin-bottom: 1rem;
+}
+
+/* Match the Table styling from RolesPage */
+.schedule-container .table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 2.5rem;
+  border-radius: 12px;
+  overflow: hidden;
+  table-layout: auto;
+  border: 1px solid #e0e0e0;
+}
+
+.schedule-container .table th,
+.schedule-container .table td {
+  padding: 1rem;
+  border: 1px solid #e0e0e0;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.schedule-container .table th {
+  font-weight: 600;
+  color: #333;
+}
+
+/* Specific Table Header Colors */
+.schedule-container .table-dark th {
+  background-color: #f1f4f8; /* Muted modern grey instead of harsh black */
+  color: #333;
+}
+
+.schedule-container .table-success th {
+  background-color: #e6f9ec; /* Match the "view" icon background from RolesPage */
+  color: #28a745;
+}
+
+.schedule-container .table tr:nth-child(even) {
+  background-color: #fafafa;
+}
+
+/* Action Buttons */
+.schedule-container .btn {
+  border-radius: 6px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  padding: 0.4rem 0.8rem;
+}
+
+.schedule-container .btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+/* Form Inputs inside Modal */
+.modal-body .form-control {
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  padding: 0.6rem;
+  font-size: 1rem;
+}
+
+/* Centered Modal Styling matching RolesPage */
+.modal.d-block {
+  display: flex !important;
+  align-items: center; /* Center vertically */
+  justify-content: center;
+}
+
+.modal-content {
+  border-radius: 12px;
+  border: none;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+  font-family: 'Segoe UI', sans-serif;
+}
+
+.modal-header {
+  border-bottom: 1px solid #e0e0e0;
+  background-color: #f8f9fa;
+  border-radius: 12px 12px 0 0;
+}
+
+.modal-footer {
+  border-top: 1px solid #e0e0e0;
+  background-color: #f8f9fa;
+  border-radius: 0 0 12px 12px;
+}
+
+/* Responsive Tweaks */
+@media screen and (max-width: 768px) {
+  .schedule-container {
+    padding: 1rem;
+    margin: 1rem;
+  }
+
+  .schedule-container .table th,
+  .schedule-container .table td {
+    font-size: 0.9rem;
+    padding: 0.6rem;
+  }
+}
