@@ -1,127 +1,322 @@
-/* ScheduleInterview.css */
+/* src/pages/hr/ScheduleInterview.css */
 
-.schedule-container {
-  max-width: 1200px;
-  margin: 2rem auto;
+.schedule-page {
   padding: 2rem;
-  background: #ffffff;
-  border-radius: 16px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  max-width: 1100px;
+  margin: 0 auto;
   font-family: 'Segoe UI', sans-serif;
 }
 
-.schedule-container h2 {
-  font-size: 1.5rem;
+.schedule-header h2 {
+  font-size: 1.7rem;
   font-weight: 700;
-  color: #222;
-  margin-bottom: 1.5rem;
-  border-bottom: 2px solid #007bff;
-  padding-bottom: 0.5rem;
+  margin-bottom: 0.2rem;
+  color: #1a1a2e;
 }
 
-.schedule-container h4 {
-  font-size: 1.25rem;
+.schedule-sub {
+  color: #888;
+  font-size: 0.9rem;
+  margin-bottom: 1.5rem;
+}
+
+/* ── Filter bar ─────────────────────────────────────────────────────────── */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.filter-bar label {
   font-weight: 600;
   color: #444;
-  margin-bottom: 1rem;
+  white-space: nowrap;
 }
 
-/* Match the Table styling from RolesPage */
-.schedule-container .table {
+.role-select {
+  padding: 0.45rem 0.8rem;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  min-width: 260px;
+  background: #fff;
+  cursor: pointer;
+}
+
+/* ── Section card ───────────────────────────────────────────────────────── */
+.section-card {
+  background: #fff;
+  border-radius: 14px;
+  border: 1px solid #e8e8f0;
+  padding: 1.5rem;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.05);
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1.2rem;
+}
+
+.section-icon {
+  font-size: 1.2rem;
+}
+
+.section-header h3 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 0;
+  color: #1a1a2e;
+}
+
+.count-badge {
+  background: #f0f0ff;
+  color: #5c5cff;
+  border-radius: 20px;
+  padding: 0.15rem 0.65rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.empty-msg {
+  color: #aaa;
+  font-size: 0.9rem;
+  padding: 1rem 0;
+}
+
+/* ── Table ──────────────────────────────────────────────────────────────── */
+.schedule-table {
   width: 100%;
   border-collapse: collapse;
-  margin-bottom: 2.5rem;
-  border-radius: 12px;
-  overflow: hidden;
-  table-layout: auto;
-  border: 1px solid #e0e0e0;
+  font-size: 0.88rem;
 }
 
-.schedule-container .table th,
-.schedule-container .table td {
-  padding: 1rem;
-  border: 1px solid #e0e0e0;
-  text-align: center;
-  vertical-align: middle;
-}
-
-.schedule-container .table th {
+.schedule-table th {
+  background: #f7f7fb;
+  color: #555;
   font-weight: 600;
+  padding: 0.75rem 1rem;
+  text-align: left;
+  border-bottom: 2px solid #eee;
+}
+
+.schedule-table td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #f0f0f0;
+  vertical-align: middle;
   color: #333;
 }
 
-/* Specific Table Header Colors */
-.schedule-container .table-dark th {
-  background-color: #f1f4f8; /* Muted modern grey instead of harsh black */
-  color: #333;
+.schedule-table tr:last-child td {
+  border-bottom: none;
 }
 
-.schedule-container .table-success th {
-  background-color: #e6f9ec; /* Match the "view" icon background from RolesPage */
-  color: #28a745;
+.schedule-table tr:hover td {
+  background: #fafafe;
 }
 
-.schedule-container .table tr:nth-child(even) {
-  background-color: #fafafa;
-}
-
-/* Action Buttons */
-.schedule-container .btn {
-  border-radius: 6px;
+.resume-link {
+  color: #0055ff;
+  text-decoration: none;
   font-weight: 500;
-  transition: all 0.2s ease;
-  padding: 0.4rem 0.8rem;
 }
 
-.schedule-container .btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+.resume-link:hover {
+  text-decoration: underline;
 }
 
-/* Form Inputs inside Modal */
-.modal-body .form-control {
-  border-radius: 8px;
-  border: 1px solid #ccc;
-  padding: 0.6rem;
-  font-size: 1rem;
+.meeting-link {
+  color: #00b894;
+  font-weight: 600;
+  text-decoration: none;
 }
 
-/* Centered Modal Styling matching RolesPage */
-.modal.d-block {
-  display: flex !important;
-  align-items: center; /* Center vertically */
-  justify-content: center;
+.meeting-link:hover {
+  text-decoration: underline;
 }
 
-.modal-content {
-  border-radius: 12px;
+/* ── Buttons ────────────────────────────────────────────────────────────── */
+.btn-schedule {
+  background: #0055ff;
+  color: #fff;
   border: none;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-  font-family: 'Segoe UI', sans-serif;
+  border-radius: 8px;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-schedule:hover {
+  background: #0040cc;
+}
+
+.btn-unschedule {
+  background: #fff0f0;
+  color: #dc3545;
+  border: 1px solid #f5c6cb;
+  border-radius: 8px;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-unschedule:hover {
+  background: #fde8ea;
+}
+
+/* ── Modal backdrop ─────────────────────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-box {
+  background: #fff;
+  border-radius: 16px;
+  width: 100%;
+  max-width: 480px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+  overflow: hidden;
 }
 
 .modal-header {
-  border-bottom: 1px solid #e0e0e0;
-  background-color: #f8f9fa;
-  border-radius: 12px 12px 0 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 1.4rem 1.5rem 1rem;
+  border-bottom: 1px solid #f0f0f0;
 }
 
+.modal-header h3 {
+  margin: 0 0 0.2rem;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #1a1a2e;
+}
+
+.modal-sub {
+  font-size: 0.85rem;
+  color: #888;
+  margin: 0;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 1.1rem;
+  color: #aaa;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.modal-close:hover {
+  color: #dc3545;
+}
+
+.modal-body {
+  padding: 1.2rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.field-group label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #444;
+}
+
+.field-group input {
+  padding: 0.5rem 0.8rem;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  outline: none;
+  transition: border 0.2s;
+}
+
+.field-group input:focus {
+  border-color: #0055ff;
+  box-shadow: 0 0 0 3px rgba(0,85,255,0.1);
+}
+
+.field-hint {
+  font-size: 0.76rem;
+  color: #aaa;
+}
+
+/* ── Status banner ──────────────────────────────────────────────────────── */
+.status-banner {
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.status-banner.success { background: #d4edda; color: #155724; }
+.status-banner.error   { background: #f8d7da; color: #721c24; }
+.status-banner.info    { background: #d1ecf1; color: #0c5460; }
+
+/* ── Modal footer ───────────────────────────────────────────────────────── */
 .modal-footer {
-  border-top: 1px solid #e0e0e0;
-  background-color: #f8f9fa;
-  border-radius: 0 0 12px 12px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem 1.4rem;
+  border-top: 1px solid #f0f0f0;
 }
 
-/* Responsive Tweaks */
-@media screen and (max-width: 768px) {
-  .schedule-container {
-    padding: 1rem;
-    margin: 1rem;
-  }
+.btn-cancel {
+  background: #f5f5f5;
+  color: #555;
+  border: none;
+  border-radius: 8px;
+  padding: 0.5rem 1.2rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+}
 
-  .schedule-container .table th,
-  .schedule-container .table td {
-    font-size: 0.9rem;
-    padding: 0.6rem;
-  }
+.btn-cancel:hover {
+  background: #eee;
+}
+
+.btn-confirm {
+  background: #0055ff;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.5rem 1.4rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-confirm:hover:not(:disabled) {
+  background: #0040cc;
+}
+
+.btn-confirm:disabled,
+.btn-cancel:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }

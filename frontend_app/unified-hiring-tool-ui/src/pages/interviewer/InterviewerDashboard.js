@@ -137,6 +137,7 @@ function InterviewerDashboard() {
       candidateName: c.name,
       candidateRole: c.applied_role || '—',
       candidateId:   c.candidate_id,
+      hrName:        c.interview_details?.scheduled_by_hr_name || null,
       roundsPending: !(c.interviews || []).length
         ? 'No rounds yet'
         : `Pending L${Math.max(...(c.interviews || []).map(i => i.round)) + 1}`,
@@ -387,7 +388,10 @@ function InterviewerDashboard() {
                 <div className="avatar danger-avatar">{getInitials(c.candidateName)}</div>
                 <div className="cand-info">
                   <div className="cand-name">{c.candidateName}</div>
-                  <div className="cand-meta">{c.candidateRole} · {c.roundsPending}</div>
+                  <div className="cand-meta">
+                    {c.candidateRole} · {c.roundsPending}
+                    {c.hrName && <span style={{ color: '#5c5cff', marginLeft: '6px' }}>· 👤 {c.hrName}</span>}
+                  </div>
                 </div>
                 <span className="round-pill overdue">Go →</span>
               </div>

@@ -288,21 +288,23 @@ async def get_users():
 async def schedule_interview(
     candidate_id: str = Body(...),
     interviewer_email: str = Body(...),
-    scheduled_date: Optional[str] = Body(None)
+    scheduled_datetime: Optional[str] = Body(None),
+    meeting_link: Optional[str] = Body(None),
+    hr_id: Optional[str] = Body(None),
+    hr_name: Optional[str] = Body(None),
 ):
     """
     HR schedules a candidate for a specific interviewer.
-    Sets status=Scheduled and stores interviewer_email so the interviewer
-    portal can query /get-interviewer-candidates/{email}.
+    Stores interviewer email, date/time, meeting link, and which HR scheduled it.
     """
     candidate = candidates_collection.find_one({"candidate_id": candidate_id})
     if not candidate:
         raise HTTPException(status_code=404, detail=f"Candidate '{candidate_id}' not found.")
 
-    # Verify the interviewer email exists in users
+    # Verify the interviewer email exists
     interviewer = users_collection.find_one({"email": interviewer_email, "role": "Interviewer"})
     if not interviewer:
-        raise HTTPException(status_code=404, detail=f"No interviewer found with email '{interviewer_email}'.")
+        raise HTTPException(status_code=404, detail=f"No interviewer account found with email '{interviewer_email}'. Please check the email and try again.")
 
     update_data = {
         "status": "Scheduled",
@@ -310,7 +312,10 @@ async def schedule_interview(
             "interviewer_email": interviewer_email,
             "interviewer_id": interviewer.get("user_id"),
             "interviewer_name": interviewer.get("name"),
-            "scheduled_date": scheduled_date
+            "scheduled_datetime": scheduled_datetime,
+            "meeting_link": meeting_link or "",
+            "scheduled_by_hr_id": hr_id or "",
+            "scheduled_by_hr_name": hr_name or "",
         }
     }
 
@@ -324,6 +329,20 @@ async def schedule_interview(
         "candidate_id": candidate_id,
         "interviewer_email": interviewer_email
     }
+
+
+@app.post("/unschedule-interview/", status_code=200)
+async def unschedule_interview(candidate_id: str = Body(...)):
+    """Remove scheduling from a candidate — moves them back to unscheduled."""
+    candidate = candidates_collection.find_one({"candidate_id": candidate_id})
+    if not candidate:
+        raise HTTPException(status_code=404, detail=f"Candidate '{candidate_id}' not found.")
+
+    candidates_collection.update_one(
+        {"candidate_id": candidate_id},
+        {"$unset": {"status": "", "interview_details": ""}}
+    )
+    return {"message": f"Candidate {candidate_id} unscheduled."}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # INTERVIEWER — fetch only assigned candidates

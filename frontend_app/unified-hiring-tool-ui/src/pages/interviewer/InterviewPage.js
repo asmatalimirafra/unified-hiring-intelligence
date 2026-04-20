@@ -325,21 +325,41 @@ function InterviewPage() {
               <thead>
                 <tr>
                   <th>Candidate</th>
+                  <th>Scheduled By (HR)</th>
+                  <th>Date & Time</th>
+                  <th>Meeting Link</th>
                   <th>Resume</th>
-                  <th>Scheduled Date</th>
                   <th>Rounds</th>
                   <th>Mark Complete</th>
                 </tr>
               </thead>
               <tbody>
                 {pendingCandidates.length === 0 ? (
-                  <tr><td colSpan="5" className="empty-row">No pending candidates assigned to you.</td></tr>
+                  <tr><td colSpan="7" className="empty-row">No pending candidates assigned to you.</td></tr>
                 ) : (
                   pendingCandidates.map(c => (
                     <tr key={c.candidate_id}>
                       <td>
                         <div className="cand-name">{c.name}</div>
                         <div className="cand-id">{c.candidate_id}</div>
+                      </td>
+                      <td>
+                        <span style={{ fontWeight: 600, color: '#5c5cff' }}>
+                          👤 {c.interview_details?.scheduled_by_hr_name || c.interview_details?.scheduled_by_hr_id || '—'}
+                        </span>
+                      </td>
+                      <td>
+                        {c.interview_details?.scheduled_datetime
+                          ? new Date(c.interview_details.scheduled_datetime).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                          : '—'}
+                      </td>
+                      <td>
+                        {c.interview_details?.meeting_link ? (
+                          <a href={c.interview_details.meeting_link} target="_blank" rel="noopener noreferrer"
+                            style={{ color: '#00b894', fontWeight: 600, textDecoration: 'none' }}>
+                            Join 🔗
+                          </a>
+                        ) : '—'}
                       </td>
                       <td>
                         <a
@@ -349,11 +369,6 @@ function InterviewPage() {
                         >
                           View PDF
                         </a>
-                      </td>
-                      <td>
-                        {c.interview_details?.scheduled_date
-                          ? formatDate(c.interview_details.scheduled_date)
-                          : '—'}
                       </td>
                       <td><RoundBadges candidate={c} editable={true} /></td>
                       <td>
