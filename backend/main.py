@@ -643,3 +643,14 @@ async def interviewer_chat(request: dict):
         media_type="text/plain",
         headers={"X-Thread-Id": thread_id}
     )
+
+@app.get("/get-interviewer-candidates/{email}")
+async def get_interviewer_candidates(email: str):
+    """Fetch only candidates scheduled for a specific interviewer."""
+    # Find candidates where the status is Scheduled AND the email matches
+    candidates = list(candidates_collection.find({
+        "status": "Scheduled",
+        "interview_details.interviewer_email": email
+    }, {"_id": 0})) 
+    
+    return candidates

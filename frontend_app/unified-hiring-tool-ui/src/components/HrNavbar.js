@@ -79,6 +79,10 @@ function HrNavbar() {
         <NavLink to="/hr/roles" className={({ isActive }) => `nav-link ${isActive ? 'active-link' : ''}`}>
           <span className="link-text">Roles</span>
         </NavLink>
+        {/* ⬅️ NEW SCHEDULE LINK START */}
+        <NavLink to="/hr/schedule" className={({ isActive }) => `nav-link ${isActive ? 'active-link' : ''}`}>
+          <span className="link-text">Schedule</span>
+        </NavLink>
 
         {/* Enhanced Candidates dropdown */}
         <div

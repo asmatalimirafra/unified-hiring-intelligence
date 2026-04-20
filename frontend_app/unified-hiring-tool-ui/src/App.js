@@ -77,6 +77,7 @@ import InterviewerDashboard from './pages/interviewer/InterviewerDashboard';
 import ProtectedRoute from './components/ProtectedRoute';
 import InterviewerLayout from './layouts/InterviewerLayout';
 import HrLayout from './layouts/HrLayout';
+import ScheduleInterview from './pages/hr/ScheduleInterview'; // ⬅️ NEW IMPORT
 
 // Feature Pages
 import FitmentScorer from './pages/interviewer/FitmentScorer';
@@ -109,6 +110,7 @@ function App() {
         >
           <Route path="dashboard" element={<HrDashboard />} />
           <Route path="roles" element={<RolesPage />} />
+          <Route path="schedule" element={<ScheduleInterview />} /> {/* ⬅️ NEW ROUTE */}
           <Route path="candidates" element={<ViewCandidates />} />
           <Route path="candidates/add" element={<AddCandidate />} />   
           <Route path="feedback" element={<FeedbackPage />} />        
