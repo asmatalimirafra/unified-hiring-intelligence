@@ -18,19 +18,23 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
 const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 const HEADERS  = { headers: { 'ngrok-skip-browser-warning': 'true' } };
 
-const todayStr = () => new Date().toLocaleDateString('en-CA');
-const monthStart = () => {
-  const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth(), 1).toLocaleDateString('en-CA');
+/* ── safe date parser — handles ISO string or MongoDB {$date:...} ── */
+const parseDate = (dt) => {
+  if (!dt) return null;
+  const raw = (dt && typeof dt === 'object' && dt.$date) ? dt.$date : dt;
+  const d = new Date(raw);
+  return isNaN(d.getTime()) ? null : d;
 };
-const monthEnd = () => {
-  const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth() + 1, 0).toLocaleDateString('en-CA');
-};
+
+const todayStr  = () => new Date().toLocaleDateString('en-CA');
+const monthStart = () => new Date(new Date().getFullYear(), new Date().getMonth(), 1).toLocaleDateString('en-CA');
+const monthEnd   = () => new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toLocaleDateString('en-CA');
+
 const inRange = (dateStr, from, to) => {
-  if (!dateStr) return false;
-  const d = new Date(dateStr).toLocaleDateString('en-CA');
-  return d >= from && d <= to;
+  const d = parseDate(dateStr);
+  if (!d) return false;
+  const s = d.toLocaleDateString('en-CA');
+  return s >= from && s <= to;
 };
 const getInitials = (name = '') =>
   name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
@@ -110,9 +114,10 @@ function InterviewerDashboard() {
 
   const interviewsToday = useMemo(() => {
     const t = todayStr();
-    return myInterviews.filter(iv =>
-      iv.datetime && new Date(iv.datetime).toLocaleDateString('en-CA') === t
-    ).length;
+    return myInterviews.filter(iv => {
+      const d = parseDate(iv.datetime);
+      return d && d.toLocaleDateString('en-CA') === t;
+    }).length;
   }, [myInterviews]);
 
   // Pending = candidates where interview_completed is NOT true (matches InterviewPage logic exactly)
@@ -153,7 +158,7 @@ function InterviewerDashboard() {
   const todaysInterviewList = useMemo(() =>
     myInterviews
       .filter(iv => inRange(iv.datetime, rangeToday.from, rangeToday.to))
-      .sort((a, b) => new Date(a.datetime) - new Date(b.datetime)),
+      .sort((a, b) => (parseDate(a.datetime) || 0) - (parseDate(b.datetime) || 0)),
     [myInterviews, rangeToday]
   );
 
@@ -201,18 +206,25 @@ function InterviewerDashboard() {
     myInterviews
       .filter(iv => inRange(iv.datetime, rangeMonth.from, rangeMonth.to))
       .forEach(iv => {
-        const day = new Date(iv.datetime).getDate();
-        counts[Math.min(Math.floor((day - 1) / 7), 3)]++;
+        const d = parseDate(iv.datetime);
+        if (!d) return;
+        counts[Math.min(Math.floor((d.getDate() - 1) / 7), 3)]++;
       });
     return counts;
   }, [myInterviews, rangeMonth]);
 
   const currentWeekIndex = Math.min(Math.floor((new Date().getDate() - 1) / 7), 3);
   const chartColors = weeklyData.map((_, i) => i === currentWeekIndex ? '#0055ff' : '#93b8ff');
-  const lastWeek = currentWeekIndex - 1;
-  const percentGrowth = lastWeek >= 0 && weeklyData[lastWeek] > 0
-    ? Math.round(((weeklyData[currentWeekIndex] - weeklyData[lastWeek]) / weeklyData[lastWeek]) * 100)
-    : 0;
+
+  const currentWeekCount  = weeklyData[currentWeekIndex] ?? 0;
+  const previousWeekCount = currentWeekIndex > 0 ? (weeklyData[currentWeekIndex - 1] ?? 0) : 0;
+
+  const percentGrowth = (() => {
+    if (currentWeekCount === 0 && previousWeekCount === 0) return 0;          // both zero — no change
+    if (previousWeekCount === 0 && currentWeekCount > 0)  return 100;         // new activity this week — 100% up
+    if (currentWeekCount === 0 && previousWeekCount > 0)  return -100;        // dropped to zero — 100% down
+    return Math.round(((currentWeekCount - previousWeekCount) / previousWeekCount) * 100);
+  })();
 
   const chartData = {
     labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
@@ -354,7 +366,7 @@ function InterviewerDashboard() {
                   <div className="cand-meta">
                     {iv.candidateRole} ·{' '}
                     {iv.datetime
-                      ? new Date(iv.datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                      ? parseDate(iv.datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                       : '—'}
                   </div>
                 </div>
@@ -503,10 +515,10 @@ function InterviewerDashboard() {
           ) : (
             [...myInterviews]
               .filter(iv => iv.datetime)
-              .sort((a, b) => new Date(b.datetime) - new Date(a.datetime))
+              .sort((a, b) => (parseDate(b.datetime) || 0) - (parseDate(a.datetime) || 0))
               .slice(0, 6)
               .map((iv, idx) => {
-                const daysAgo = Math.floor((Date.now() - new Date(iv.datetime)) / 86400000);
+                const daysAgo = Math.floor((Date.now() - (parseDate(iv.datetime) || 0)) / 86400000);
                 const timeLabel = daysAgo === 0 ? 'Today' : daysAgo === 1 ? 'Yesterday' : `${daysAgo}d ago`;
                 return (
                   <div className="activity-row" key={idx}>

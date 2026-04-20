@@ -566,7 +566,7 @@ export default function HrDashboard() {
             <span className="hr-card-title">⚡ Quick actions</span>
           </div>
           <div className="hr-quick-grid">
-            <button className="hr-quick-btn" onClick={() => navigate('/hr/add-candidate')}>
+            <button className="hr-quick-btn" onClick={() => navigate('/hr/candidates/add')}>
               <span>➕</span> Add candidate
             </button>
             <button className="hr-quick-btn" onClick={() => navigate('/hr/roles')}>
@@ -578,7 +578,7 @@ export default function HrDashboard() {
             <button className="hr-quick-btn" onClick={() => navigate('/hr/feedback')}>
               <span>📄</span> View feedback
             </button>
-            <button className="hr-quick-btn" onClick={() => navigate('/hr/rag')}>
+            <button className="hr-quick-btn" onClick={() => navigate('/hr/chat')}>
               <span>💬</span> Ask RAG
             </button>
             <button className="hr-quick-btn" onClick={() => navigate('/hr/roles')}>

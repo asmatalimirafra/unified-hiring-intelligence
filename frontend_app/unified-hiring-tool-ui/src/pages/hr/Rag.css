@@ -451,16 +451,3 @@
     background: #f9fafb;
     color: #374151;
 }
-
-/* Clickable links inside bot responses */
-.rt-link {
-    color: #2563eb;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-    word-break: break-all;
-    transition: color 0.15s;
-}
-
-.rt-link:hover {
-    color: #1d4ed8;
-}
