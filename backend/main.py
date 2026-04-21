@@ -394,6 +394,9 @@ async def schedule_interview(
 
     update_data = {
         "status": "Scheduled",
+        # ✅ Reset feedback_given so candidate re-appears in Pending
+        # for the new round on the Interviewer portal
+        "feedback_given": False,
         "interview_details": {
             "interviewer_email": interviewer_email,
             "interviewer_id": interviewer.get("user_id"),

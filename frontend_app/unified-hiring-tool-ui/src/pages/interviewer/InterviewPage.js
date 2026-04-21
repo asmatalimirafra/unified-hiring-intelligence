@@ -98,10 +98,18 @@ function InterviewPage() {
   // ── Filter from cached list when role changes, and after feedback submit ──
   const fetchCandidates = (roleId) => {
     const role = allAssignedCandidates.filter(c => String(c.applied_role_id) === String(roleId));
-    // ✅ Pending = not yet selected or rejected by HR (regardless of rounds done)
-    setPendingCandidates(role.filter(c => !c.candidate_selected && !c.candidate_rejected));
-    // ✅ Completed = HR has made a final verdict (selected or rejected)
-    setCompletedCandidates(role.filter(c => c.candidate_selected || c.candidate_rejected));
+
+    // Pending   = Scheduled AND no feedback given yet for this round
+    //             (feedback_given flag is set after interviewer submits feedback)
+    // Completed = feedback has been given for the scheduled round
+    //             Edit button is shown here — no further feedback allowed
+    //             until HR re-schedules a new round
+    setPendingCandidates(role.filter(c =>
+      c.status === "Scheduled" && !c.feedback_given
+    ));
+    setCompletedCandidates(role.filter(c =>
+      c.feedback_given === true
+    ));
   };
 
   useEffect(() => {
@@ -216,10 +224,14 @@ function InterviewPage() {
         fd.append("problem_solving",  p);
         fd.append("comments",         form.comments.trim());
         await axios.post(`${BASE_URL}/add-interview/`, fd, axiosConfig);
-        // ✅ Do NOT mark interview_completed here.
-        // Candidate stays in Pending so HR can schedule L2, L3, etc.
-        // interview_completed is only set when HR explicitly checks verdict.
-        showSuccess(`✅ Feedback for Round L${form.round} submitted! Candidate remains in Pending for next round.`);
+        // ✅ Mark feedback_given = true so candidate moves to Completed section.
+        // HR must re-schedule to create a new round — this resets feedback_given.
+        await axios.put(
+          `${BASE_URL}/update-candidate/${modal.candidate.candidate_id}`,
+          { feedback_given: true },
+          axiosConfig
+        );
+        showSuccess(`✅ Feedback for Round L${form.round} submitted! Candidate moved to Completed.`);
       }
       closeModal();
       // Re-fetch from backend to refresh allAssignedCandidates
@@ -419,20 +431,22 @@ function InterviewPage() {
                     <th>Candidate</th>
                     <th>Assigned By (HR)</th>
                     <th>Resume</th>
-                    <th>Score</th>
+                    <th>Rounds Done</th>
+                    <th>Overall Score</th>
                     <th>Recommendation</th>
-                    <th>Edit Feedback</th>
+                    <th>Edit Round Feedback</th>
                   </tr>
                 </thead>
                 <tbody>
                   {completedCandidates.length === 0 ? (
                     <tr>
-                      <td colSpan="6" className="empty-row">No completed interviews yet.</td>
+                      <td colSpan="7" className="empty-row">No completed interviews yet.</td>
                     </tr>
                   ) : (
                     completedCandidates.map(c => {
-                      const avg  = getOverallAvg(c.interviews || []);
-                      const hire = avg !== null ? getHireLabel(avg) : null;
+                      const avg       = getOverallAvg(c.interviews || []);
+                      const hire      = avg !== null ? getHireLabel(avg) : null;
+                      const interviews = [...(c.interviews || [])].sort((a, b) => a.round - b.round);
                       return (
                         <tr key={c.candidate_id}>
                           <td>
@@ -456,6 +470,16 @@ function InterviewPage() {
                               View PDF
                             </a>
                           </td>
+                          {/* ✅ Show count of completed rounds */}
+                          <td>
+                            {interviews.length > 0
+                              ? interviews.map(i => (
+                                  <span key={i.round} className="round-pill" style={{ marginRight: 4 }}>
+                                    L{i.round}: {getRoundAvg(c.interviews, i.round)}
+                                  </span>
+                                ))
+                              : "—"}
+                          </td>
                           <td>
                             {avg !== null
                               ? <span className="avg-score">{avg.toFixed(2)} / 5</span>
@@ -466,14 +490,20 @@ function InterviewPage() {
                               ? <span className={`hire-badge ${hire.cls}`}>{hire.label}</span>
                               : "—"}
                           </td>
+                          {/* ✅ Edit button per round — no Give Feedback here */}
                           <td>
-                            <button
-                              className="btn-edit-feedback"
-                              onClick={() => openEditModal(c, (c.interviews || [])[0]?.round ?? 1)}
-                              title="Edit feedback"
-                            >
-                              ✏️ Edit
-                            </button>
+                            <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
+                              {interviews.map(i => (
+                                <button
+                                  key={i.round}
+                                  className="btn-edit-feedback"
+                                  onClick={() => openEditModal(c, i.round)}
+                                  title={`Edit Round L${i.round} feedback`}
+                                >
+                                  ✏️ L{i.round}
+                                </button>
+                              ))}
+                            </div>
                           </td>
                         </tr>
                       );
