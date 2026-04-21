@@ -80,7 +80,7 @@ async def add_role(
     role_id: str = Form(...),
     role: str = Form(...),
     positions: int = Form(...),
-    hr_id: Optional[str] = Form(None),          # ← NEW: HR account isolation
+    hr_id: Optional[str] = Form(None),
     jd_text: Optional[str] = Form(None),
     jd_file: Optional[UploadFile] = Form(None)
 ):
@@ -173,14 +173,15 @@ async def add_candidate(
     name: str = Form(...),
     applied_role: str = Form(...),
     resume_file: UploadFile = Form(...),
-    hr_id: Optional[str] = Form(None)           # ← NEW: tag candidate to HR
+    hr_id: Optional[str] = Form(None)
 ):
     if not resume_file.filename.endswith((".pdf", ".docx")):
         raise HTTPException(status_code=400, detail="Only PDF and DOCX files are supported.")
 
     file_bytes = await resume_file.read()
 
-    applied_role_id = get_role_id_by_name(applied_role)
+    # ✅ FIX: Pass hr_id so name clash between HR accounts is avoided
+    applied_role_id = get_role_id_by_name(applied_role, hr_id=hr_id)
     if applied_role_id is None:
         raise HTTPException(status_code=404, detail=f"Role '{applied_role}' not found.")
 
@@ -215,7 +216,7 @@ async def add_candidate(
         location=location,
         phone=phone,
         timestamp=datetime.now(),
-        hr_id=hr_id                             # ← pass through
+        hr_id=hr_id
     )
 
     if mongo_status is None:
@@ -271,7 +272,7 @@ async def get_resume(candidate_id: str):
     )
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# USERS  (used by interviewer portal to show which HR sent a candidate)
+# USERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @app.get("/get-users/")
@@ -281,7 +282,7 @@ async def get_users():
     return users
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SCHEDULE INTERVIEW  (HR schedules → candidate goes to specific interviewer)
+# SCHEDULE INTERVIEW
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @app.post("/schedule-interview/", status_code=200)
@@ -293,15 +294,10 @@ async def schedule_interview(
     hr_id: Optional[str] = Body(None),
     hr_name: Optional[str] = Body(None),
 ):
-    """
-    HR schedules a candidate for a specific interviewer.
-    Stores interviewer email, date/time, meeting link, and which HR scheduled it.
-    """
     candidate = candidates_collection.find_one({"candidate_id": candidate_id})
     if not candidate:
         raise HTTPException(status_code=404, detail=f"Candidate '{candidate_id}' not found.")
 
-    # Verify the interviewer email exists
     interviewer = users_collection.find_one({"email": interviewer_email, "role": "Interviewer"})
     if not interviewer:
         raise HTTPException(status_code=404, detail=f"No interviewer account found with email '{interviewer_email}'. Please check the email and try again.")
@@ -350,15 +346,11 @@ async def unschedule_interview(candidate_id: str = Body(...)):
 
 @app.get("/get-interviewer-candidates/{email}")
 async def get_interviewer_candidates(email: str):
-    """
-    Interviewer portal: returns only candidates scheduled for this interviewer.
-    Uses interviewer's login email.
-    """
     candidates = get_candidates_for_interviewer(email)
     return candidates
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# INTERVIEWERS LIST  (HR uses this to pick interviewer when scheduling)
+# INTERVIEWERS LIST
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @app.get("/get-interviewers/")
@@ -553,7 +545,7 @@ async def login_user(email: str = Form(...), password: str = Form(...)):
         "user_id": user["user_id"],
         "name": user["name"],
         "role": user["role"],
-        "email": user["email"]       # ← ensure email is returned for interviewer filtering
+        "email": user["email"]
     }
 
 # ═══════════════════════════════════════════════════════════════════════════════

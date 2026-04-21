@@ -17,8 +17,15 @@ interviewers_collection.create_index("interviewer_id", unique=True)
 users_collection.create_index("user_id", unique=True)
 roles_collection.create_index("role_id", unique=True)
 
-def get_role_id_by_name(role_name):
-    result = roles_collection.find_one({"role": role_name})
+def get_role_id_by_name(role_name, hr_id=None):
+    """
+    Look up a role by name. If hr_id is provided, restrict to that HR's roles
+    to avoid name clashes between different HR accounts.
+    """
+    query = {"role": role_name}
+    if hr_id:
+        query["hr_id"] = hr_id
+    result = roles_collection.find_one(query)
     return result["role_id"] if result else None
 
 # ── ROLES ──────────────────────────────────────────────────────────────────────
