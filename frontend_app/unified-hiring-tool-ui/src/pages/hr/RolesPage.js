@@ -121,10 +121,16 @@ function RolesPage() {
   const handleDelete = async (role_id) => {
     if (window.confirm('Are you sure you want to delete this role?')) {
       try {
-        await axios.delete(`${BASE_URL}/delete-role/${role_id}`);
+        await axios.delete(`${BASE_URL}/delete-role/${role_id}`, {
+          headers: { "ngrok-skip-browser-warning": "true" }
+        });
         fetchRoles();
+        alert('Role deleted successfully.');
       } catch (err) {
         console.error('Error deleting role:', err);
+        // ✅ Show the exact backend error (e.g. "cannot delete — interviews scheduled")
+        const msg = err.response?.data?.detail || 'Failed to delete role. Please try again.';
+        alert(`❌ ${msg}`);
       }
     }
   };

@@ -151,6 +151,18 @@ async def update_role_api(role_id: str, update_data: dict = Body(...)):
 
 @app.delete("/delete-role/{role_id}")
 async def delete_role_api(role_id: str):
+    # ✅ Block deletion if any candidate for this role has a scheduled interview
+    scheduled_count = candidates_collection.count_documents({
+        "applied_role_id": role_id,
+        "status": "Scheduled"
+    })
+    if scheduled_count > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete this role — {scheduled_count} candidate(s) have a scheduled interview for it. "
+                   f"Cancel or complete those interviews first."
+        )
+
     deleted = delete_role(role_id)
     if deleted:
         delete_jd_vector(int(role_id))
