@@ -270,11 +270,33 @@ async def select_candidate(candidate_id: str):
     """HR marks a candidate as selected after all interview rounds."""
     result = candidates_collection.update_one(
         {"candidate_id": candidate_id},
-        {"$set": {"candidate_selected": True}}
+        {"$set": {"candidate_selected": True, "candidate_rejected": False}}
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail=f"Candidate '{candidate_id}' not found.")
     return {"message": f"Candidate {candidate_id} marked as selected."}
+
+@app.post("/reject-candidate/{candidate_id}", status_code=200)
+async def reject_candidate(candidate_id: str):
+    """HR marks a candidate as rejected after checking verdict."""
+    result = candidates_collection.update_one(
+        {"candidate_id": candidate_id},
+        {"$set": {"candidate_rejected": True, "candidate_selected": False}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail=f"Candidate '{candidate_id}' not found.")
+    return {"message": f"Candidate {candidate_id} marked as rejected."}
+
+@app.post("/undo-candidate-verdict/{candidate_id}", status_code=200)
+async def undo_candidate_verdict(candidate_id: str):
+    """Move a selected or rejected candidate back to Pending."""
+    result = candidates_collection.update_one(
+        {"candidate_id": candidate_id},
+        {"$set": {"candidate_selected": False, "candidate_rejected": False}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail=f"Candidate '{candidate_id}' not found.")
+    return {"message": f"Candidate {candidate_id} moved back to Pending."}
 
 @app.delete("/delete-candidate/{candidate_id}")
 async def delete_candidate_api(candidate_id: str):
@@ -768,14 +790,3 @@ async def interviewer_chat(request: dict):
         media_type="text/plain",
         headers={"X-Thread-Id": thread_id}
     )
-
-
-@app.post("/reject-candidate/{candidate_id}", status_code=200)
-async def reject_candidate(candidate_id: str):
-    result = candidates_collection.update_one(
-        {"candidate_id": candidate_id},
-        {"$set": {"candidate_rejected": True}}
-    )
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail=f"Candidate '{candidate_id}' not found.")
-    return {"message": f"Candidate {candidate_id} marked as rejected."}

@@ -98,8 +98,10 @@ function InterviewPage() {
   // ── Filter from cached list when role changes, and after feedback submit ──
   const fetchCandidates = (roleId) => {
     const role = allAssignedCandidates.filter(c => String(c.applied_role_id) === String(roleId));
-    setPendingCandidates(role.filter(c => c.interview_completed !== true));
-    setCompletedCandidates(role.filter(c => c.interview_completed === true));
+    // ✅ Pending = not yet selected or rejected by HR (regardless of rounds done)
+    setPendingCandidates(role.filter(c => !c.candidate_selected && !c.candidate_rejected));
+    // ✅ Completed = HR has made a final verdict (selected or rejected)
+    setCompletedCandidates(role.filter(c => c.candidate_selected || c.candidate_rejected));
   };
 
   useEffect(() => {
@@ -214,13 +216,10 @@ function InterviewPage() {
         fd.append("problem_solving",  p);
         fd.append("comments",         form.comments.trim());
         await axios.post(`${BASE_URL}/add-interview/`, fd, axiosConfig);
-        // Auto-move to completed
-        await axios.put(
-          `${BASE_URL}/update-candidate/${modal.candidate.candidate_id}`,
-          { interview_completed: true },
-          axiosConfig
-        );
-        showSuccess("Feedback submitted! Candidate moved to Completed.");
+        // ✅ Do NOT mark interview_completed here.
+        // Candidate stays in Pending so HR can schedule L2, L3, etc.
+        // interview_completed is only set when HR explicitly checks verdict.
+        showSuccess(`✅ Feedback for Round L${form.round} submitted! Candidate remains in Pending for next round.`);
       }
       closeModal();
       // Re-fetch from backend to refresh allAssignedCandidates
@@ -284,6 +283,7 @@ function InterviewPage() {
                 <thead>
                   <tr>
                     <th>Candidate</th>
+                    <th>Round</th>
                     <th>Assigned By (HR)</th>
                     <th>Date & Time</th>
                     <th>Meeting Link</th>
@@ -295,7 +295,7 @@ function InterviewPage() {
                 <tbody>
                   {pendingCandidates.length === 0 ? (
                     <tr>
-                      <td colSpan="7" className="empty-row">
+                      <td colSpan="8" className="empty-row">
                         No pending candidates assigned to you.
                       </td>
                     </tr>
@@ -309,6 +309,22 @@ function InterviewPage() {
                           <td>
                             <div className="cand-name">{c.name}</div>
                             <div className="cand-id">{c.candidate_id}</div>
+                          </td>
+
+                          {/* ✅ Current round being interviewed */}
+                          <td>
+                            {(() => {
+                              const completedRounds = (c.interviews || []).length;
+                              const nextRound = completedRounds + 1;
+                              return (
+                                <span className="round-label">
+                                  L{nextRound}
+                                  {completedRounds > 0 &&
+                                    <span className="rounds-done-hint"> ({completedRounds} done)</span>
+                                  }
+                                </span>
+                              );
+                            })()}
                           </td>
 
                           {/* HR who scheduled */}
