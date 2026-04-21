@@ -418,17 +418,22 @@ async def schedule_interview(
 
 
 @app.post("/unschedule-interview/", status_code=200)
-async def unschedule_interview(candidate_id: str = Body(...)):
+async def unschedule_interview(payload: dict = Body(...)):
     """Remove scheduling from a candidate — moves them back to unscheduled."""
+    candidate_id = payload.get("candidate_id")
+    if not candidate_id:
+        raise HTTPException(status_code=422, detail="candidate_id is required.")
+
     candidate = candidates_collection.find_one({"candidate_id": candidate_id})
     if not candidate:
         raise HTTPException(status_code=404, detail=f"Candidate '{candidate_id}' not found.")
 
+    # Unset status and interview_details so candidate goes back to clean Pending state
     candidates_collection.update_one(
         {"candidate_id": candidate_id},
         {"$unset": {"status": "", "interview_details": ""}}
     )
-    return {"message": f"Candidate {candidate_id} unscheduled."}
+    return {"message": f"Candidate {candidate_id} unscheduled successfully."}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # INTERVIEWER — fetch only assigned candidates

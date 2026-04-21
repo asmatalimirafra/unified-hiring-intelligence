@@ -203,8 +203,9 @@ export default function ScheduleInterview() {
     try {
       await axios.post(`${BASE_URL}/unschedule-interview/`, { candidate_id: candidate.candidate_id }, axiosConfig);
       fetchCandidates();
-    } catch {
-      alert('Failed to cancel interview. Please try again.');
+    } catch (err) {
+      const msg = err.response?.data?.detail || 'Failed to cancel interview. Please try again.';
+      alert(`❌ ${msg}`);
     }
   };
 
