@@ -192,13 +192,23 @@ function ViewCandidates() {
                   </button>
                 </td>
                 <td>
-                  <button
-                    className="btn btn-outline-success btn-sm"
-                    title="Schedule Interview"
-                    onClick={() => openScheduleModal(c)}
-                  >
-                    <FaCalendarPlus />
-                  </button>
+                  {c.status === 'Scheduled' ? (
+                    <span
+                      className="badge bg-success"
+                      style={{ fontSize: '0.75rem', padding: '0.4rem 0.6rem', cursor: 'default' }}
+                      title={`Scheduled with ${c.interview_details?.interviewer_email || 'interviewer'}`}
+                    >
+                      ✓ Scheduled
+                    </span>
+                  ) : (
+                    <button
+                      className="btn btn-outline-success btn-sm"
+                      title="Schedule Interview"
+                      onClick={() => openScheduleModal(c)}
+                    >
+                      <FaCalendarPlus />
+                    </button>
+                  )}
                 </td>
                 <td>
                   <button

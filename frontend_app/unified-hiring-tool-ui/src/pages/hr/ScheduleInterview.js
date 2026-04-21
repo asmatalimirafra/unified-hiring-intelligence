@@ -21,7 +21,7 @@ export default function ScheduleInterview() {
   const [selectedRoleId, setSelectedRoleId] = useState('');
 
   // ── Modal state ──────────────────────────────────────────────────────────
-  const [modal, setModal] = useState({ open: false, candidate: null });
+  const [modal, setModal] = useState({ open: false, candidate: null, isEditing: false });
   const [form,  setForm]  = useState({
     interviewer_email: '',
     scheduled_datetime: '',
@@ -70,15 +70,35 @@ export default function ScheduleInterview() {
     ? scheduled.filter(c => String(c.applied_role_id) === String(selectedRoleId))
     : scheduled;
 
-  // ── Open modal ────────────────────────────────────────────────────────────
+  // ── Open modal for new schedule ───────────────────────────────────────────
   const openModal = (candidate) => {
-    setModal({ open: true, candidate });
+    setModal({ open: true, candidate, isEditing: false });
     setForm({ interviewer_email: '', scheduled_datetime: '', meeting_link: '' });
     setStatusMsg('');
     setStatusType('');
   };
 
-  // ── Submit schedule ───────────────────────────────────────────────────────
+  // ── Open modal pre-filled for editing existing schedule ───────────────────
+  const openEditModal = (candidate) => {
+    const d = candidate.interview_details || {};
+    // Convert ISO datetime to datetime-local format (YYYY-MM-DDTHH:mm)
+    let dt = '';
+    if (d.scheduled_datetime) {
+      try { dt = new Date(d.scheduled_datetime).toISOString().slice(0, 16); } catch {}
+    }
+    setModal({ open: true, candidate, isEditing: true });
+    setForm({
+      interviewer_email: d.interviewer_email || '',
+      scheduled_datetime: dt,
+      meeting_link: d.meeting_link || '',
+    });
+    setStatusMsg('');
+    setStatusType('');
+  };
+
+  const closeModal = () => setModal({ open: false, candidate: null, isEditing: false });
+
+  // ── Submit schedule (both new and edit) ──────────────────────────────────
   const handleSchedule = async () => {
     if (!form.interviewer_email.trim()) {
       setStatusMsg('Please enter the interviewer email.');
@@ -92,29 +112,29 @@ export default function ScheduleInterview() {
     }
 
     setSubmitting(true);
-    setStatusMsg('Scheduling...');
+    setStatusMsg(modal.isEditing ? 'Updating...' : 'Scheduling...');
     setStatusType('info');
 
     try {
       await axios.post(
         `${BASE_URL}/schedule-interview/`,
         {
-          candidate_id:        modal.candidate.candidate_id,
-          interviewer_email:   form.interviewer_email.trim(),
-          scheduled_datetime:  form.scheduled_datetime,
-          meeting_link:        form.meeting_link.trim(),
-          hr_id:               hrId,
-          hr_name:             hrName,
+          candidate_id:       modal.candidate.candidate_id,
+          interviewer_email:  form.interviewer_email.trim(),
+          scheduled_datetime: form.scheduled_datetime,
+          meeting_link:       form.meeting_link.trim(),
+          hr_id:              hrId,
+          hr_name:            hrName,
         },
         axiosConfig
       );
 
-      setStatusMsg('✅ Interview scheduled successfully!');
+      setStatusMsg(modal.isEditing ? '✅ Schedule updated successfully!' : '✅ Interview scheduled successfully!');
       setStatusType('success');
 
       setTimeout(() => {
-        setModal({ open: false, candidate: null });
-        fetchCandidates(); // refresh both lists
+        closeModal();
+        fetchCandidates();
       }, 1200);
     } catch (err) {
       const msg = err.response?.data?.detail || 'Failed to schedule. Please check the interviewer email.';
@@ -240,7 +260,7 @@ export default function ScheduleInterview() {
                 <th>Interviewer Email</th>
                 <th>Date & Time</th>
                 <th>Meeting Link</th>
-                <th>Unschedule</th>
+                <th>Edit</th>
               </tr>
             </thead>
             <tbody>
@@ -259,8 +279,8 @@ export default function ScheduleInterview() {
                     ) : '—'}
                   </td>
                   <td>
-                    <button className="btn-unschedule" onClick={() => handleUnschedule(c)}>
-                      ✕ Remove
+                    <button className="btn-edit" onClick={() => openEditModal(c)}>
+                      ✏️ Edit
                     </button>
                   </td>
                 </tr>
@@ -270,19 +290,18 @@ export default function ScheduleInterview() {
         )}
       </section>
 
-      {/* ── Schedule Modal ───────────────────────────────────────────────── */}
       {modal.open && modal.candidate && (
-        <div className="modal-backdrop" onClick={() => setModal({ open: false, candidate: null })}>
+        <div className="modal-backdrop" onClick={closeModal}>
           <div className="modal-box" onClick={e => e.stopPropagation()}>
 
             <div className="modal-header">
               <div>
-                <h3>Schedule Interview</h3>
+                <h3>{modal.isEditing ? 'Edit Schedule' : 'Schedule Interview'}</h3>
                 <p className="modal-sub">
                   <strong>{modal.candidate.name}</strong> &nbsp;·&nbsp; {modal.candidate.applied_role}
                 </p>
               </div>
-              <button className="modal-close" onClick={() => setModal({ open: false, candidate: null })}>✕</button>
+              <button className="modal-close" onClick={closeModal}>✕</button>
             </div>
 
             <div className="modal-body">
@@ -323,19 +342,13 @@ export default function ScheduleInterview() {
             </div>
 
             <div className="modal-footer">
-              <button
-                className="btn-cancel"
-                onClick={() => setModal({ open: false, candidate: null })}
-                disabled={submitting}
-              >
+              <button className="btn-cancel" onClick={closeModal} disabled={submitting}>
                 Cancel
               </button>
-              <button
-                className="btn-confirm"
-                onClick={handleSchedule}
-                disabled={submitting}
-              >
-                {submitting ? 'Scheduling...' : '📅 Confirm Schedule'}
+              <button className="btn-confirm" onClick={handleSchedule} disabled={submitting}>
+                {submitting
+                  ? (modal.isEditing ? 'Updating...' : 'Scheduling...')
+                  : (modal.isEditing ? '✏️ Update Schedule' : '📅 Confirm Schedule')}
               </button>
             </div>
 

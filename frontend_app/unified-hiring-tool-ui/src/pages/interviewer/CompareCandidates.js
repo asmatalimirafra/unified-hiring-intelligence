@@ -155,9 +155,14 @@ function CompareCandidates() {
                 </tr>
               ) : (
                 candidates.map((c) => {
-                  const hrName = hrMap[c.hr_id] || c.hr_id || '—';
-                  const scheduledDate = c.interview_details?.scheduled_date
-                    ? new Date(c.interview_details.scheduled_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                  const hrName = c.interview_details?.scheduled_by_hr_name
+                    || hrMap[c.hr_id]
+                    || c.hr_id
+                    || '—';
+                  const rawDt = c.interview_details?.scheduled_datetime
+                    || c.interview_details?.scheduled_date;
+                  const scheduledDate = rawDt
+                    ? new Date(rawDt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
                     : '—';
 
                   return (

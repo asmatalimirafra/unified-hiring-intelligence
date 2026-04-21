@@ -170,6 +170,22 @@
   background: #fde8ea;
 }
 
+.btn-edit {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-edit:hover {
+  background: #dbeafe;
+}
+
 /* ── Modal backdrop ─────────────────────────────────────────────────────── */
 .modal-backdrop {
   position: fixed;

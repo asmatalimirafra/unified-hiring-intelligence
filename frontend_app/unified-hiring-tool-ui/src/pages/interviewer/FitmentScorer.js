@@ -187,9 +187,16 @@ function FitmentScorer() {
                 {candidates.map(candidate => {
                   const cachedScore  = inlineScores[candidate.candidate_id];
                   const isRescoring  = rescoringId === candidate.candidate_id;
-                  const hrName       = hrMap[candidate.hr_id] || candidate.hr_id || '—';
-                  const scheduledDate = candidate.interview_details?.scheduled_date
-                    ? new Date(candidate.interview_details.scheduled_date).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })
+                  // HR name: prefer what's stored directly on interview_details, fall back to hrMap lookup
+                  const hrName = candidate.interview_details?.scheduled_by_hr_name
+                    || hrMap[candidate.hr_id]
+                    || candidate.hr_id
+                    || '—';
+                  // Support both field names: scheduled_datetime (new) and scheduled_date (old)
+                  const rawDt = candidate.interview_details?.scheduled_datetime
+                    || candidate.interview_details?.scheduled_date;
+                  const scheduledDate = rawDt
+                    ? new Date(rawDt).toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })
                     : '—';
 
                   return (

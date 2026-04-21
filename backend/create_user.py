@@ -26,6 +26,14 @@ users_to_add = [
         "password": "Tejdeep",
         "role": "Interviewer",
         "department": "Android"
+    },
+    {
+        "user_id": "INT-004",
+        "name": "Tarapuram Tejdeep1",
+        "email": "tejdeepu1@company.com",
+        "password": "Tejdeep1",
+        "role": "Interviewer",
+        "department": "Android"
     }
 ]
 
