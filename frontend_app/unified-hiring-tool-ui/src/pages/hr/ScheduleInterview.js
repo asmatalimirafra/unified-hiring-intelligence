@@ -40,7 +40,7 @@ export default function ScheduleInterview() {
   const [allCands, setAllCands] = useState([]);
   const [selectedRoleId, setSelectedRoleId] = useState('');
 
-  const [modal,      setModal]      = useState({ open: false, candidate: null, isEditing: false });
+  const [modal,      setModal]      = useState({ open: false, candidate: null });
   const [form,       setForm]       = useState({ interviewer_email: '', scheduled_datetime: '', meeting_link: '' });
   const [submitting, setSubmitting] = useState(false);
   const [statusMsg,  setStatusMsg]  = useState('');
@@ -78,16 +78,19 @@ export default function ScheduleInterview() {
   const applyRoleFilter = (c) =>
     !selectedRoleId || String(c.applied_role_id) === String(selectedRoleId);
 
+  // Pending = open role, not selected, not rejected
   const pending = allCands.filter(c =>
     openRoleIds.has(String(c.applied_role_id)) &&
     !c.candidate_selected &&
-    c.status !== 'Scheduled' &&
+    !c.candidate_rejected &&
     applyRoleFilter(c)
   );
 
-  const scheduled = allCands.filter(c =>
+  // Scheduled = status "Scheduled", not yet selected/rejected
+  const scheduledRows = allCands.filter(c =>
     c.status === 'Scheduled' &&
     !c.candidate_selected &&
+    !c.candidate_rejected &&
     applyRoleFilter(c)
   );
 
@@ -95,26 +98,21 @@ export default function ScheduleInterview() {
     c.candidate_selected && applyRoleFilter(c)
   );
 
+  // ✅ NEW: Rejected section
+  const rejected = allCands.filter(c =>
+    c.candidate_rejected && applyRoleFilter(c)
+  );
+
   // ── Modal helpers ─────────────────────────────────────────────────────────
   const openModal = (candidate) => {
-    setModal({ open: true, candidate, isEditing: false });
+    setModal({ open: true, candidate });
     setForm({ interviewer_email: '', scheduled_datetime: '', meeting_link: '' });
     setStatusMsg(''); setStatusType('');
   };
 
-  const openEditModal = (candidate) => {
-    const d = candidate.interview_details || {};
-    let dt = '';
-    if (d.scheduled_datetime) {
-      try { dt = new Date(d.scheduled_datetime).toISOString().slice(0, 16); } catch {}
-    }
-    setModal({ open: true, candidate, isEditing: true });
-    setForm({ interviewer_email: d.interviewer_email || '', scheduled_datetime: dt, meeting_link: d.meeting_link || '' });
-    setStatusMsg(''); setStatusType('');
-  };
+  const closeModal = () => setModal({ open: false, candidate: null });
 
-  const closeModal = () => setModal({ open: false, candidate: null, isEditing: false });
-
+  // ── Schedule next round ───────────────────────────────────────────────────
   const handleSchedule = async () => {
     if (!form.interviewer_email.trim()) {
       setStatusMsg('Please enter the interviewer email.'); setStatusType('error'); return;
@@ -123,7 +121,7 @@ export default function ScheduleInterview() {
       setStatusMsg('Please select a date and time.'); setStatusType('error'); return;
     }
     setSubmitting(true);
-    setStatusMsg(modal.isEditing ? 'Updating...' : 'Scheduling...'); setStatusType('info');
+    setStatusMsg('Scheduling...'); setStatusType('info');
     try {
       await axios.post(`${BASE_URL}/schedule-interview/`, {
         candidate_id:       modal.candidate.candidate_id,
@@ -133,7 +131,7 @@ export default function ScheduleInterview() {
         hr_id:              hrId,
         hr_name:            hrName,
       }, axiosConfig);
-      setStatusMsg(modal.isEditing ? '✅ Updated!' : '✅ Scheduled!');
+      setStatusMsg('✅ Scheduled!');
       setStatusType('success');
       setTimeout(() => { closeModal(); fetchCandidates(); }, 1200);
     } catch (err) {
@@ -142,12 +140,33 @@ export default function ScheduleInterview() {
     } finally { setSubmitting(false); }
   };
 
-  const handleSelect = async (candidate) => {
-    if (!window.confirm(`Select "${candidate.name}" as a final candidate?`)) return;
+  // ── Check Verdict: avg >= 3 → Selected, else → Rejected ──────────────────
+  const handleCheckVerdict = async (candidate) => {
+    const avg = getOverallAvg(candidate.interviews || []);
+
+    if (avg === null) {
+      alert('No interview rounds completed yet. Cannot check verdict.');
+      return;
+    }
+
+    const verdict   = getVerdictLabel(avg);
+    const isSelected = avg >= 3;
+    const confirmMsg = isSelected
+      ? `Avg score: ${avg.toFixed(2)}/5 — ${verdict.label}\n\nMove "${candidate.name}" to Selected?`
+      : `Avg score: ${avg.toFixed(2)}/5 — ${verdict.label}\n\nScore is below 3. Move "${candidate.name}" to Rejected?`;
+
+    if (!window.confirm(confirmMsg)) return;
+
     try {
-      await axios.post(`${BASE_URL}/select-candidate/${candidate.candidate_id}`, {}, axiosConfig);
+      if (isSelected) {
+        await axios.post(`${BASE_URL}/select-candidate/${candidate.candidate_id}`, {}, axiosConfig);
+      } else {
+        await axios.post(`${BASE_URL}/reject-candidate/${candidate.candidate_id}`, {}, axiosConfig);
+      }
       fetchCandidates();
-    } catch { alert('Failed to select candidate. Please try again.'); }
+    } catch {
+      alert('Failed to update candidate status. Please try again.');
+    }
   };
 
   const formatDateTime = (dt) => {
@@ -196,8 +215,8 @@ export default function ScheduleInterview() {
                 <th>Avg Score</th>
                 <th>Verdict</th>
                 <th>Resume</th>
-                <th>Schedule</th>
-                <th>Select</th>
+                <th>Add Interview</th>
+                <th>Check Verdict</th>
               </tr>
             </thead>
             <tbody>
@@ -205,10 +224,11 @@ export default function ScheduleInterview() {
                 const avg       = getOverallAvg(c.interviews || []);
                 const verdict   = getVerdictLabel(avg);
                 const nextRound = getNextRound(c.interviews || []);
-                const canSelect = avg !== null && avg > 3;
                 const lastRound = (c.interviews || []).length > 0
                   ? Math.max(...(c.interviews || []).map(i => i.round))
                   : null;
+                const hasRounds = avg !== null;
+
                 return (
                   <tr key={c.candidate_id}>
                     <td>{c.candidate_id}</td>
@@ -224,9 +244,10 @@ export default function ScheduleInterview() {
                         ? <strong>{avg.toFixed(2)} / 5</strong>
                         : <span className="no-score">—</span>}
                     </td>
+                    {/* ✅ Verdict as small inline text tag, not big badge */}
                     <td>
                       {verdict
-                        ? <span className={`verdict-badge ${verdict.cls}`}>{verdict.label}</span>
+                        ? <span className={`verdict-tag ${verdict.cls}`}>{verdict.label}</span>
                         : '—'}
                     </td>
                     <td>
@@ -238,19 +259,21 @@ export default function ScheduleInterview() {
                         View PDF
                       </a>
                     </td>
+                    {/* ✅ Always "Add Interview" — schedules the next round */}
                     <td>
                       <button className="btn-schedule" onClick={() => openModal(c)}>
-                        📅 L{nextRound}
+                        ➕ L{nextRound}
                       </button>
                     </td>
+                    {/* ✅ "Check Verdict" — routes to Selected or Rejected based on avg */}
                     <td>
                       <button
-                        className={`btn-select ${canSelect ? 'btn-select-active' : 'btn-select-disabled'}`}
-                        onClick={() => canSelect && handleSelect(c)}
-                        disabled={!canSelect}
-                        title={canSelect ? 'Select this candidate' : 'Avg score must be > 3 to select'}
+                        className={`btn-verdict ${hasRounds ? 'btn-verdict-active' : 'btn-verdict-disabled'}`}
+                        onClick={() => hasRounds && handleCheckVerdict(c)}
+                        disabled={!hasRounds}
+                        title={hasRounds ? 'Check verdict based on avg score' : 'Complete at least one interview round first'}
                       >
-                        ✅ Select
+                        🔍 Check Verdict
                       </button>
                     </td>
                   </tr>
@@ -266,10 +289,10 @@ export default function ScheduleInterview() {
         <div className="section-header">
           <span className="section-icon">📅</span>
           <h3>Scheduled Interviews</h3>
-          <span className="count-badge">{scheduled.length}</span>
+          <span className="count-badge">{scheduledRows.length}</span>
         </div>
 
-        {scheduled.length === 0 ? (
+        {scheduledRows.length === 0 ? (
           <p className="empty-msg">No scheduled interviews{selectedRoleId ? ' for this role' : ''}.</p>
         ) : (
           <table className="schedule-table">
@@ -279,21 +302,28 @@ export default function ScheduleInterview() {
                 <th>Name</th>
                 <th>Applied Role</th>
                 <th>Round Scheduled</th>
+                <th>Rounds Completed</th>
                 <th>Interviewer</th>
                 <th>Date & Time</th>
                 <th>Meeting Link</th>
-                <th>Edit</th>
               </tr>
             </thead>
             <tbody>
-              {scheduled.map(c => {
-                const nextRound = getNextRound(c.interviews || []);
+              {scheduledRows.map(c => {
+                // ✅ Round Scheduled = next round number (increases as rounds are completed)
+                const nextRound       = getNextRound(c.interviews || []);
+                const completedRounds = (c.interviews || []).length;
                 return (
                   <tr key={c.candidate_id}>
                     <td>{c.candidate_id}</td>
                     <td>{c.name}</td>
                     <td>{getRoleName(c.applied_role_id) || c.applied_role}</td>
                     <td><span className="round-pill">L{nextRound}</span></td>
+                    <td>
+                      {completedRounds > 0
+                        ? <span className="round-pill completed">L{completedRounds} done</span>
+                        : <span className="no-rounds">None yet</span>}
+                    </td>
                     <td>{c.interview_details?.interviewer_email || '—'}</td>
                     <td>{formatDateTime(c.interview_details?.scheduled_datetime)}</td>
                     <td>
@@ -302,9 +332,6 @@ export default function ScheduleInterview() {
                           Join 🔗
                         </a>
                       ) : '—'}
-                    </td>
-                    <td>
-                      <button className="btn-edit" onClick={() => openEditModal(c)}>✏️ Edit</button>
                     </td>
                   </tr>
                 );
@@ -350,7 +377,7 @@ export default function ScheduleInterview() {
                     <td>{avg !== null ? <strong>{avg.toFixed(2)} / 5</strong> : '—'}</td>
                     <td>
                       {verdict
-                        ? <span className={`verdict-badge ${verdict.cls}`}>{verdict.label}</span>
+                        ? <span className={`verdict-tag ${verdict.cls}`}>{verdict.label}</span>
                         : '—'}
                     </td>
                     <td>
@@ -370,17 +397,69 @@ export default function ScheduleInterview() {
         )}
       </section>
 
-      {/* ── Schedule Modal ────────────────────────────────────────────────── */}
+      {/* ── SECTION 4: Rejected Candidates ───────────────────────────────── */}
+      <section className="section-card rejected-section" style={{ marginTop: '2rem' }}>
+        <div className="section-header">
+          <span className="section-icon">❌</span>
+          <h3>Rejected Candidates</h3>
+          <span className="count-badge rejected-badge">{rejected.length}</span>
+        </div>
+
+        {rejected.length === 0 ? (
+          <p className="empty-msg">No rejected candidates{selectedRoleId ? ' for this role' : ''}.</p>
+        ) : (
+          <table className="schedule-table">
+            <thead>
+              <tr>
+                <th>Candidate ID</th>
+                <th>Name</th>
+                <th>Applied Role</th>
+                <th>Rounds Completed</th>
+                <th>Avg Score</th>
+                <th>Verdict</th>
+                <th>Resume</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rejected.map(c => {
+                const avg     = getOverallAvg(c.interviews || []);
+                const verdict = getVerdictLabel(avg);
+                return (
+                  <tr key={c.candidate_id} className="rejected-row">
+                    <td>{c.candidate_id}</td>
+                    <td>{c.name}</td>
+                    <td>{getRoleName(c.applied_role_id) || c.applied_role}</td>
+                    <td>{(c.interviews || []).length} round(s)</td>
+                    <td>{avg !== null ? <strong>{avg.toFixed(2)} / 5</strong> : '—'}</td>
+                    <td>
+                      {verdict
+                        ? <span className={`verdict-tag ${verdict.cls}`}>{verdict.label}</span>
+                        : '—'}
+                    </td>
+                    <td>
+                      <a
+                        href={`${BASE_URL}/get-resume/${c.candidate_id}?ngrok-skip-browser-warning=true`}
+                        target="_blank" rel="noopener noreferrer"
+                        className="resume-link"
+                      >
+                        View PDF
+                      </a>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      {/* ── Schedule Modal (Add Next Round) ──────────────────────────────── */}
       {modal.open && modal.candidate && (
         <div className="modal-backdrop" onClick={closeModal}>
           <div className="modal-box" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <div>
-                <h3>
-                  {modal.isEditing
-                    ? 'Edit Schedule'
-                    : `Schedule Round L${getNextRound(modal.candidate.interviews || [])}`}
-                </h3>
+                <h3>Schedule Round L{getNextRound(modal.candidate.interviews || [])}</h3>
                 <p className="modal-sub">
                   <strong>{modal.candidate.name}</strong> &nbsp;·&nbsp;
                   {getRoleName(modal.candidate.applied_role_id) || modal.candidate.applied_role}
@@ -421,9 +500,7 @@ export default function ScheduleInterview() {
             <div className="modal-footer">
               <button className="btn-cancel" onClick={closeModal} disabled={submitting}>Cancel</button>
               <button className="btn-confirm" onClick={handleSchedule} disabled={submitting}>
-                {submitting
-                  ? (modal.isEditing ? 'Updating...' : 'Scheduling...')
-                  : (modal.isEditing ? '✏️ Update' : '📅 Confirm Schedule')}
+                {submitting ? 'Scheduling...' : '📅 Confirm Schedule'}
               </button>
             </div>
           </div>

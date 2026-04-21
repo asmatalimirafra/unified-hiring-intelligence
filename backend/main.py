@@ -768,3 +768,14 @@ async def interviewer_chat(request: dict):
         media_type="text/plain",
         headers={"X-Thread-Id": thread_id}
     )
+
+
+@app.post("/reject-candidate/{candidate_id}", status_code=200)
+async def reject_candidate(candidate_id: str):
+    result = candidates_collection.update_one(
+        {"candidate_id": candidate_id},
+        {"$set": {"candidate_rejected": True}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail=f"Candidate '{candidate_id}' not found.")
+    return {"message": f"Candidate {candidate_id} marked as rejected."}
