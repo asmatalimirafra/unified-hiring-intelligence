@@ -83,8 +83,12 @@ function ViewCandidates() {
     ? candidates.filter(c => String(c.applied_role_id) === String(selectedRoleId))
     : [];
 
-  const pending   = filtered.filter(c => c.interview_completed !== true);
-  const completed = filtered.filter(c => c.interview_completed === true);
+  // ✅ Pending = not selected and not rejected (regardless of how many rounds done)
+  // Candidate stays here until HR explicitly presses Check Verdict
+  const pending   = filtered.filter(c => !c.candidate_selected && !c.candidate_rejected);
+
+  // ✅ Completed = HR has made a final verdict (selected or rejected)
+  const completed = filtered.filter(c => c.candidate_selected || c.candidate_rejected);
 
   const pendingRounds   = getAllRounds(pending);
   const completedRounds = getAllRounds(completed);
@@ -103,6 +107,7 @@ function ViewCandidates() {
               <th>Status</th>
               {rounds.map(r => <th key={r}>L{r} Avg</th>)}
               <th>Overall Avg</th>
+              <th>Verdict</th>
               <th>Resume</th>
               <th>Schedule</th>
               <th>Delete</th>
@@ -124,6 +129,14 @@ function ViewCandidates() {
                 </td>
                 {rounds.map(r => <td key={r}>{getAvgScore(c, r)}</td>)}
                 <td><strong>{getOverallAvg(c.interviews || [])}</strong></td>
+                {/* ✅ Verdict column — shows outcome once HR checks verdict */}
+                <td>
+                  {c.candidate_selected
+                    ? <span className="badge bg-success">🏆 Selected</span>
+                    : c.candidate_rejected
+                      ? <span className="badge bg-danger">❌ Rejected</span>
+                      : <span className="badge bg-light text-muted">—</span>}
+                </td>
                 <td>
                   <button
                     className="btn btn-outline-primary btn-sm"
@@ -148,7 +161,6 @@ function ViewCandidates() {
                       ✓ Scheduled
                     </span>
                   ) : (
-                    // ✅ Navigate to Schedule page instead of opening modal
                     <button
                       className="btn btn-outline-success btn-sm"
                       title="Schedule Interview"
@@ -196,8 +208,8 @@ function ViewCandidates() {
 
       {selectedRoleId && (
         <>
-          {renderTable(pending, 'Pending Interviews', pendingRounds)}
-          {renderTable(completed, 'Completed Interviews', completedRounds)}
+          {renderTable(pending,   '⏳ Pending Interviews',   pendingRounds)}
+          {renderTable(completed, '✅ Completed Interviews', completedRounds)}
         </>
       )}
     </div>

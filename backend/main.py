@@ -151,7 +151,9 @@ async def update_role_api(role_id: str, update_data: dict = Body(...)):
 
 @app.delete("/delete-role/{role_id}")
 async def delete_role_api(role_id: str):
-    # ✅ Block deletion if any candidate for this role has a scheduled interview
+    # ── Block deletion if any candidate linked to this role has interview activity ──
+
+    # Check 1: any candidate currently scheduled
     scheduled_count = candidates_collection.count_documents({
         "applied_role_id": role_id,
         "status": "Scheduled"
@@ -159,8 +161,34 @@ async def delete_role_api(role_id: str):
     if scheduled_count > 0:
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot delete this role — {scheduled_count} candidate(s) have a scheduled interview for it. "
-                   f"Cancel or complete those interviews first."
+            detail=f"Cannot delete — {scheduled_count} candidate(s) have a scheduled interview for this role. "
+                   f"Cancel those interviews first."
+        )
+
+    # Check 2: any candidate has completed at least one interview round
+    interviewed_count = candidates_collection.count_documents({
+        "applied_role_id": role_id,
+        "interviews.0": {"$exists": True}   # interviews array is non-empty
+    })
+    if interviewed_count > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete — {interviewed_count} candidate(s) have already completed interview round(s) for this role. "
+                   f"Candidate interview history would be lost."
+        )
+
+    # Check 3: any candidate has been selected or rejected
+    verdict_count = candidates_collection.count_documents({
+        "applied_role_id": role_id,
+        "$or": [
+            {"candidate_selected": True},
+            {"candidate_rejected": True}
+        ]
+    })
+    if verdict_count > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete — {verdict_count} candidate(s) have already received a verdict (selected/rejected) for this role."
         )
 
     deleted = delete_role(role_id)

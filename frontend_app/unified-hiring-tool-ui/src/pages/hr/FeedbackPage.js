@@ -86,7 +86,7 @@ export default function FeedbackPage() {
       const filtered = Array.isArray(res.data)
         ? res.data.filter(
             c => String(c.applied_role_id) === String(roleId) &&
-                 c.interview_completed === true
+                 (c.candidate_selected === true || c.candidate_rejected === true)
           )
         : [];
       setCandidates(filtered);
@@ -205,7 +205,7 @@ export default function FeedbackPage() {
       ) : selectedRole && (
         <>
           {candidates.length === 0 ? (
-            <p className="text-muted">No completed candidates found for this role.</p>
+            <p className="text-muted">No candidates with a final verdict yet for this role. Press "Check Verdict" on the Schedule page first.</p>
           ) : (
             <Table bordered hover responsive className="feedback-table">
               <thead className="table-light">
@@ -214,6 +214,7 @@ export default function FeedbackPage() {
                   <th>Name</th>
                   {allRounds.map(r => <th key={r}>L{r} Avg</th>)}
                   <th>Overall Avg</th>
+                  <th>Verdict</th>
                   <th>Resume</th>
                   <th>Aggregate</th>
                   <th>Offer Generated</th>
@@ -223,12 +224,20 @@ export default function FeedbackPage() {
               <tbody>
                 {candidates.map(c => {
                   const overall = getOverallAvg(c.interviews || []);
+                  // ✅ Generate Offer active only if Selected AND avg >= 3
+                  const canGenerateOffer = c.candidate_selected === true && parseFloat(overall) >= 3;
                   return (
                     <tr key={c.candidate_id}>
                       <td>{c.candidate_id}</td>
                       <td>{c.name}</td>
                       {allRounds.map(r => <td key={r}>{getRoundAvg(c.interviews || [], r)}</td>)}
                       <td>{overall ? <strong>{overall} / 5</strong> : '-'}</td>
+                      {/* ✅ Verdict column */}
+                      <td>
+                        {c.candidate_selected
+                          ? <span className="badge bg-success">🏆 Selected</span>
+                          : <span className="badge bg-danger">❌ Rejected</span>}
+                      </td>
                       <td>
                         <Button
                           variant="outline-primary" size="sm"
@@ -242,7 +251,7 @@ export default function FeedbackPage() {
                       </td>
                       <td>
                         <Button variant="success" size="sm" onClick={() => handleViewAggregate(c)}>
-                          <FaEye /> Check Verdict
+                          <FaEye /> View Aggregate
                         </Button>
                       </td>
                       <td style={{ textAlign: 'center' }}>
@@ -251,8 +260,20 @@ export default function FeedbackPage() {
                           : <span className="badge bg-secondary">No</span>}
                       </td>
                       <td>
-                        {/* ✅ Opens the new two-step offer letter modal */}
-                        <Button variant="primary" size="sm" onClick={() => setOfferCandidate(c)}>
+                        {/* ✅ Active only for Selected candidates with avg >= 3 */}
+                        <Button
+                          variant={canGenerateOffer ? 'primary' : 'secondary'}
+                          size="sm"
+                          disabled={!canGenerateOffer}
+                          title={
+                            !c.candidate_selected
+                              ? 'Only available for Selected candidates'
+                              : parseFloat(overall) < 3
+                                ? 'Avg score must be ≥ 3 to generate offer'
+                                : 'Generate Offer Letter'
+                          }
+                          onClick={() => canGenerateOffer && setOfferCandidate(c)}
+                        >
                           <FaFileAlt /> Generate Offer
                         </Button>
                       </td>
