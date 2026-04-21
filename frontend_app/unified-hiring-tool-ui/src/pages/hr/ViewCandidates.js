@@ -1,6 +1,7 @@
 // src/pages/hr/ViewCandidates.js
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
+import { useNavigate } from 'react-router-dom';
 import './ViewCandidates.css';
 import { FaTrashAlt, FaEye, FaCalendarPlus } from 'react-icons/fa';
 
@@ -8,6 +9,8 @@ const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 const axiosConfig = { headers: { 'ngrok-skip-browser-warning': 'true' } };
 
 function ViewCandidates() {
+  const navigate = useNavigate();
+
   // ── Logged-in HR account ─────────────────────────────────────────────────
   const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
   const hrId = storedUser.user_id || null;
@@ -16,22 +19,13 @@ function ViewCandidates() {
   const [selectedRoleId, setSelectedRoleId] = useState('');
   const [candidates, setCandidates] = useState([]);
 
-  // Schedule modal state
-  const [scheduleModal, setScheduleModal] = useState({ open: false, candidate: null });
-  const [interviewers, setInterviewers] = useState([]);
-  const [scheduleForm, setScheduleForm] = useState({ interviewer_email: '', scheduled_date: '' });
-  const [scheduleStatus, setScheduleStatus] = useState('');
-  const [scheduling, setScheduling] = useState(false);
-
   useEffect(() => {
     fetchRoles();
     fetchCandidates();
-    fetchInterviewers();
   }, []); // eslint-disable-line
 
   const fetchRoles = async () => {
     try {
-      // ── Only fetch this HR's roles ────────────────────────────────────────
       const params = hrId ? { hr_id: hrId } : {};
       const res = await axios.get(`${BASE_URL}/get-roles/`, { ...axiosConfig, params });
       const openRoles = Array.isArray(res.data)
@@ -45,58 +39,11 @@ function ViewCandidates() {
 
   const fetchCandidates = async () => {
     try {
-      // ── Only fetch this HR's candidates ──────────────────────────────────
       const params = hrId ? { hr_id: hrId } : {};
       const res = await axios.get(`${BASE_URL}/get-candidates/`, { ...axiosConfig, params });
       setCandidates(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
       console.error('Error fetching candidates:', err);
-    }
-  };
-
-  const fetchInterviewers = async () => {
-    try {
-      const res = await axios.get(`${BASE_URL}/get-interviewers/`, axiosConfig);
-      setInterviewers(Array.isArray(res.data) ? res.data : []);
-    } catch (err) {
-      console.error('Error fetching interviewers:', err);
-    }
-  };
-
-  // ── Schedule interview ────────────────────────────────────────────────────
-  const openScheduleModal = (candidate) => {
-    setScheduleModal({ open: true, candidate });
-    setScheduleForm({ interviewer_email: '', scheduled_date: '' });
-    setScheduleStatus('');
-  };
-
-  const handleSchedule = async () => {
-    if (!scheduleForm.interviewer_email) {
-      setScheduleStatus('❌ Please select an interviewer.');
-      return;
-    }
-    setScheduling(true);
-    setScheduleStatus('Scheduling...');
-    try {
-      await axios.post(
-        `${BASE_URL}/schedule-interview/`,
-        {
-          candidate_id: scheduleModal.candidate.candidate_id,
-          interviewer_email: scheduleForm.interviewer_email,
-          scheduled_date: scheduleForm.scheduled_date || null
-        },
-        axiosConfig
-      );
-      setScheduleStatus('✅ Interview scheduled successfully!');
-      setTimeout(() => {
-        setScheduleModal({ open: false, candidate: null });
-        fetchCandidates();
-      }, 1200);
-    } catch (err) {
-      const msg = err.response?.data?.detail || 'Failed to schedule interview.';
-      setScheduleStatus(`❌ ${msg}`);
-    } finally {
-      setScheduling(false);
     }
   };
 
@@ -201,10 +148,11 @@ function ViewCandidates() {
                       ✓ Scheduled
                     </span>
                   ) : (
+                    // ✅ Navigate to Schedule page instead of opening modal
                     <button
                       className="btn btn-outline-success btn-sm"
                       title="Schedule Interview"
-                      onClick={() => openScheduleModal(c)}
+                      onClick={() => navigate('/hr/schedule')}
                     >
                       <FaCalendarPlus />
                     </button>
@@ -251,72 +199,6 @@ function ViewCandidates() {
           {renderTable(pending, 'Pending Interviews', pendingRounds)}
           {renderTable(completed, 'Completed Interviews', completedRounds)}
         </>
-      )}
-
-      {/* ── Schedule Interview Modal ────────────────────────────────────── */}
-      {scheduleModal.open && scheduleModal.candidate && (
-        <div className="modal show d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <div className="modal-dialog">
-            <div className="modal-content">
-              <div className="modal-header">
-                <h5 className="modal-title">
-                  Schedule Interview — <strong>{scheduleModal.candidate.name}</strong>
-                </h5>
-                <button
-                  type="button"
-                  className="btn-close"
-                  onClick={() => setScheduleModal({ open: false, candidate: null })}
-                />
-              </div>
-              <div className="modal-body">
-                <div className="mb-3">
-                  <label className="form-label">Select Interviewer *</label>
-                  <select
-                    className="form-select"
-                    value={scheduleForm.interviewer_email}
-                    onChange={e => setScheduleForm({ ...scheduleForm, interviewer_email: e.target.value })}
-                  >
-                    <option value="">-- Select Interviewer --</option>
-                    {interviewers.map(i => (
-                      <option key={i.interviewer_id} value={i.email}>
-                        {i.name} ({i.email}) — {i.department}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="mb-3">
-                  <label className="form-label">Scheduled Date (optional)</label>
-                  <input
-                    type="date"
-                    className="form-control"
-                    value={scheduleForm.scheduled_date}
-                    onChange={e => setScheduleForm({ ...scheduleForm, scheduled_date: e.target.value })}
-                  />
-                </div>
-                {scheduleStatus && (
-                  <div className={`alert ${scheduleStatus.startsWith('✅') ? 'alert-success' : scheduleStatus.startsWith('❌') ? 'alert-danger' : 'alert-info'}`}>
-                    {scheduleStatus}
-                  </div>
-                )}
-              </div>
-              <div className="modal-footer">
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => setScheduleModal({ open: false, candidate: null })}
-                >
-                  Cancel
-                </button>
-                <button
-                  className="btn btn-success"
-                  onClick={handleSchedule}
-                  disabled={scheduling}
-                >
-                  {scheduling ? 'Scheduling...' : 'Confirm Schedule'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   );
