@@ -139,6 +139,12 @@ async def get_roles(hr_id: Optional[str] = Query(None)):
 async def update_role_api(role_id: str, update_data: dict = Body(...)):
     modified = update_role(role_id, update_data)
     if modified:
+        # ✅ If role name changed, cascade update to all candidates with this role_id
+        if "role" in update_data:
+            candidates_collection.update_many(
+                {"applied_role_id": role_id},
+                {"$set": {"applied_role": update_data["role"]}}
+            )
         return {"message": f"Role {role_id} updated."}
     else:
         raise HTTPException(status_code=404, detail="Role not found or no change applied.")

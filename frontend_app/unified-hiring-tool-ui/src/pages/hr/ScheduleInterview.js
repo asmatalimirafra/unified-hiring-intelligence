@@ -15,7 +15,7 @@ export default function ScheduleInterview() {
   // ── Data ─────────────────────────────────────────────────────────────────
   const [roles,      setRoles]      = useState([]);
   const [candidates, setCandidates] = useState([]);
-  const [scheduled,  setScheduled]  = useState([]); // already-scheduled by this HR
+  const [scheduled,  setScheduled]  = useState([]);
 
   // ── Filter state ─────────────────────────────────────────────────────────
   const [selectedRoleId, setSelectedRoleId] = useState('');
@@ -41,7 +41,8 @@ export default function ScheduleInterview() {
     try {
       const params = hrId ? { hr_id: hrId } : {};
       const res = await axios.get(`${BASE_URL}/get-roles/`, { ...axiosConfig, params });
-      setRoles(Array.isArray(res.data) ? res.data.filter(r => r.status === 'open') : []);
+      // Keep ALL roles (open + closed) so we can look up names for scheduled candidates
+      setRoles(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
       console.error('Failed to fetch roles:', err);
     }
@@ -49,11 +50,9 @@ export default function ScheduleInterview() {
 
   const fetchCandidates = async () => {
     try {
-      // Only this HR's candidates
       const params = hrId ? { hr_id: hrId } : {};
       const res = await axios.get(`${BASE_URL}/get-candidates/`, { ...axiosConfig, params });
       const all = Array.isArray(res.data) ? res.data : [];
-      // Split into unscheduled and scheduled
       setCandidates(all.filter(c => c.status !== 'Scheduled'));
       setScheduled(all.filter(c => c.status === 'Scheduled'));
     } catch (err) {
@@ -61,11 +60,27 @@ export default function ScheduleInterview() {
     }
   };
 
-  // ── Filtered by selected role ─────────────────────────────────────────────
-  const filteredUnscheduled = selectedRoleId
-    ? candidates.filter(c => String(c.applied_role_id) === String(selectedRoleId))
-    : candidates;
+  // ── Helper: get live role name by role_id ────────────────────────────────
+  const getRoleName = (roleId) => {
+    const role = roles.find(r => String(r.role_id) === String(roleId));
+    return role ? role.role : null;
+  };
 
+  // ── Open roles (for unscheduled filtering) ───────────────────────────────
+  const openRoleIds = new Set(
+    roles.filter(r => r.status?.toLowerCase().trim() === 'open').map(r => String(r.role_id))
+  );
+
+  // ── Filtered by selected role ─────────────────────────────────────────────
+  // Unscheduled: only show candidates whose role is currently OPEN and EXISTS
+  const filteredUnscheduled = candidates.filter(c => {
+    const roleExists = openRoleIds.has(String(c.applied_role_id));
+    if (!roleExists) return false;
+    if (selectedRoleId) return String(c.applied_role_id) === String(selectedRoleId);
+    return true;
+  });
+
+  // Scheduled: show all scheduled candidates regardless of role status
   const filteredScheduled = selectedRoleId
     ? scheduled.filter(c => String(c.applied_role_id) === String(selectedRoleId))
     : scheduled;
@@ -81,7 +96,6 @@ export default function ScheduleInterview() {
   // ── Open modal pre-filled for editing existing schedule ───────────────────
   const openEditModal = (candidate) => {
     const d = candidate.interview_details || {};
-    // Convert ISO datetime to datetime-local format (YYYY-MM-DDTHH:mm)
     let dt = '';
     if (d.scheduled_datetime) {
       try { dt = new Date(d.scheduled_datetime).toISOString().slice(0, 16); } catch {}
@@ -168,6 +182,9 @@ export default function ScheduleInterview() {
     });
   };
 
+  // Only open roles shown in the role filter dropdown
+  const openRoles = roles.filter(r => r.status?.toLowerCase().trim() === 'open');
+
   return (
     <div className="schedule-page">
       <div className="schedule-header">
@@ -184,7 +201,7 @@ export default function ScheduleInterview() {
           onChange={e => setSelectedRoleId(e.target.value)}
         >
           <option value="">— All Roles —</option>
-          {roles.map(r => (
+          {openRoles.map(r => (
             <option key={r.role_id} value={r.role_id}>
               {r.role} ({r.role_id})
             </option>
@@ -218,7 +235,8 @@ export default function ScheduleInterview() {
                 <tr key={c.candidate_id}>
                   <td>{c.candidate_id}</td>
                   <td>{c.name}</td>
-                  <td>{c.applied_role}</td>
+                  {/* ✅ Always show live role name from roles list */}
+                  <td>{getRoleName(c.applied_role_id) || c.applied_role}</td>
                   <td>
                     <a
                       href={`${BASE_URL}/get-resume/${c.candidate_id}?ngrok-skip-browser-warning=true`}
@@ -268,7 +286,8 @@ export default function ScheduleInterview() {
                 <tr key={c.candidate_id}>
                   <td>{c.candidate_id}</td>
                   <td>{c.name}</td>
-                  <td>{c.applied_role}</td>
+                  {/* ✅ Always show live role name from roles list */}
+                  <td>{getRoleName(c.applied_role_id) || c.applied_role}</td>
                   <td>{c.interview_details?.interviewer_email || '—'}</td>
                   <td>{formatDateTime(c.interview_details?.scheduled_datetime)}</td>
                   <td>
@@ -298,7 +317,8 @@ export default function ScheduleInterview() {
               <div>
                 <h3>{modal.isEditing ? 'Edit Schedule' : 'Schedule Interview'}</h3>
                 <p className="modal-sub">
-                  <strong>{modal.candidate.name}</strong> &nbsp;·&nbsp; {modal.candidate.applied_role}
+                  <strong>{modal.candidate.name}</strong> &nbsp;·&nbsp;
+                  {getRoleName(modal.candidate.applied_role_id) || modal.candidate.applied_role}
                 </p>
               </div>
               <button className="modal-close" onClick={closeModal}>✕</button>
