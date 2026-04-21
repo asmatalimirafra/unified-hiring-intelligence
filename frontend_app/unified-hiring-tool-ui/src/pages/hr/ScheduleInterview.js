@@ -6,94 +6,102 @@ import './ScheduleInterview.css';
 const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 const axiosConfig = { headers: { 'ngrok-skip-browser-warning': 'true' } };
 
+// ── Score helpers ─────────────────────────────────────────────────────────────
+function getOverallAvg(interviews = []) {
+  if (!interviews.length) return null;
+  let total = 0, count = 0;
+  interviews.forEach(i => {
+    const r = i.ratings || {};
+    total += (r.communication || 0) + (r.domain_knowledge || 0) + (r.problem_solving || 0);
+    count += 3;
+  });
+  return count > 0 ? total / count : null;
+}
+
+function getVerdictLabel(avg) {
+  if (avg === null) return null;
+  if (avg >= 4)   return { label: 'Strong Hire', cls: 'verdict-strong' };
+  if (avg >= 3)   return { label: 'Hire',        cls: 'verdict-hire'   };
+  if (avg >= 2.5) return { label: 'Weak Hire',   cls: 'verdict-weak'   };
+  return                 { label: 'No Hire',     cls: 'verdict-no'     };
+}
+
+function getNextRound(interviews = []) {
+  if (!interviews.length) return 1;
+  return Math.max(...interviews.map(i => i.round)) + 1;
+}
+
 export default function ScheduleInterview() {
-  // ── Logged-in HR ─────────────────────────────────────────────────────────
   const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
   const hrId   = storedUser.user_id || null;
   const hrName = storedUser.name    || 'HR';
 
-  // ── Data ─────────────────────────────────────────────────────────────────
-  const [roles,      setRoles]      = useState([]);
-  const [candidates, setCandidates] = useState([]);
-  const [scheduled,  setScheduled]  = useState([]);
-
-  // ── Filter state ─────────────────────────────────────────────────────────
+  const [roles,    setRoles]    = useState([]);
+  const [allCands, setAllCands] = useState([]);
   const [selectedRoleId, setSelectedRoleId] = useState('');
 
-  // ── Modal state ──────────────────────────────────────────────────────────
-  const [modal, setModal] = useState({ open: false, candidate: null, isEditing: false });
-  const [form,  setForm]  = useState({
-    interviewer_email: '',
-    scheduled_datetime: '',
-    meeting_link: '',
-  });
-  const [submitting,  setSubmitting]  = useState(false);
-  const [statusMsg,   setStatusMsg]   = useState('');
-  const [statusType,  setStatusType]  = useState('');
+  const [modal,      setModal]      = useState({ open: false, candidate: null, isEditing: false });
+  const [form,       setForm]       = useState({ interviewer_email: '', scheduled_datetime: '', meeting_link: '' });
+  const [submitting, setSubmitting] = useState(false);
+  const [statusMsg,  setStatusMsg]  = useState('');
+  const [statusType, setStatusType] = useState('');
 
-  // ── Load roles & candidates on mount ─────────────────────────────────────
-  useEffect(() => {
-    fetchRoles();
-    fetchCandidates();
-  }, []); // eslint-disable-line
+  useEffect(() => { fetchRoles(); fetchCandidates(); }, []); // eslint-disable-line
 
   const fetchRoles = async () => {
     try {
       const params = hrId ? { hr_id: hrId } : {};
       const res = await axios.get(`${BASE_URL}/get-roles/`, { ...axiosConfig, params });
-      // Keep ALL roles (open + closed) so we can look up names for scheduled candidates
       setRoles(Array.isArray(res.data) ? res.data : []);
-    } catch (err) {
-      console.error('Failed to fetch roles:', err);
-    }
+    } catch (err) { console.error('Failed to fetch roles:', err); }
   };
 
   const fetchCandidates = async () => {
     try {
       const params = hrId ? { hr_id: hrId } : {};
       const res = await axios.get(`${BASE_URL}/get-candidates/`, { ...axiosConfig, params });
-      const all = Array.isArray(res.data) ? res.data : [];
-      setCandidates(all.filter(c => c.status !== 'Scheduled'));
-      setScheduled(all.filter(c => c.status === 'Scheduled'));
-    } catch (err) {
-      console.error('Failed to fetch candidates:', err);
-    }
+      setAllCands(Array.isArray(res.data) ? res.data : []);
+    } catch (err) { console.error('Failed to fetch candidates:', err); }
   };
 
-  // ── Helper: get live role name by role_id ────────────────────────────────
   const getRoleName = (roleId) => {
     const role = roles.find(r => String(r.role_id) === String(roleId));
     return role ? role.role : null;
   };
 
-  // ── Open roles (for unscheduled filtering) ───────────────────────────────
   const openRoleIds = new Set(
     roles.filter(r => r.status?.toLowerCase().trim() === 'open').map(r => String(r.role_id))
   );
+  const openRoles = roles.filter(r => r.status?.toLowerCase().trim() === 'open');
 
-  // ── Filtered by selected role ─────────────────────────────────────────────
-  // Unscheduled: only show candidates whose role is currently OPEN and EXISTS
-  const filteredUnscheduled = candidates.filter(c => {
-    const roleExists = openRoleIds.has(String(c.applied_role_id));
-    if (!roleExists) return false;
-    if (selectedRoleId) return String(c.applied_role_id) === String(selectedRoleId);
-    return true;
-  });
+  // ── Section filters ───────────────────────────────────────────────────────
+  const applyRoleFilter = (c) =>
+    !selectedRoleId || String(c.applied_role_id) === String(selectedRoleId);
 
-  // Scheduled: show all scheduled candidates regardless of role status
-  const filteredScheduled = selectedRoleId
-    ? scheduled.filter(c => String(c.applied_role_id) === String(selectedRoleId))
-    : scheduled;
+  const pending = allCands.filter(c =>
+    openRoleIds.has(String(c.applied_role_id)) &&
+    !c.candidate_selected &&
+    c.status !== 'Scheduled' &&
+    applyRoleFilter(c)
+  );
 
-  // ── Open modal for new schedule ───────────────────────────────────────────
+  const scheduled = allCands.filter(c =>
+    c.status === 'Scheduled' &&
+    !c.candidate_selected &&
+    applyRoleFilter(c)
+  );
+
+  const selected = allCands.filter(c =>
+    c.candidate_selected && applyRoleFilter(c)
+  );
+
+  // ── Modal helpers ─────────────────────────────────────────────────────────
   const openModal = (candidate) => {
     setModal({ open: true, candidate, isEditing: false });
     setForm({ interviewer_email: '', scheduled_datetime: '', meeting_link: '' });
-    setStatusMsg('');
-    setStatusType('');
+    setStatusMsg(''); setStatusType('');
   };
 
-  // ── Open modal pre-filled for editing existing schedule ───────────────────
   const openEditModal = (candidate) => {
     const d = candidate.interview_details || {};
     let dt = '';
@@ -101,77 +109,45 @@ export default function ScheduleInterview() {
       try { dt = new Date(d.scheduled_datetime).toISOString().slice(0, 16); } catch {}
     }
     setModal({ open: true, candidate, isEditing: true });
-    setForm({
-      interviewer_email: d.interviewer_email || '',
-      scheduled_datetime: dt,
-      meeting_link: d.meeting_link || '',
-    });
-    setStatusMsg('');
-    setStatusType('');
+    setForm({ interviewer_email: d.interviewer_email || '', scheduled_datetime: dt, meeting_link: d.meeting_link || '' });
+    setStatusMsg(''); setStatusType('');
   };
 
   const closeModal = () => setModal({ open: false, candidate: null, isEditing: false });
 
-  // ── Submit schedule (both new and edit) ──────────────────────────────────
   const handleSchedule = async () => {
     if (!form.interviewer_email.trim()) {
-      setStatusMsg('Please enter the interviewer email.');
-      setStatusType('error');
-      return;
+      setStatusMsg('Please enter the interviewer email.'); setStatusType('error'); return;
     }
     if (!form.scheduled_datetime) {
-      setStatusMsg('Please select a date and time.');
-      setStatusType('error');
-      return;
+      setStatusMsg('Please select a date and time.'); setStatusType('error'); return;
     }
-
     setSubmitting(true);
-    setStatusMsg(modal.isEditing ? 'Updating...' : 'Scheduling...');
-    setStatusType('info');
-
+    setStatusMsg(modal.isEditing ? 'Updating...' : 'Scheduling...'); setStatusType('info');
     try {
-      await axios.post(
-        `${BASE_URL}/schedule-interview/`,
-        {
-          candidate_id:       modal.candidate.candidate_id,
-          interviewer_email:  form.interviewer_email.trim(),
-          scheduled_datetime: form.scheduled_datetime,
-          meeting_link:       form.meeting_link.trim(),
-          hr_id:              hrId,
-          hr_name:            hrName,
-        },
-        axiosConfig
-      );
-
-      setStatusMsg(modal.isEditing ? '✅ Schedule updated successfully!' : '✅ Interview scheduled successfully!');
+      await axios.post(`${BASE_URL}/schedule-interview/`, {
+        candidate_id:       modal.candidate.candidate_id,
+        interviewer_email:  form.interviewer_email.trim(),
+        scheduled_datetime: form.scheduled_datetime,
+        meeting_link:       form.meeting_link.trim(),
+        hr_id:              hrId,
+        hr_name:            hrName,
+      }, axiosConfig);
+      setStatusMsg(modal.isEditing ? '✅ Updated!' : '✅ Scheduled!');
       setStatusType('success');
-
-      setTimeout(() => {
-        closeModal();
-        fetchCandidates();
-      }, 1200);
+      setTimeout(() => { closeModal(); fetchCandidates(); }, 1200);
     } catch (err) {
-      const msg = err.response?.data?.detail || 'Failed to schedule. Please check the interviewer email.';
-      setStatusMsg(`❌ ${msg}`);
-      setStatusType('error');
-    } finally {
-      setSubmitting(false);
-    }
+      const msg = err.response?.data?.detail || 'Failed. Check the interviewer email.';
+      setStatusMsg(`❌ ${msg}`); setStatusType('error');
+    } finally { setSubmitting(false); }
   };
 
-  // ── Unschedule (move back to unscheduled) ────────────────────────────────
-  const handleUnschedule = async (candidate) => {
-    if (!window.confirm(`Remove schedule for "${candidate.name}"?`)) return;
+  const handleSelect = async (candidate) => {
+    if (!window.confirm(`Select "${candidate.name}" as a final candidate?`)) return;
     try {
-      await axios.post(
-        `${BASE_URL}/unschedule-interview/`,
-        { candidate_id: candidate.candidate_id },
-        axiosConfig
-      );
+      await axios.post(`${BASE_URL}/select-candidate/${candidate.candidate_id}`, {}, axiosConfig);
       fetchCandidates();
-    } catch (err) {
-      alert('Failed to unschedule. Please try again.');
-    }
+    } catch { alert('Failed to select candidate. Please try again.'); }
   };
 
   const formatDateTime = (dt) => {
@@ -182,43 +158,33 @@ export default function ScheduleInterview() {
     });
   };
 
-  // Only open roles shown in the role filter dropdown
-  const openRoles = roles.filter(r => r.status?.toLowerCase().trim() === 'open');
-
   return (
     <div className="schedule-page">
       <div className="schedule-header">
         <h2>Schedule Interviews</h2>
-        <p className="schedule-sub">Assign candidates to interviewers for their review</p>
+        <p className="schedule-sub">Manage interview rounds and candidate pipeline</p>
       </div>
 
-      {/* ── Role filter ──────────────────────────────────────────────────── */}
       <div className="filter-bar">
         <label>Filter by Role:</label>
-        <select
-          className="role-select"
-          value={selectedRoleId}
-          onChange={e => setSelectedRoleId(e.target.value)}
-        >
+        <select className="role-select" value={selectedRoleId} onChange={e => setSelectedRoleId(e.target.value)}>
           <option value="">— All Roles —</option>
           {openRoles.map(r => (
-            <option key={r.role_id} value={r.role_id}>
-              {r.role} ({r.role_id})
-            </option>
+            <option key={r.role_id} value={r.role_id}>{r.role} ({r.role_id})</option>
           ))}
         </select>
       </div>
 
-      {/* ── Unscheduled candidates ───────────────────────────────────────── */}
+      {/* ── SECTION 1: Pending Candidates ────────────────────────────────── */}
       <section className="section-card">
         <div className="section-header">
           <span className="section-icon">📋</span>
-          <h3>Unscheduled Candidates</h3>
-          <span className="count-badge">{filteredUnscheduled.length}</span>
+          <h3>Pending Candidates</h3>
+          <span className="count-badge">{pending.length}</span>
         </div>
 
-        {filteredUnscheduled.length === 0 ? (
-          <p className="empty-msg">No unscheduled candidates{selectedRoleId ? ' for this role' : ''}.</p>
+        {pending.length === 0 ? (
+          <p className="empty-msg">No pending candidates{selectedRoleId ? ' for this role' : ''}.</p>
         ) : (
           <table className="schedule-table">
             <thead>
@@ -226,48 +192,85 @@ export default function ScheduleInterview() {
                 <th>Candidate ID</th>
                 <th>Name</th>
                 <th>Applied Role</th>
+                <th>Rounds Done</th>
+                <th>Avg Score</th>
+                <th>Verdict</th>
                 <th>Resume</th>
-                <th>Action</th>
+                <th>Schedule</th>
+                <th>Select</th>
               </tr>
             </thead>
             <tbody>
-              {filteredUnscheduled.map(c => (
-                <tr key={c.candidate_id}>
-                  <td>{c.candidate_id}</td>
-                  <td>{c.name}</td>
-                  {/* ✅ Always show live role name from roles list */}
-                  <td>{getRoleName(c.applied_role_id) || c.applied_role}</td>
-                  <td>
-                    <a
-                      href={`${BASE_URL}/get-resume/${c.candidate_id}?ngrok-skip-browser-warning=true`}
-                      target="_blank" rel="noopener noreferrer"
-                      className="resume-link"
-                    >
-                      View PDF
-                    </a>
-                  </td>
-                  <td>
-                    <button className="btn-schedule" onClick={() => openModal(c)}>
-                      📅 Schedule
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {pending.map(c => {
+                const avg       = getOverallAvg(c.interviews || []);
+                const verdict   = getVerdictLabel(avg);
+                const nextRound = getNextRound(c.interviews || []);
+                const canSelect = avg !== null && avg > 3;
+                const lastRound = (c.interviews || []).length > 0
+                  ? Math.max(...(c.interviews || []).map(i => i.round))
+                  : null;
+                return (
+                  <tr key={c.candidate_id}>
+                    <td>{c.candidate_id}</td>
+                    <td>{c.name}</td>
+                    <td>{getRoleName(c.applied_role_id) || c.applied_role}</td>
+                    <td>
+                      {lastRound !== null
+                        ? <span className="round-pill">L{lastRound} done</span>
+                        : <span className="no-rounds">None yet</span>}
+                    </td>
+                    <td>
+                      {avg !== null
+                        ? <strong>{avg.toFixed(2)} / 5</strong>
+                        : <span className="no-score">—</span>}
+                    </td>
+                    <td>
+                      {verdict
+                        ? <span className={`verdict-badge ${verdict.cls}`}>{verdict.label}</span>
+                        : '—'}
+                    </td>
+                    <td>
+                      <a
+                        href={`${BASE_URL}/get-resume/${c.candidate_id}?ngrok-skip-browser-warning=true`}
+                        target="_blank" rel="noopener noreferrer"
+                        className="resume-link"
+                      >
+                        View PDF
+                      </a>
+                    </td>
+                    <td>
+                      <button className="btn-schedule" onClick={() => openModal(c)}>
+                        📅 L{nextRound}
+                      </button>
+                    </td>
+                    <td>
+                      <button
+                        className={`btn-select ${canSelect ? 'btn-select-active' : 'btn-select-disabled'}`}
+                        onClick={() => canSelect && handleSelect(c)}
+                        disabled={!canSelect}
+                        title={canSelect ? 'Select this candidate' : 'Avg score must be > 3 to select'}
+                      >
+                        ✅ Select
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
       </section>
 
-      {/* ── Already scheduled ────────────────────────────────────────────── */}
+      {/* ── SECTION 2: Scheduled Interviews ──────────────────────────────── */}
       <section className="section-card" style={{ marginTop: '2rem' }}>
         <div className="section-header">
-          <span className="section-icon">✅</span>
+          <span className="section-icon">📅</span>
           <h3>Scheduled Interviews</h3>
-          <span className="count-badge">{filteredScheduled.length}</span>
+          <span className="count-badge">{scheduled.length}</span>
         </div>
 
-        {filteredScheduled.length === 0 ? (
-          <p className="empty-msg">No scheduled interviews yet{selectedRoleId ? ' for this role' : ''}.</p>
+        {scheduled.length === 0 ? (
+          <p className="empty-msg">No scheduled interviews{selectedRoleId ? ' for this role' : ''}.</p>
         ) : (
           <table className="schedule-table">
             <thead>
@@ -275,47 +278,109 @@ export default function ScheduleInterview() {
                 <th>Candidate ID</th>
                 <th>Name</th>
                 <th>Applied Role</th>
-                <th>Interviewer Email</th>
+                <th>Round Scheduled</th>
+                <th>Interviewer</th>
                 <th>Date & Time</th>
                 <th>Meeting Link</th>
                 <th>Edit</th>
               </tr>
             </thead>
             <tbody>
-              {filteredScheduled.map(c => (
-                <tr key={c.candidate_id}>
-                  <td>{c.candidate_id}</td>
-                  <td>{c.name}</td>
-                  {/* ✅ Always show live role name from roles list */}
-                  <td>{getRoleName(c.applied_role_id) || c.applied_role}</td>
-                  <td>{c.interview_details?.interviewer_email || '—'}</td>
-                  <td>{formatDateTime(c.interview_details?.scheduled_datetime)}</td>
-                  <td>
-                    {c.interview_details?.meeting_link ? (
-                      <a href={c.interview_details.meeting_link} target="_blank" rel="noopener noreferrer" className="meeting-link">
-                        Join Link 🔗
-                      </a>
-                    ) : '—'}
-                  </td>
-                  <td>
-                    <button className="btn-edit" onClick={() => openEditModal(c)}>
-                      ✏️ Edit
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {scheduled.map(c => {
+                const nextRound = getNextRound(c.interviews || []);
+                return (
+                  <tr key={c.candidate_id}>
+                    <td>{c.candidate_id}</td>
+                    <td>{c.name}</td>
+                    <td>{getRoleName(c.applied_role_id) || c.applied_role}</td>
+                    <td><span className="round-pill">L{nextRound}</span></td>
+                    <td>{c.interview_details?.interviewer_email || '—'}</td>
+                    <td>{formatDateTime(c.interview_details?.scheduled_datetime)}</td>
+                    <td>
+                      {c.interview_details?.meeting_link ? (
+                        <a href={c.interview_details.meeting_link} target="_blank" rel="noopener noreferrer" className="meeting-link">
+                          Join 🔗
+                        </a>
+                      ) : '—'}
+                    </td>
+                    <td>
+                      <button className="btn-edit" onClick={() => openEditModal(c)}>✏️ Edit</button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
       </section>
 
+      {/* ── SECTION 3: Selected Candidates ───────────────────────────────── */}
+      <section className="section-card selected-section" style={{ marginTop: '2rem' }}>
+        <div className="section-header">
+          <span className="section-icon">🏆</span>
+          <h3>Selected Candidates</h3>
+          <span className="count-badge">{selected.length}</span>
+        </div>
+
+        {selected.length === 0 ? (
+          <p className="empty-msg">No candidates selected yet{selectedRoleId ? ' for this role' : ''}.</p>
+        ) : (
+          <table className="schedule-table">
+            <thead>
+              <tr>
+                <th>Candidate ID</th>
+                <th>Name</th>
+                <th>Applied Role</th>
+                <th>Rounds Completed</th>
+                <th>Avg Score</th>
+                <th>Verdict</th>
+                <th>Resume</th>
+              </tr>
+            </thead>
+            <tbody>
+              {selected.map(c => {
+                const avg     = getOverallAvg(c.interviews || []);
+                const verdict = getVerdictLabel(avg);
+                return (
+                  <tr key={c.candidate_id} className="selected-row">
+                    <td>{c.candidate_id}</td>
+                    <td><strong>{c.name}</strong> 🏆</td>
+                    <td>{getRoleName(c.applied_role_id) || c.applied_role}</td>
+                    <td>{(c.interviews || []).length} round(s)</td>
+                    <td>{avg !== null ? <strong>{avg.toFixed(2)} / 5</strong> : '—'}</td>
+                    <td>
+                      {verdict
+                        ? <span className={`verdict-badge ${verdict.cls}`}>{verdict.label}</span>
+                        : '—'}
+                    </td>
+                    <td>
+                      <a
+                        href={`${BASE_URL}/get-resume/${c.candidate_id}?ngrok-skip-browser-warning=true`}
+                        target="_blank" rel="noopener noreferrer"
+                        className="resume-link"
+                      >
+                        View PDF
+                      </a>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      {/* ── Schedule Modal ────────────────────────────────────────────────── */}
       {modal.open && modal.candidate && (
         <div className="modal-backdrop" onClick={closeModal}>
           <div className="modal-box" onClick={e => e.stopPropagation()}>
-
             <div className="modal-header">
               <div>
-                <h3>{modal.isEditing ? 'Edit Schedule' : 'Schedule Interview'}</h3>
+                <h3>
+                  {modal.isEditing
+                    ? 'Edit Schedule'
+                    : `Schedule Round L${getNextRound(modal.candidate.interviews || [])}`}
+                </h3>
                 <p className="modal-sub">
                   <strong>{modal.candidate.name}</strong> &nbsp;·&nbsp;
                   {getRoleName(modal.candidate.applied_role_id) || modal.candidate.applied_role}
@@ -323,9 +388,7 @@ export default function ScheduleInterview() {
               </div>
               <button className="modal-close" onClick={closeModal}>✕</button>
             </div>
-
             <div className="modal-body">
-
               <div className="field-group">
                 <label>Interviewer Email *</label>
                 <input
@@ -336,7 +399,6 @@ export default function ScheduleInterview() {
                 />
                 <small className="field-hint">Must match an existing Interviewer account email</small>
               </div>
-
               <div className="field-group">
                 <label>Date & Time *</label>
                 <input
@@ -345,7 +407,6 @@ export default function ScheduleInterview() {
                   onChange={e => setForm({ ...form, scheduled_datetime: e.target.value })}
                 />
               </div>
-
               <div className="field-group">
                 <label>Meeting Link</label>
                 <input
@@ -355,23 +416,16 @@ export default function ScheduleInterview() {
                   onChange={e => setForm({ ...form, meeting_link: e.target.value })}
                 />
               </div>
-
-              {statusMsg && (
-                <div className={`status-banner ${statusType}`}>{statusMsg}</div>
-              )}
+              {statusMsg && <div className={`status-banner ${statusType}`}>{statusMsg}</div>}
             </div>
-
             <div className="modal-footer">
-              <button className="btn-cancel" onClick={closeModal} disabled={submitting}>
-                Cancel
-              </button>
+              <button className="btn-cancel" onClick={closeModal} disabled={submitting}>Cancel</button>
               <button className="btn-confirm" onClick={handleSchedule} disabled={submitting}>
                 {submitting
                   ? (modal.isEditing ? 'Updating...' : 'Scheduling...')
-                  : (modal.isEditing ? '✏️ Update Schedule' : '📅 Confirm Schedule')}
+                  : (modal.isEditing ? '✏️ Update' : '📅 Confirm Schedule')}
               </button>
             </div>
-
           </div>
         </div>
       )}

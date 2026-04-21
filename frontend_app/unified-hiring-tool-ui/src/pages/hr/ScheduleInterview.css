@@ -336,3 +336,55 @@
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+/* ── Verdict badges ──────────────────────────────────────────────────────── */
+.verdict-badge {
+  display: inline-block;
+  padding: 0.25rem 0.65rem;
+  border-radius: 20px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.verdict-strong { background: #dbeafe; color: #1d4ed8; }
+.verdict-hire   { background: #dcfce7; color: #15803d; }
+.verdict-weak   { background: #fef9c3; color: #a16207; }
+.verdict-no     { background: #fee2e2; color: #b91c1c; }
+
+/* ── Round pill ──────────────────────────────────────────────────────────── */
+.round-pill {
+  display: inline-block;
+  background: #e0e7ff;
+  color: #3730a3;
+  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+}
+.no-rounds, .no-score { color: #aaa; font-size: 0.85rem; }
+
+/* ── Select button ───────────────────────────────────────────────────────── */
+.btn-select {
+  border: none;
+  border-radius: 8px;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.btn-select-active {
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #86efac;
+}
+.btn-select-active:hover { background: #bbf7d0; }
+.btn-select-disabled {
+  background: #f1f5f9;
+  color: #94a3b8;
+  border: 1px solid #e2e8f0;
+  cursor: not-allowed;
+}
+
+/* ── Selected section & row ──────────────────────────────────────────────── */
+.selected-section { border: 2px solid #86efac; }
+.selected-row td  { background: #f0fdf4 !important; }

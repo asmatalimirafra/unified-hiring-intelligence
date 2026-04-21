@@ -265,16 +265,16 @@ async def mark_offer_generated(candidate_id: str):
         raise HTTPException(status_code=404, detail=f"Candidate '{candidate_id}' not found.")
     return {"message": f"Offer marked as generated for {candidate_id}."}
 
-@app.post("/mark-offer-generated/{candidate_id}", status_code=200)
-async def mark_offer_generated(candidate_id: str):
-    """Mark that an offer letter has been generated for this candidate."""
+@app.post("/select-candidate/{candidate_id}", status_code=200)
+async def select_candidate(candidate_id: str):
+    """HR marks a candidate as selected after all interview rounds."""
     result = candidates_collection.update_one(
         {"candidate_id": candidate_id},
-        {"$set": {"offer_generated": True}}
+        {"$set": {"candidate_selected": True}}
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail=f"Candidate '{candidate_id}' not found.")
-    return {"message": f"Offer marked as generated for {candidate_id}."}
+    return {"message": f"Candidate {candidate_id} marked as selected."}
 
 @app.delete("/delete-candidate/{candidate_id}")
 async def delete_candidate_api(candidate_id: str):

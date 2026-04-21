@@ -44,37 +44,6 @@ function formatDateTime(dt) {
   } catch { return "—"; }
 }
 
-// ── Round badges — clicking existing badge = edit, + Round = add new ──────────
-function RoundBadges({ candidate, onAdd, onEdit, onView, editable }) {
-  const interviews = candidate.interviews || [];
-  return (
-    <div className="round-badges">
-      {interviews.map(iv => (
-        <button
-          key={iv.round}
-          className="round-badge clickable"
-          title={`Round ${iv.round} avg: ${getRoundAvg(interviews, iv.round) ?? "—"}`}
-          onClick={() => editable ? onEdit(candidate, iv.round) : onView(candidate, iv.round)}
-        >
-          L{iv.round} · {getRoundAvg(interviews, iv.round) ?? "—"}
-        </button>
-      ))}
-      {editable && (
-        <button
-          className="round-badge add-round"
-          onClick={() => onAdd(candidate)}
-          title="Add new interview round"
-        >
-          + Round
-        </button>
-      )}
-      {!interviews.length && !editable && (
-        <span className="no-rounds">No rounds yet</span>
-      )}
-    </div>
-  );
-}
-
 // ── Main component ────────────────────────────────────────────────────────────
 function InterviewPage() {
   const storedUser       = JSON.parse(localStorage.getItem("user") || "{}");
@@ -104,41 +73,38 @@ function InterviewPage() {
   const [notesSaving, setNotesSaving] = useState(false);
   const [notesSaved,  setNotesSaved]  = useState(false);
 
-  // ── Fetch roles ───────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!interviewerEmail) setErrorMsg("Interviewer email not found. Please log in again.");
-  }, [interviewerEmail]);
+  // ── Fetch all assigned candidates once, derive roles from them ───────────
+  const [allAssignedCandidates, setAllAssignedCandidates] = useState([]);
 
   useEffect(() => {
-    axios.get(`${BASE_URL}/get-roles/`, axiosConfig)
-      .then(res => setRoles((Array.isArray(res.data) ? res.data : []).filter(r => r.status === "open")))
-      .catch(() => setErrorMsg("Failed to load roles."));
-  }, []);
-
-  // ── Fetch candidates assigned to this interviewer ─────────────────────────
-  const fetchCandidates = async (roleId) => {
-    if (!interviewerEmail) return;
+    if (!interviewerEmail) { setErrorMsg("Interviewer email not found. Please log in again."); return; }
     setLoading(true);
-    setErrorMsg("");
-    try {
-      const res = await axios.get(
-        `${BASE_URL}/get-interviewer-candidates/${encodeURIComponent(interviewerEmail)}`,
-        axiosConfig
-      );
-      const all  = Array.isArray(res.data) ? res.data : [];
-      const role = all.filter(c => String(c.applied_role_id) === String(roleId));
-      setPendingCandidates(role.filter(c => c.interview_completed !== true));
-      setCompletedCandidates(role.filter(c => c.interview_completed === true));
-    } catch {
-      setErrorMsg("Failed to load candidates.");
-    } finally {
-      setLoading(false);
-    }
+    axios.get(`${BASE_URL}/get-interviewer-candidates/${encodeURIComponent(interviewerEmail)}`, axiosConfig)
+      .then(res => {
+        const all = Array.isArray(res.data) ? res.data : [];
+        setAllAssignedCandidates(all);
+        const roleMap = {};
+        all.forEach(c => {
+          if (c.applied_role_id && c.applied_role) {
+            roleMap[String(c.applied_role_id)] = c.applied_role;
+          }
+        });
+        setRoles(Object.entries(roleMap).map(([role_id, role]) => ({ role_id, role })));
+      })
+      .catch(() => setErrorMsg("Failed to load candidates."))
+      .finally(() => setLoading(false));
+  }, [interviewerEmail]); // eslint-disable-line
+
+  // ── Filter from cached list when role changes, and after feedback submit ──
+  const fetchCandidates = (roleId) => {
+    const role = allAssignedCandidates.filter(c => String(c.applied_role_id) === String(roleId));
+    setPendingCandidates(role.filter(c => c.interview_completed !== true));
+    setCompletedCandidates(role.filter(c => c.interview_completed === true));
   };
 
   useEffect(() => {
     if (selectedRoleId) fetchCandidates(selectedRoleId);
-  }, [selectedRoleId]); // eslint-disable-line
+  }, [selectedRoleId, allAssignedCandidates]); // eslint-disable-line
 
   // ── Feedback modal helpers ────────────────────────────────────────────────
   const openAddModal = (candidate) => {
@@ -170,20 +136,6 @@ function InterviewPage() {
     setModal({ open: true, mode: "edit", candidate, roundNum });
   };
 
-  const openViewModal = (candidate, roundNum) => {
-    const iv = (candidate.interviews || []).find(i => i.round === roundNum);
-    if (!iv) return;
-    setForm({
-      round: roundNum,
-      date: iv.datetime ? new Date(iv.datetime).toISOString().split("T")[0] : "",
-      communication:    iv.ratings?.communication    || "",
-      domain_knowledge: iv.ratings?.domain_knowledge || "",
-      problem_solving:  iv.ratings?.problem_solving  || "",
-      comments: iv.comments || "",
-    });
-    setFormError("");
-    setModal({ open: true, mode: "view", candidate, roundNum });
-  };
 
   const closeModal = () => setModal({ open: false, mode: "add", candidate: null, roundNum: null });
 
@@ -222,7 +174,7 @@ function InterviewPage() {
     }
   };
 
-  // ── Submit feedback ───────────────────────────────────────────────────────
+  // ── Submit feedback (Give Feedback — always adds, then marks complete) ─────
   const handleSubmit = async () => {
     const c = Number(form.communication);
     const d = Number(form.domain_knowledge);
@@ -239,6 +191,7 @@ function InterviewPage() {
     setFormError("");
     try {
       if (modal.mode === "edit") {
+        // Edit existing feedback (from Completed section)
         const updatedInterviews = (modal.candidate.interviews || []).map(iv =>
           iv.round === modal.roundNum
             ? { ...iv, ratings: { communication: c, domain_knowledge: d, problem_solving: p }, comments: form.comments.trim(), datetime: form.date }
@@ -249,7 +202,9 @@ function InterviewPage() {
           { interviews: updatedInterviews },
           axiosConfig
         );
+        showSuccess("Feedback updated successfully!");
       } else {
+        // Give Feedback — submit and immediately mark as completed
         const fd = new FormData();
         fd.append("candidate_id",     modal.candidate.candidate_id);
         fd.append("round_num",        form.round);
@@ -259,10 +214,22 @@ function InterviewPage() {
         fd.append("problem_solving",  p);
         fd.append("comments",         form.comments.trim());
         await axios.post(`${BASE_URL}/add-interview/`, fd, axiosConfig);
+        // Auto-move to completed
+        await axios.put(
+          `${BASE_URL}/update-candidate/${modal.candidate.candidate_id}`,
+          { interview_completed: true },
+          axiosConfig
+        );
+        showSuccess("Feedback submitted! Candidate moved to Completed.");
       }
-      showSuccess("Feedback submitted successfully!");
       closeModal();
-      fetchCandidates(selectedRoleId);
+      // Re-fetch from backend to refresh allAssignedCandidates
+      const res = await axios.get(
+        `${BASE_URL}/get-interviewer-candidates/${encodeURIComponent(interviewerEmail)}`,
+        axiosConfig
+      );
+      const all = Array.isArray(res.data) ? res.data : [];
+      setAllAssignedCandidates(all);
     } catch (err) {
       setFormError(err.response?.data?.detail || "Failed to submit feedback.");
     } finally {
@@ -270,29 +237,7 @@ function InterviewPage() {
     }
   };
 
-  const markCompleted = async (candidate) => {
-    try {
-      await axios.put(
-        `${BASE_URL}/update-candidate/${candidate.candidate_id}`,
-        { interview_completed: true },
-        axiosConfig
-      );
-      showSuccess(`${candidate.name} moved to Completed.`);
-      fetchCandidates(selectedRoleId);
-    } catch { setErrorMsg("Failed to update candidate status."); }
-  };
 
-  const moveToPending = async (candidate) => {
-    try {
-      await axios.put(
-        `${BASE_URL}/update-candidate/${candidate.candidate_id}`,
-        { interview_completed: false },
-        axiosConfig
-      );
-      showSuccess(`${candidate.name} moved back to Pending.`);
-      fetchCandidates(selectedRoleId);
-    } catch { setErrorMsg("Failed to update candidate status."); }
-  };
 
   const showSuccess = (msg) => {
     setSuccessMsg(msg);
@@ -302,7 +247,7 @@ function InterviewPage() {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="interview-page">
-      <h2 className="page-title">Interview Feedback</h2>
+      <h2 className="page-title">My Interviews</h2>
 
       {errorMsg   && <div className="banner banner-error">{errorMsg}</div>}
       {successMsg && <div className="banner banner-success">{successMsg}</div>}
@@ -343,24 +288,20 @@ function InterviewPage() {
                     <th>Date & Time</th>
                     <th>Meeting Link</th>
                     <th>Resume</th>
-                    <th>Rounds</th>
                     <th>Notes</th>
-                    <th>Mark Complete</th>
+                    <th>Give Feedback</th>
                   </tr>
                 </thead>
                 <tbody>
                   {pendingCandidates.length === 0 ? (
                     <tr>
-                      <td colSpan="8" className="empty-row">
+                      <td colSpan="7" className="empty-row">
                         No pending candidates assigned to you.
                       </td>
                     </tr>
                   ) : (
                     pendingCandidates.map(c => {
-                      const roundsDone  = (c.interviews || []).length;
-                      const canComplete = roundsDone >= 2;
-                      const hasNotes    = !!c.interviewer_notes?.trim();
-
+                      const hasNotes = !!c.interviewer_notes?.trim();
                       return (
                         <tr key={c.candidate_id}>
 
@@ -413,17 +354,6 @@ function InterviewPage() {
                             </a>
                           </td>
 
-                          {/* Round badges — click badge to edit, + Round to add */}
-                          <td>
-                            <RoundBadges
-                              candidate={c}
-                              editable={true}
-                              onAdd={openAddModal}
-                              onEdit={openEditModal}
-                              onView={openViewModal}
-                            />
-                          </td>
-
                           {/* 📓 Notes button */}
                           <td>
                             <button
@@ -438,19 +368,14 @@ function InterviewPage() {
                             </button>
                           </td>
 
-                          {/* Mark complete — minimum 2 rounds */}
+                          {/* Give Feedback — opens modal, submitting moves to Completed */}
                           <td>
                             <button
-                              className={`btn-complete${!canComplete ? " btn-disabled" : ""}`}
-                              onClick={() => canComplete && markCompleted(c)}
-                              disabled={!canComplete}
-                              title={
-                                canComplete
-                                  ? "Mark interview as complete"
-                                  : `Minimum 2 rounds required (${roundsDone}/2 done)`
-                              }
+                              className="btn-feedback"
+                              onClick={() => openAddModal(c)}
+                              title="Give feedback for this candidate"
                             >
-                              {canComplete ? "✓ Complete" : `${roundsDone}/2 Rounds`}
+                              ✍️ Give Feedback
                             </button>
                           </td>
 
@@ -478,16 +403,15 @@ function InterviewPage() {
                     <th>Candidate</th>
                     <th>Assigned By (HR)</th>
                     <th>Resume</th>
-                    <th>Rounds</th>
-                    <th>Overall Avg</th>
+                    <th>Score</th>
                     <th>Recommendation</th>
-                    <th>Reopen</th>
+                    <th>Edit Feedback</th>
                   </tr>
                 </thead>
                 <tbody>
                   {completedCandidates.length === 0 ? (
                     <tr>
-                      <td colSpan="7" className="empty-row">No completed interviews yet.</td>
+                      <td colSpan="6" className="empty-row">No completed interviews yet.</td>
                     </tr>
                   ) : (
                     completedCandidates.map(c => {
@@ -517,15 +441,6 @@ function InterviewPage() {
                             </a>
                           </td>
                           <td>
-                            <RoundBadges
-                              candidate={c}
-                              editable={false}
-                              onAdd={openAddModal}
-                              onEdit={openEditModal}
-                              onView={openViewModal}
-                            />
-                          </td>
-                          <td>
                             {avg !== null
                               ? <span className="avg-score">{avg.toFixed(2)} / 5</span>
                               : "—"}
@@ -536,8 +451,12 @@ function InterviewPage() {
                               : "—"}
                           </td>
                           <td>
-                            <button className="btn-reopen" onClick={() => moveToPending(c)}>
-                              ↩ Reopen
+                            <button
+                              className="btn-edit-feedback"
+                              onClick={() => openEditModal(c, (c.interviews || [])[0]?.round ?? 1)}
+                              title="Edit feedback"
+                            >
+                              ✏️ Edit
                             </button>
                           </td>
                         </tr>
@@ -559,9 +478,7 @@ function InterviewPage() {
             <div className="modal-header">
               <div>
                 <h3>
-                  {modal.mode === "view" ? "View Round"
-                   : modal.mode === "edit" ? "Edit Round"
-                   : "Add Round"}
+                  {modal.mode === "edit" ? "Edit Feedback" : "Give Feedback"}
                 </h3>
                 <p className="modal-subtitle">
                   {modal.candidate.name}

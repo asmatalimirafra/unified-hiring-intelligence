@@ -22,6 +22,7 @@ function FitmentScorer() {
 
   const [roles, setRoles]                       = useState([]);
   const [rolesLoading, setRolesLoading]         = useState(true);
+  const [allAssignedCandidates, setAllAssignedCandidates] = useState([]);
   const [selectedRoleId, setSelectedRoleId]     = useState('');
   const [selectedRoleName, setSelectedRoleName] = useState('');
   const [candidates, setCandidates]             = useState([]);
@@ -47,51 +48,46 @@ function FitmentScorer() {
       .catch(() => {}); // non-critical, fail silently
   }, []);
 
-  // ── Fetch roles ──────────────────────────────────────────────────────────
+  // ── Fetch all candidates assigned to this interviewer, derive roles from them ──
   useEffect(() => {
-    axios.get(`${BASE_URL}/get-roles/`, HEADERS)
+    if (!interviewerEmail) { setRolesLoading(false); return; }
+    setRolesLoading(true);
+    axios.get(`${BASE_URL}/get-interviewer-candidates/${encodeURIComponent(interviewerEmail)}`, HEADERS)
       .then(res => {
-        setRoles((res.data || []).filter(r => r.status === 'open'));
-      })
-      .catch(err => console.error('Failed to fetch roles:', err))
-      .finally(() => setRolesLoading(false));
-  }, []);
-
-  // ── Fetch candidates assigned to this interviewer for selected role ───────
-  useEffect(() => {
-    if (!selectedRoleId || !interviewerEmail) {
-      setCandidates([]);
-      return;
-    }
-    const fetchCandidates = async () => {
-      setCandidatesLoading(true);
-      try {
-        // Only fetch candidates assigned to this interviewer
-        const res = await axios.get(
-          `${BASE_URL}/get-interviewer-candidates/${encodeURIComponent(interviewerEmail)}`,
-          HEADERS
-        );
-        const roleCandidates = (res.data || []).filter(
-          c => String(c.applied_role_id) === String(selectedRoleId)
-        );
-        const pending = roleCandidates.filter(c => c.interview_completed !== true);
-        setCandidates(pending);
-
-        const scoreMap = {};
+        const all = res.data || [];
+        setAllAssignedCandidates(all);
+        // Build unique roles list only from assigned candidates (pending only)
+        const pending = all.filter(c => c.interview_completed !== true);
+        const roleMap = {};
         pending.forEach(c => {
-          if (c.results?.fitment_score !== undefined) {
-            scoreMap[c.candidate_id] = c.results.fitment_score;
+          if (c.applied_role_id && c.applied_role) {
+            roleMap[String(c.applied_role_id)] = c.applied_role;
           }
         });
-        setInlineScores(scoreMap);
-      } catch (err) {
-        console.error('Failed to fetch candidates:', err);
-      } finally {
-        setCandidatesLoading(false);
+        const derivedRoles = Object.entries(roleMap).map(([role_id, role]) => ({ role_id, role }));
+        setRoles(derivedRoles);
+      })
+      .catch(err => console.error('Failed to fetch assigned candidates:', err))
+      .finally(() => setRolesLoading(false));
+  }, [interviewerEmail]);
+
+  // ── Filter candidates from already-fetched list when role changes ─────────
+  useEffect(() => {
+    if (!selectedRoleId) { setCandidates([]); return; }
+    setCandidatesLoading(true);
+    const pending = allAssignedCandidates.filter(
+      c => String(c.applied_role_id) === String(selectedRoleId) && c.interview_completed !== true
+    );
+    setCandidates(pending);
+    const scoreMap = {};
+    pending.forEach(c => {
+      if (c.results?.fitment_score !== undefined) {
+        scoreMap[c.candidate_id] = c.results.fitment_score;
       }
-    };
-    fetchCandidates();
-  }, [selectedRoleId, interviewerEmail]);
+    });
+    setInlineScores(scoreMap);
+    setCandidatesLoading(false);
+  }, [selectedRoleId, allAssignedCandidates]);
 
   const fetchFitmentData = useCallback(async (candidateId, forceRescore = false, candidateName = '') => {
     if (forceRescore) setRescoringId(candidateId);

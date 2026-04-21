@@ -14,11 +14,14 @@ function CompareCandidates() {
   const interviewerEmail = storedUser.email || '';
 
   const [roles, setRoles]                     = useState([]);
+  const [rolesLoading, setRolesLoading]       = useState(true);
+  const [allAssignedCandidates, setAllAssignedCandidates] = useState([]);
   const [selectedRoleId, setSelectedRoleId]   = useState('');
   const [selectedRoleName, setSelectedRoleName] = useState('');
   const [candidates, setCandidates]           = useState([]);
   const [selectedCandidates, setSelectedCandidates] = useState([]);
   const [comparisonData, setComparisonData]   = useState([]);
+  const [comparing, setComparing]             = useState(false);
   const [resumeModal, setResumeModal]         = useState({ open: false, candidateId: '', fileName: '' });
 
   // ── HR name lookup map ───────────────────────────────────────────────────
@@ -37,53 +40,39 @@ function CompareCandidates() {
       .catch(() => {}); // non-critical
   }, []);
 
-  // ── Fetch all open roles ─────────────────────────────────────────────────
+  // ── Fetch all assigned candidates once, derive roles from them ───────────
   useEffect(() => {
-    axios.get(`${BASE_URL}/get-roles/`, headers)
+    if (!interviewerEmail) { setRolesLoading(false); return; }
+    setRolesLoading(true);
+    axios.get(`${BASE_URL}/get-interviewer-candidates/${encodeURIComponent(interviewerEmail)}`, headers)
       .then(res => {
-        const roleList = Array.isArray(res.data) ? res.data : res.data.roles || [];
-        setRoles(roleList.filter(role => role.status === 'open'));
-      })
-      .catch(err => console.error("Role fetch error:", err));
-  }, []);
-
-  // ── Fetch candidates assigned to this interviewer for selected role ───────
-  useEffect(() => {
-    if (!selectedRoleId || !interviewerEmail) return;
-
-    const fetchCandidates = async () => {
-      try {
-        // Only fetch candidates assigned to this interviewer
-        const res = await axios.get(
-          `${BASE_URL}/get-interviewer-candidates/${encodeURIComponent(interviewerEmail)}`,
-          headers
-        );
-        const candidateList = Array.isArray(res.data) ? res.data : [];
-        const roleCandidates = candidateList.filter(
-          c => String(c.applied_role_id) === String(selectedRoleId)
-        );
-
-        const filtered = [];
-        for (let c of roleCandidates) {
-          if (c.interview_completed === true) continue;
-          try {
-            const f = await axios.get(`${BASE_URL}/score-fitment/${c.candidate_id}`, headers);
-            filtered.push({ ...c, fitmentData: f.data });
-          } catch (err) {
-            console.error("Fitment fetch failed:", err);
-            filtered.push({ ...c, fitmentData: null });
+        const all = Array.isArray(res.data) ? res.data : [];
+        setAllAssignedCandidates(all);
+        // Derive unique roles only from pending assigned candidates
+        const pending = all.filter(c => c.interview_completed !== true);
+        const roleMap = {};
+        pending.forEach(c => {
+          if (c.applied_role_id && c.applied_role) {
+            roleMap[String(c.applied_role_id)] = c.applied_role;
           }
-        }
+        });
+        setRoles(Object.entries(roleMap).map(([role_id, role]) => ({ role_id, role })));
+      })
+      .catch(err => console.error("Candidate fetch error:", err))
+      .finally(() => setRolesLoading(false));
+  }, [interviewerEmail]);
 
-        setCandidates(filtered);
-        setSelectedRoleName(roles.find(r => String(r.role_id) === String(selectedRoleId))?.role || '');
-      } catch (err) {
-        console.error("Candidate fetch error:", err);
-      }
-    };
-
-    fetchCandidates();
-  }, [selectedRoleId, roles, interviewerEmail]);
+  // ── Filter candidates from cached list when role changes ─────────────────
+  useEffect(() => {
+    if (!selectedRoleId) { setCandidates([]); return; }
+    const pending = allAssignedCandidates.filter(
+      c => String(c.applied_role_id) === String(selectedRoleId) && c.interview_completed !== true
+    );
+    setCandidates(pending);
+    setSelectedRoleName(
+      roles.find(r => String(r.role_id) === String(selectedRoleId))?.role || ''
+    );
+  }, [selectedRoleId, allAssignedCandidates, roles]);
 
   const handleToggle = (id) => {
     setSelectedCandidates(prev =>
@@ -96,6 +85,7 @@ function CompareCandidates() {
   };
 
   const fetchAndShowComparison = async () => {
+    setComparing(true);
     try {
       const data = await Promise.all(
         selectedCandidates.map(id =>
@@ -112,6 +102,8 @@ function CompareCandidates() {
       setComparisonData(enriched);
     } catch (err) {
       console.error('Comparison load failed:', err);
+    } finally {
+      setComparing(false);
     }
   };
 
@@ -122,16 +114,20 @@ function CompareCandidates() {
         Showing only candidates assigned to you
       </p>
 
-      <select
-        className="dropdown"
-        onChange={(e) => { setSelectedRoleId(e.target.value); setSelectedCandidates([]); setComparisonData([]); }}
-        value={selectedRoleId}
-      >
-        <option value="">Select Role</option>
-        {roles.map((r) => (
-          <option key={r.role_id} value={r.role_id}>{r.role}</option>
-        ))}
-      </select>
+      {rolesLoading ? (
+        <div className="inline-spinner" />
+      ) : (
+        <select
+          className="dropdown"
+          onChange={(e) => { setSelectedRoleId(e.target.value); setSelectedCandidates([]); setComparisonData([]); }}
+          value={selectedRoleId}
+        >
+          <option value="">— Choose a role —</option>
+          {roles.map((r) => (
+            <option key={r.role_id} value={r.role_id}>{r.role}</option>
+          ))}
+        </select>
+      )}
 
       {selectedRoleName && (
         <>
@@ -201,9 +197,9 @@ function CompareCandidates() {
           <button
             className="compare-btn"
             onClick={fetchAndShowComparison}
-            disabled={selectedCandidates.length < 2}
+            disabled={selectedCandidates.length < 2 || comparing}
           >
-            See Comparison
+            {comparing ? 'Loading…' : 'See Comparison'}
           </button>
         </>
       )}
