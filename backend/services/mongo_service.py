@@ -89,7 +89,7 @@ def get_all_closed_roles():
 
 def store_candidate(candidate_id, name, applied_role, applied_role_id, resume_text,
                     file_bytes, stored_file_name, email, github, location, phone,
-                    timestamp, hr_id=None):
+                    timestamp, hr_id=None, ats_score=None):
     """Insert candidate, tagged with the HR who added them."""
     try:
         doc = {
@@ -104,7 +104,8 @@ def store_candidate(candidate_id, name, applied_role, applied_role_id, resume_te
             "location": location,
             "phone": phone,
             "file_name": stored_file_name,
-            "resume_file": file_bytes
+            "resume_file": file_bytes,
+            "ats_score": ats_score
         }
         if hr_id:
             doc["hr_id"] = hr_id

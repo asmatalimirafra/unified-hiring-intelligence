@@ -352,12 +352,18 @@ async def add_candidate(
     if mongo_status is None:
         raise HTTPException(status_code=409, detail=f"Candidate ID '{candidate_id_str}' already exists.")
 
-    # Run Qdrant embedding in background — it uses Ollama which is slow (60-120s).
-    # The candidate is already saved to MongoDB so the HR portal works immediately.
-    # Qdrant is only needed for Fitment Scorer which runs later.
-    background_tasks.add_task(
-        store_resume_embedding, candidate_id_num, resume_text, name, applied_role
-    )
+    # ── Run Qdrant embedding in a fire-and-forget thread ────────────────────
+    # SentenceTransformer model.encode() is CPU-heavy (30-60s).
+    # Running it in a daemon thread means the HTTP response returns immediately
+    # and the embedding completes in the background without blocking anything.
+    import threading
+    def _embed_in_background():
+        try:
+            store_resume_embedding(candidate_id_num, resume_text, name, applied_role)
+            print(f"✅ Background embedding done for {candidate_id_str}")
+        except Exception as e:
+            print(f"⚠️ Background embedding failed for {candidate_id_str}: {e}")
+    threading.Thread(target=_embed_in_background, daemon=True).start()
 
     return {
         "candidate_id": candidate_id_str,
@@ -365,7 +371,7 @@ async def add_candidate(
         "applied_role_id": applied_role_id,
         "ats_score": ats_score,
         "mongo_status": mongo_status,
-        "qdrant_status": "queued"   # embedding runs in background
+        "qdrant_status": "queued"
     }
 
 @app.get("/get-candidates/")
