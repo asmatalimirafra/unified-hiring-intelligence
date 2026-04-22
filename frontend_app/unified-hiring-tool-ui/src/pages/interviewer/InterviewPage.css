@@ -654,3 +654,28 @@
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+/* ── View-only feedback button (rounds by other interviewers) ─────────────── */
+.btn-view-feedback {
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  border-radius: 6px;
+  border: 1px solid #94a3b8;
+  background: #f1f5f9;
+  color: #475569;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btn-view-feedback:hover {
+  background: #e2e8f0;
+}
+
+/* ── Info banner (view-only notice inside modal) ─────────────────────────── */
+.banner-info {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  padding: 0.6rem 1rem;
+  font-size: 0.85rem;
+}

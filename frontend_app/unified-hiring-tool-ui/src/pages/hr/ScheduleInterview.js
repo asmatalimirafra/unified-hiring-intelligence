@@ -139,16 +139,17 @@ export default function ScheduleInterview() {
 
   // A candidate is "truly scheduled" only if:
   // - status is "Scheduled"  AND
-  // - the interviewer has NOT yet submitted feedback for the scheduled round
-  //   (i.e. the interviews[] array has no entry for the next expected round)
-  // Once feedback is submitted, backend clears status — but for old DB records
-  // that are stuck, we also check: if interviews has data for the scheduled round,
-  // the round is done and the candidate should NOT stay in Scheduled.
+  // - feedback has NOT yet been submitted for the exact round that was scheduled
+  //
+  // Uses interview_details.scheduled_round (stored by backend at scheduling time)
+  // so the check is stable — it doesn't drift after feedback is added.
+  // Falls back to interviews.length + 1 for old records that pre-date this field.
   const isTrulyScheduled = (c) => {
     if (c.status !== 'Scheduled') return false;
-    const nextRound = getNextRound(c.interviews || []);
-    const scheduledRound = nextRound; // the round we scheduled is always the next one
-    // If interviews already contains this round's feedback, the round is done
+    const scheduledRound =
+      c.interview_details?.scheduled_round   // ← exact round stored at scheduling time
+      ?? (c.interviews || []).length + 1;    // ← fallback for old records
+    // If interviews already contains an entry for that round, feedback is done
     const feedbackDone = (c.interviews || []).some(i => i.round === scheduledRound);
     return !feedbackDone;
   };

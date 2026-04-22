@@ -396,10 +396,13 @@ async def schedule_interview(
     if not interviewer:
         raise HTTPException(status_code=404, detail=f"No interviewer account found with email '{interviewer_email}'. Please check the email and try again.")
 
+    # Calculate the round number being scheduled right now
+    candidate_doc = candidates_collection.find_one({"candidate_id": candidate_id})
+    completed_rounds = len(candidate_doc.get("interviews", []))
+    scheduled_round = completed_rounds + 1
+
     update_data = {
         "status": "Scheduled",
-        # ✅ Reset feedback_given so candidate re-appears in Pending
-        # for the new round on the Interviewer portal
         "feedback_given": False,
         "interview_details": {
             "interviewer_email": interviewer_email,
@@ -409,6 +412,7 @@ async def schedule_interview(
             "meeting_link": meeting_link or "",
             "scheduled_by_hr_id": hr_id or "",
             "scheduled_by_hr_name": hr_name or "",
+            "scheduled_round": scheduled_round,   # ← exact round being scheduled
         }
     }
 

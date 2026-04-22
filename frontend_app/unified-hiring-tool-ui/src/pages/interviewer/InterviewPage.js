@@ -147,6 +147,22 @@ function InterviewPage() {
   };
 
 
+  // Opens the modal in read-only mode — for rounds conducted by other interviewers
+  const openViewModal = (candidate, roundNum) => {
+    const iv = (candidate.interviews || []).find(i => i.round === roundNum);
+    if (!iv) return;
+    setForm({
+      round: roundNum,
+      date: iv.datetime ? new Date(iv.datetime).toISOString().split("T")[0] : "",
+      communication:    iv.ratings?.communication    || "",
+      domain_knowledge: iv.ratings?.domain_knowledge || "",
+      problem_solving:  iv.ratings?.problem_solving  || "",
+      comments: iv.comments || "",
+    });
+    setFormError("");
+    setModal({ open: true, mode: "view", candidate, roundNum });
+  };
+
   const closeModal = () => setModal({ open: false, mode: "add", candidate: null, roundNum: null });
 
   // ── Notes modal helpers ───────────────────────────────────────────────────
@@ -434,7 +450,7 @@ function InterviewPage() {
                     <th>Rounds Done</th>
                     <th>Overall Score</th>
                     <th>Recommendation</th>
-                    <th>Edit Round Feedback</th>
+                    <th>Round Feedback</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -490,20 +506,53 @@ function InterviewPage() {
                               ? <span className={`hire-badge ${hire.cls}`}>{hire.label}</span>
                               : "—"}
                           </td>
-                          {/* ✅ Edit button per round — no Give Feedback here */}
+                          {/* Per-round: only the most recent OWN round is editable */}
                           <td>
-                            <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
-                              {interviews.map(i => (
-                                <button
-                                  key={i.round}
-                                  className="btn-edit-feedback"
-                                  onClick={() => openEditModal(c, i.round)}
-                                  title={`Edit Round L${i.round} feedback`}
-                                >
-                                  ✏️ L{i.round}
-                                </button>
-                              ))}
-                            </div>
+                            {(() => {
+                              // Find the highest round number conducted by this interviewer
+                              const myRounds = interviews
+                                .filter(i => String(i.interviewer_id) === String(interviewerId))
+                                .map(i => i.round);
+                              const myLatestRound = myRounds.length > 0 ? Math.max(...myRounds) : null;
+
+                              return (
+                                <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
+                                  {interviews.map(i => {
+                                    const isMine = String(i.interviewer_id) === String(interviewerId);
+                                    // Editable only if it's mine AND it's my most recent round
+                                    const isEditable = isMine && i.round === myLatestRound;
+
+                                    if (isEditable) {
+                                      return (
+                                        <button
+                                          key={i.round}
+                                          className="btn-edit-feedback"
+                                          onClick={() => openEditModal(c, i.round)}
+                                          title={`Edit your L${i.round} feedback`}
+                                        >
+                                          ✏️ L{i.round}
+                                        </button>
+                                      );
+                                    } else {
+                                      return (
+                                        <button
+                                          key={i.round}
+                                          className="btn-view-feedback"
+                                          onClick={() => openViewModal(c, i.round)}
+                                          title={
+                                            isMine
+                                              ? `L${i.round} is an earlier round you conducted — view only`
+                                              : `L${i.round} was conducted by another interviewer — view only`
+                                          }
+                                        >
+                                          👁 L{i.round}
+                                        </button>
+                                      );
+                                    }
+                                  })}
+                                </div>
+                              );
+                            })()}
                           </td>
                         </tr>
                       );
@@ -524,7 +573,9 @@ function InterviewPage() {
             <div className="modal-header">
               <div>
                 <h3>
-                  {modal.mode === "edit" ? "Edit Feedback" : "Give Feedback"}
+                  {modal.mode === "edit" ? "Edit Feedback"
+                   : modal.mode === "view" ? "View Feedback"
+                   : "Give Feedback"}
                 </h3>
                 <p className="modal-subtitle">
                   {modal.candidate.name}
@@ -540,6 +591,17 @@ function InterviewPage() {
                 {formError}
               </div>
             )}
+            {modal.mode === "view" && (() => {
+              const iv = (modal.candidate?.interviews || []).find(i => i.round === modal.roundNum);
+              const conductedByMe = iv && String(iv.interviewer_id) === String(interviewerId);
+              return (
+                <div className="banner banner-info" style={{ margin: "0 1.5rem" }}>
+                  {conductedByMe
+                    ? `👁 L${modal.roundNum} is an earlier round you conducted. Only your most recent round is editable.`
+                    : `👁 L${modal.roundNum} was conducted by another interviewer. You can view but not edit this feedback.`}
+                </div>
+              );
+            })()}
 
             <div style={{ padding: "1rem 1.5rem", display: "flex", flexDirection: "column", gap: "1rem" }}>
               <div className="field-group">
