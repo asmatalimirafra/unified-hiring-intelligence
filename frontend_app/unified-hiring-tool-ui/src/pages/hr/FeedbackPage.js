@@ -53,12 +53,18 @@ export default function FeedbackPage() {
   const [offerCandidate, setOfferCandidate] = useState(null);
 
   // ── Mark offer generated in MongoDB ─────────────────────────────────────
-  const markOfferGenerated = async (candidateId) => {
+  const markOfferGenerated = async (candidateId, offerDetails) => {
     try {
-      await axios.post(`${BASE_URL}/mark-offer-generated/${candidateId}`, {}, axiosConfig);
-      // Update local candidates state so column refreshes immediately
+      await axios.post(
+        `${BASE_URL}/mark-offer-generated/${candidateId}`,
+        { offer_details: offerDetails },   // ← save form data to MongoDB
+        axiosConfig
+      );
+      // Update local state so button switches to "Preview Offer" immediately
       setCandidates(prev =>
-        prev.map(c => c.candidate_id === candidateId ? { ...c, offer_generated: true } : c)
+        prev.map(c => c.candidate_id === candidateId
+          ? { ...c, offer_generated: true, offer_details: offerDetails }
+          : c)
       );
     } catch (err) {
       console.error('Failed to mark offer generated:', err);
@@ -260,22 +266,34 @@ export default function FeedbackPage() {
                           : <span className="badge bg-secondary">No</span>}
                       </td>
                       <td>
-                        {/* ✅ Active only for Selected candidates with avg >= 3 */}
-                        <Button
-                          variant={canGenerateOffer ? 'primary' : 'secondary'}
-                          size="sm"
-                          disabled={!canGenerateOffer}
-                          title={
-                            !c.candidate_selected
-                              ? 'Only available for Selected candidates'
-                              : parseFloat(overall) < 3
-                                ? 'Avg score must be ≥ 3 to generate offer'
-                                : 'Generate Offer Letter'
-                          }
-                          onClick={() => canGenerateOffer && setOfferCandidate(c)}
-                        >
-                          <FaFileAlt /> Generate Offer
-                        </Button>
+                        {c.offer_generated ? (
+                          /* ── Already generated: show Preview button ── */
+                          <Button
+                            variant="success"
+                            size="sm"
+                            title="Preview or edit the generated offer letter"
+                            onClick={() => setOfferCandidate({ ...c, _mode: 'preview' })}
+                          >
+                            <FaFileAlt /> Preview Offer
+                          </Button>
+                        ) : (
+                          /* ── Not yet generated: show Generate button ── */
+                          <Button
+                            variant={canGenerateOffer ? 'primary' : 'secondary'}
+                            size="sm"
+                            disabled={!canGenerateOffer}
+                            title={
+                              !c.candidate_selected
+                                ? 'Only available for Selected candidates'
+                                : parseFloat(overall) < 3
+                                  ? 'Avg score must be ≥ 3 to generate offer'
+                                  : 'Generate Offer Letter'
+                            }
+                            onClick={() => canGenerateOffer && setOfferCandidate(c)}
+                          >
+                            <FaFileAlt /> Generate Offer
+                          </Button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -450,6 +468,8 @@ export default function FeedbackPage() {
         <OfferLetterModal
           candidate={offerCandidate}
           roleName={selectedRoleName}
+          mode={offerCandidate._mode || 'generate'}
+          savedDetails={offerCandidate.offer_details || null}
           onClose={() => setOfferCandidate(null)}
           onOfferGenerated={markOfferGenerated}
         />

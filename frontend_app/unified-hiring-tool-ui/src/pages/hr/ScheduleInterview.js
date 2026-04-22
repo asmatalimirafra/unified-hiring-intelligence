@@ -336,8 +336,8 @@ export default function ScheduleInterview() {
                 // FIX 2: Block next round if last round avg < 3
                 const lastRoundFailed = lastRoundAvg !== null && lastRoundAvg < 3;
 
-                // FIX 3: Select enabled only if ≥1 round done AND overall avg ≥ 3
-                const canSelect = completedCount >= 1 && avg !== null && avg >= 3;
+                // Select enabled only if ≥2 rounds done AND overall avg ≥ 3
+                const canSelect = completedCount >= 2 && avg !== null && avg >= 3;
 
                 return (
                   <tr key={c.candidate_id}>
@@ -387,8 +387,8 @@ export default function ScheduleInterview() {
                         onClick={() => canSelect && openSelectModal(c)}
                         disabled={!canSelect}
                         title={
-                          completedCount === 0 ? 'No rounds completed yet'
-                          : avg !== null && avg < 3 ? `Overall avg ${avg.toFixed(2)}/5 is below 3`
+                          completedCount < 2 ? `Need at least 2 completed rounds (${completedCount} done)`
+                          : avg !== null && avg < 3 ? `Overall avg ${avg.toFixed(2)}/5 is below 3 — cannot select`
                           : 'Review interviews and select candidate'
                         }
                       >
@@ -527,7 +527,7 @@ export default function ScheduleInterview() {
               <tr>
                 <th>Candidate ID</th><th>Name</th><th>Applied Role</th>
                 <th>Rounds Completed</th><th>Avg Score</th><th>Verdict</th>
-                <th>Resume</th><th>Undo</th>
+                <th>Resume</th>
               </tr>
             </thead>
             <tbody>
@@ -545,9 +545,6 @@ export default function ScheduleInterview() {
                     <td>
                       <a href={`${BASE_URL}/get-resume/${c.candidate_id}?ngrok-skip-browser-warning=true`}
                         target="_blank" rel="noopener noreferrer" className="resume-link">View PDF</a>
-                    </td>
-                    <td>
-                      <button className="btn-undo" onClick={() => handleUndo(c, 'rejected')} title="Move back to Pending">↩️ Undo</button>
                     </td>
                   </tr>
                 );

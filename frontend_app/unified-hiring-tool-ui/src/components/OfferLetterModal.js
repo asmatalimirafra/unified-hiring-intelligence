@@ -5,9 +5,11 @@ import './OfferLetterModal.css';
 
 const STEPS = { DETAILS: 'details', PREVIEW: 'preview' };
 
-export default function OfferLetterModal({ candidate, roleName, onClose, onOfferGenerated }) {
-  const [step, setStep] = useState(STEPS.DETAILS);
-  const [form, setForm] = useState({
+export default function OfferLetterModal({ candidate, roleName, onClose, onOfferGenerated, mode = 'generate', savedDetails = null }) {
+  // If mode is 'preview' and we have savedDetails, open directly on preview step
+  const [step, setStep] = useState(mode === 'preview' && savedDetails ? STEPS.PREVIEW : STEPS.DETAILS);
+
+  const defaultForm = {
     fixed_ctc: '',
     variable_ctc: '',
     joining_bonus: '',
@@ -16,8 +18,13 @@ export default function OfferLetterModal({ candidate, roleName, onClose, onOffer
     department: '',
     work_location: '',
     notice_period: '30',
-  });
+  };
+
+  // Pre-populate form with savedDetails if available (for preview/edit flow)
+  const [form, setForm] = useState(savedDetails ? { ...defaultForm, ...savedDetails } : defaultForm);
   const [errors, setErrors] = useState({});
+  // Track whether we are in edit mode inside preview (for preview-first flow)
+  const [isEditing, setIsEditing] = useState(false);
 
   const today = new Date().toLocaleDateString('en-IN', {
     day: '2-digit', month: 'long', year: 'numeric'
@@ -205,15 +212,16 @@ export default function OfferLetterModal({ candidate, roleName, onClose, onOffer
     doc.text('This is a confidential document intended solely for the named recipient. Mirafra Technologies Pvt. Ltd.', W / 2, 291, { align: 'center' });
 
     doc.save(`${candidate.name}_Offer_Letter.pdf`);
-    // ✅ Mark offer as generated in MongoDB
-    if (onOfferGenerated) onOfferGenerated(candidate.candidate_id);
+    // Save offer details to MongoDB so they can be previewed/edited later
+    if (onOfferGenerated) onOfferGenerated(candidate.candidate_id, form);
+    setIsEditing(false);
   };
 
   // ── Send to candidate (placeholder) ──────────────────────────────────────
   const handleSend = () => {
     alert(`📧 Email integration coming soon!\nOffer letter will be sent to: ${candidate.email || 'candidate email'}`);
-    // ✅ Mark offer as generated in MongoDB
-    if (onOfferGenerated) onOfferGenerated(candidate.candidate_id);
+    if (onOfferGenerated) onOfferGenerated(candidate.candidate_id, form);
+    setIsEditing(false);
   };
 
   return (
@@ -225,10 +233,11 @@ export default function OfferLetterModal({ candidate, roleName, onClose, onOffer
           <>
             <div className="ol-header">
               <div className="ol-header-left">
-                <span className="ol-step-tag">Step 1 of 2</span>
-                <h2>Generate Offer Letter</h2>
+                <span className="ol-step-tag">{isEditing ? 'Edit Mode' : 'Step 1 of 2'}</span>
+                <h2>{isEditing ? 'Edit Offer Letter' : 'Generate Offer Letter'}</h2>
                 <p className="ol-sub">
-                  Fill in the compensation details for <strong>{candidate.name}</strong>
+                  {isEditing ? 'Update the details for' : 'Fill in the compensation details for'}{' '}
+                  <strong>{candidate.name}</strong>
                 </p>
               </div>
               <button className="ol-close" onClick={onClose}>✕</button>
@@ -327,9 +336,31 @@ export default function OfferLetterModal({ candidate, roleName, onClose, onOffer
             </div>
 
             <div className="ol-footer">
-              <button className="ol-btn-cancel" onClick={onClose}>Cancel</button>
+              <button
+                className="ol-btn-cancel"
+                onClick={() => {
+                  if (isEditing) {
+                    // Cancel editing → go back to preview without saving changes
+                    setForm(savedDetails ? { ...{
+                      fixed_ctc: '', variable_ctc: '', joining_bonus: '',
+                      joining_date: '', designation: roleName || '',
+                      department: '', work_location: '', notice_period: '30',
+                    }, ...savedDetails } : {
+                      fixed_ctc: '', variable_ctc: '', joining_bonus: '',
+                      joining_date: '', designation: roleName || '',
+                      department: '', work_location: '', notice_period: '30',
+                    });
+                    setIsEditing(false);
+                    setStep(STEPS.PREVIEW);
+                  } else {
+                    onClose();
+                  }
+                }}
+              >
+                Cancel
+              </button>
               <button className="ol-btn-primary" onClick={handleProceed}>
-                Preview Offer Letter →
+                {isEditing ? 'Preview Updated Letter →' : 'Preview Offer Letter →'}
               </button>
             </div>
           </>
@@ -340,9 +371,13 @@ export default function OfferLetterModal({ candidate, roleName, onClose, onOffer
           <>
             <div className="ol-header">
               <div className="ol-header-left">
-                <span className="ol-step-tag">Step 2 of 2</span>
+                <span className="ol-step-tag">{mode === 'preview' ? 'Offer Letter' : 'Step 2 of 2'}</span>
                 <h2>Offer Letter Preview</h2>
-                <p className="ol-sub">Review before downloading or sending</p>
+                <p className="ol-sub">
+                  {mode === 'preview'
+                    ? <>Previously generated for <strong>{candidate.name}</strong></>
+                    : 'Review before downloading or sending'}
+                </p>
               </div>
               <button className="ol-close" onClick={onClose}>✕</button>
             </div>
@@ -451,10 +486,18 @@ export default function OfferLetterModal({ candidate, roleName, onClose, onOffer
             </div>
 
             <div className="ol-footer">
-              <button className="ol-btn-back" onClick={() => setStep(STEPS.DETAILS)}>
-                ← Edit Details
+              {/* Left side: Cancel (always closes modal) */}
+              <button className="ol-btn-cancel" onClick={onClose}>
+                Cancel
               </button>
               <div className="ol-footer-right">
+                {/* Edit button — switches to details form in edit mode */}
+                <button
+                  className="ol-btn-back"
+                  onClick={() => { setIsEditing(true); setStep(STEPS.DETAILS); }}
+                >
+                  ✏️ Edit
+                </button>
                 <button className="ol-btn-send" onClick={handleSend}>
                   📧 Send to Candidate
                 </button>

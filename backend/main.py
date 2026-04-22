@@ -295,11 +295,15 @@ async def update_candidate_api(candidate_id: str, update_data: dict = Body(...))
         raise HTTPException(status_code=404, detail="Candidate not found or no change applied.")
 
 @app.post("/mark-offer-generated/{candidate_id}", status_code=200)
-async def mark_offer_generated(candidate_id: str):
-    """Mark that an offer letter has been generated for this candidate."""
+async def mark_offer_generated(candidate_id: str, body: dict = Body({})):
+    """Mark offer as generated and save the offer form details for later preview/edit."""
+    offer_details = body.get("offer_details", {})
+    update_payload = {"offer_generated": True}
+    if offer_details:
+        update_payload["offer_details"] = offer_details   # ← save form data to MongoDB
     result = candidates_collection.update_one(
         {"candidate_id": candidate_id},
-        {"$set": {"offer_generated": True}}
+        {"$set": update_payload}
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail=f"Candidate '{candidate_id}' not found.")
@@ -442,37 +446,6 @@ async def unschedule_interview(payload: dict = Body(...)):
 # INTERVIEWER — fetch only assigned candidates
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@app.post("/fix-completed-interviews/", status_code=200)
-async def fix_completed_interviews():
-    """
-    One-time migration: clears status='Scheduled' for any candidate where the
-    interviewer has already submitted feedback for the scheduled round.
-    Fixes candidates stuck in the Scheduled section from before the auto-clear fix.
-    """
-    stuck = list(candidates_collection.find(
-        {"status": "Scheduled", "interviews": {"$exists": True, "$not": {"$size": 0}}}
-    ))
-    fixed = 0
-    for c in stuck:
-        interviews = c.get("interviews", [])
-        if not interviews:
-            continue
-        next_round = max(i["round"] for i in interviews) + 1
-        scheduled_round = next_round  # the round that was scheduled = next expected
-        # If interviews already has data for the scheduled round, feedback is done
-        feedback_done = any(i["round"] == scheduled_round for i in interviews)
-        # Also: if interviews has ANY data and status is Scheduled but no interview_details,
-        # the round was completed (backend cleared interview_details but not status in old code)
-        has_no_details = not c.get("interview_details")
-        if feedback_done or has_no_details:
-            candidates_collection.update_one(
-                {"candidate_id": c["candidate_id"]},
-                {"$unset": {"status": "", "interview_details": ""}}
-            )
-            fixed += 1
-    return {"message": f"Fixed {fixed} stuck candidate(s)."}
-
-
 @app.get("/get-interviewer-candidates/{email}")
 async def get_interviewer_candidates(email: str):
     candidates = get_candidates_for_interviewer(email)
@@ -539,14 +512,6 @@ async def add_interview(
     candidate_updated = add_interview_to_candidate(candidate_id, interview_data)
     if candidate_updated == 0:
         raise HTTPException(status_code=404, detail=f"Candidate ID '{candidate_id}' not found.")
-
-    # ── Clear "Scheduled" status now that the round is complete ──────────────
-    # Moves the candidate out of the Scheduled section on the HR portal so
-    # the HR portal can correctly evaluate the score and auto-reject if < 3.
-    candidates_collection.update_one(
-        {"candidate_id": candidate_id},
-        {"$unset": {"status": "", "interview_details": ""}}
-    )
 
     interview_log = {
         "candidate_id": candidate_id,

@@ -11,7 +11,6 @@ const axiosConfig = { headers: { 'ngrok-skip-browser-warning': 'true' } };
 function ViewCandidates() {
   const navigate = useNavigate();
 
-  // ── Logged-in HR account ─────────────────────────────────────────────────
   const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
   const hrId = storedUser.user_id || null;
 
@@ -28,10 +27,9 @@ function ViewCandidates() {
     try {
       const params = hrId ? { hr_id: hrId } : {};
       const res = await axios.get(`${BASE_URL}/get-roles/`, { ...axiosConfig, params });
-      const openRoles = Array.isArray(res.data)
-        ? res.data.filter(r => r.status?.toLowerCase().trim() === 'open')
-        : [];
-      setRoles(openRoles);
+      const allRoles = Array.isArray(res.data) ? res.data : [];
+      // Show all roles (open + closed) so completed candidates under closed roles still appear
+      setRoles(allRoles);
     } catch (err) {
       console.error('Error fetching roles:', err);
     }
@@ -47,13 +45,13 @@ function ViewCandidates() {
     }
   };
 
-  // ── Score helpers ─────────────────────────────────────────────────────────
+  // ── Score helpers ──────────────────────────────────────────────────────────
   const getAvgScore = (candidate, round) => {
     if (!candidate || !Array.isArray(candidate.interviews)) return '-';
     const roundData = candidate.interviews.find(i => i.round === round);
     if (!roundData?.ratings) {
       const maxRound = Math.max(...candidate.interviews.map(i => i.round), 0);
-      return round > maxRound ? 'No Need' : '-';
+      return round > maxRound ? '—' : '-';
     }
     const vals = Object.values(roundData.ratings);
     return vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1) : '-';
@@ -72,6 +70,43 @@ function ViewCandidates() {
     return [...rounds].sort((a, b) => a - b);
   };
 
+  // ── Status label: shows rounds done + scheduled state ─────────────────────
+  // e.g. "L1 done", "L1 done · L2 Scheduled", "No interviews yet"
+  const getStatusLabel = (c) => {
+    const interviews = c.interviews || [];
+    const completedRounds = interviews.length;
+    const isScheduled = c.status === 'Scheduled';
+
+    if (completedRounds === 0 && !isScheduled) {
+      return <span className="badge bg-secondary">No interviews yet</span>;
+    }
+
+    const parts = [];
+
+    // Show each completed round
+    if (completedRounds > 0) {
+      const maxDone = Math.max(...interviews.map(i => i.round));
+      parts.push(
+        <span key="done" className="badge bg-primary me-1">
+          L{maxDone} done
+        </span>
+      );
+    }
+
+    // Show scheduled state on top of that
+    if (isScheduled) {
+      const nextRound = completedRounds + 1;
+      parts.push(
+        <span key="sched" className="badge bg-warning text-dark">
+          L{nextRound} Scheduled →{' '}
+          {c.interview_details?.interviewer_name || c.interview_details?.interviewer_email || 'Interviewer'}
+        </span>
+      );
+    }
+
+    return <>{parts}</>;
+  };
+
   const handleDeleteCandidate = async (id) => {
     if (window.confirm('Are you sure you want to delete this candidate?')) {
       await axios.delete(`${BASE_URL}/delete-candidate/${id}`, axiosConfig);
@@ -83,19 +118,18 @@ function ViewCandidates() {
     ? candidates.filter(c => String(c.applied_role_id) === String(selectedRoleId))
     : [];
 
-  // ✅ Pending = not selected and not rejected (regardless of how many rounds done)
-  // Candidate stays here until HR explicitly presses Check Verdict
+  // Pending = not yet selected or rejected
   const pending   = filtered.filter(c => !c.candidate_selected && !c.candidate_rejected);
-
-  // ✅ Completed = HR has made a final verdict (selected or rejected)
+  // Completed = HR has given a final verdict
   const completed = filtered.filter(c => c.candidate_selected || c.candidate_rejected);
 
   const pendingRounds   = getAllRounds(pending);
   const completedRounds = getAllRounds(completed);
 
-  const renderTable = (list, title, rounds) => (
+  // ── Pending table ──────────────────────────────────────────────────────────
+  const renderPendingTable = (list, rounds) => (
     <div className="candidate-section">
-      <h4>{title}</h4>
+      <h4>⏳ Pending Interviews</h4>
       {list.length === 0 ? (
         <p className="empty-message">No candidates in this section.</p>
       ) : (
@@ -115,28 +149,14 @@ function ViewCandidates() {
           </thead>
           <tbody>
             {list.map(c => (
-              <tr key={c.candidate_id || Math.random()}>
+              <tr key={c.candidate_id}>
                 <td>{c.candidate_id}</td>
                 <td>{c.name}</td>
-                <td>
-                  {c.status === 'Scheduled' ? (
-                    <span className="badge bg-success">
-                      Scheduled → {c.interview_details?.interviewer_name || c.interview_details?.interviewer_email}
-                    </span>
-                  ) : (
-                    <span className="badge bg-secondary">Unscheduled</span>
-                  )}
-                </td>
+                {/* Status: shows rounds done + scheduled badge */}
+                <td>{getStatusLabel(c)}</td>
                 {rounds.map(r => <td key={r}>{getAvgScore(c, r)}</td>)}
                 <td><strong>{getOverallAvg(c.interviews || [])}</strong></td>
-                {/* ✅ Verdict column — shows outcome once HR checks verdict */}
-                <td>
-                  {c.candidate_selected
-                    ? <span className="badge bg-success">🏆 Selected</span>
-                    : c.candidate_rejected
-                      ? <span className="badge bg-danger">❌ Rejected</span>
-                      : <span className="badge bg-light text-muted">—</span>}
-                </td>
+                <td><span className="badge bg-light text-muted">—</span></td>
                 <td>
                   <button
                     className="btn btn-outline-primary btn-sm"
@@ -151,24 +171,15 @@ function ViewCandidates() {
                     <FaEye />
                   </button>
                 </td>
+                {/* Schedule: always active (navigate to Schedule page) */}
                 <td>
-                  {c.status === 'Scheduled' ? (
-                    <span
-                      className="badge bg-success"
-                      style={{ fontSize: '0.75rem', padding: '0.4rem 0.6rem', cursor: 'default' }}
-                      title={`Scheduled with ${c.interview_details?.interviewer_email || 'interviewer'}`}
-                    >
-                      ✓ Scheduled
-                    </span>
-                  ) : (
-                    <button
-                      className="btn btn-outline-success btn-sm"
-                      title="Schedule Interview"
-                      onClick={() => navigate('/hr/schedule')}
-                    >
-                      <FaCalendarPlus />
-                    </button>
-                  )}
+                  <button
+                    className="btn btn-outline-success btn-sm"
+                    title="Go to Schedule page"
+                    onClick={() => navigate('/hr/schedule')}
+                  >
+                    <FaCalendarPlus />
+                  </button>
                 </td>
                 <td>
                   <button
@@ -181,6 +192,93 @@ function ViewCandidates() {
                 </td>
               </tr>
             ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+
+  // ── Completed table ────────────────────────────────────────────────────────
+  const renderCompletedTable = (list, rounds) => (
+    <div className="candidate-section">
+      <h4>✅ Completed Interviews</h4>
+      {list.length === 0 ? (
+        <p className="empty-message">No candidates in this section.</p>
+      ) : (
+        <table className="table table-bordered">
+          <thead>
+            <tr>
+              <th>Candidate ID</th>
+              <th>Name</th>
+              <th>Status</th>
+              {rounds.map(r => <th key={r}>L{r} Avg</th>)}
+              <th>Overall Avg</th>
+              <th>Verdict</th>
+              <th>Resume</th>
+              <th>Schedule</th>
+              <th>Delete</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map(c => {
+              const completedCount = (c.interviews || []).length;
+              const maxDone = completedCount > 0
+                ? Math.max(...(c.interviews || []).map(i => i.round))
+                : null;
+              return (
+                <tr key={c.candidate_id}>
+                  <td>{c.candidate_id}</td>
+                  <td>{c.name}</td>
+                  {/* Status: shows how many rounds were completed */}
+                  <td>
+                    {maxDone !== null
+                      ? <span className="badge bg-primary">L{maxDone} done</span>
+                      : <span className="badge bg-secondary">No interviews</span>}
+                  </td>
+                  {rounds.map(r => <td key={r}>{getAvgScore(c, r)}</td>)}
+                  <td><strong>{getOverallAvg(c.interviews || [])}</strong></td>
+                  {/* Verdict: Selected or Rejected */}
+                  <td>
+                    {c.candidate_selected
+                      ? <span className="badge bg-success">🏆 Selected</span>
+                      : <span className="badge bg-danger">❌ Rejected</span>}
+                  </td>
+                  <td>
+                    <button
+                      className="btn btn-outline-primary btn-sm"
+                      title="View Resume"
+                      onClick={() =>
+                        window.open(
+                          `${BASE_URL}/get-resume/${c.candidate_id}?ngrok-skip-browser-warning=true`,
+                          '_blank', 'noopener,noreferrer'
+                        )
+                      }
+                    >
+                      <FaEye />
+                    </button>
+                  </td>
+                  {/* Schedule column: static "Completed" badge — no action needed */}
+                  <td>
+                    <span
+                      className="badge bg-secondary"
+                      style={{ fontSize: '0.75rem', padding: '0.4rem 0.6rem' }}
+                      title="Interview process completed"
+                    >
+                      Completed
+                    </span>
+                  </td>
+                  <td>
+                    <button
+                      className="btn btn-outline-danger btn-sm"
+                      onClick={() => handleDeleteCandidate(c.candidate_id)}
+                      title="Delete Candidate"
+                    >
+                      <FaTrashAlt />
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}
@@ -208,8 +306,8 @@ function ViewCandidates() {
 
       {selectedRoleId && (
         <>
-          {renderTable(pending,   '⏳ Pending Interviews',   pendingRounds)}
-          {renderTable(completed, '✅ Completed Interviews', completedRounds)}
+          {renderPendingTable(pending,   pendingRounds)}
+          {renderCompletedTable(completed, completedRounds)}
         </>
       )}
     </div>
