@@ -99,17 +99,27 @@ function InterviewPage() {
   const fetchCandidates = (roleId) => {
     const role = allAssignedCandidates.filter(c => String(c.applied_role_id) === String(roleId));
 
-    // Pending   = Scheduled AND no feedback given yet for this round
-    //             (feedback_given flag is set after interviewer submits feedback)
-    // Completed = feedback has been given for the scheduled round
-    //             Edit button is shown here — no further feedback allowed
-    //             until HR re-schedules a new round
-    setPendingCandidates(role.filter(c =>
-      c.status === "Scheduled" && !c.feedback_given
-    ));
-    setCompletedCandidates(role.filter(c =>
-      c.feedback_given === true
-    ));
+    // Pending = currently scheduled FOR this interviewer and round not yet done.
+    // Check: status is "Scheduled" AND the scheduled round has no feedback entry yet.
+    setPendingCandidates(role.filter(c => {
+      if (c.status !== "Scheduled") return false;
+      // Confirm it's scheduled for THIS interviewer
+      if (c.interview_details?.interviewer_email !== interviewerEmail) return false;
+      // Confirm the scheduled round hasn't been submitted yet
+      const scheduledRound =
+        c.interview_details?.scheduled_round ?? ((c.interviews || []).length + 1);
+      const feedbackDone = (c.interviews || []).some(i => i.round === scheduledRound);
+      return !feedbackDone;
+    }));
+
+    // Completed = this interviewer has at least one round in the interviews[] array.
+    // Does NOT depend on status or feedback_given — works even after status is cleared.
+    setCompletedCandidates(role.filter(c => {
+      const myRounds = (c.interviews || []).filter(
+        i => String(i.interviewer_id) === String(interviewerId)
+      );
+      return myRounds.length > 0;
+    }));
   };
 
   useEffect(() => {
@@ -240,13 +250,8 @@ function InterviewPage() {
         fd.append("problem_solving",  p);
         fd.append("comments",         form.comments.trim());
         await axios.post(`${BASE_URL}/add-interview/`, fd, axiosConfig);
-        // ✅ Mark feedback_given = true so candidate moves to Completed section.
-        // HR must re-schedule to create a new round — this resets feedback_given.
-        await axios.put(
-          `${BASE_URL}/update-candidate/${modal.candidate.candidate_id}`,
-          { feedback_given: true },
-          axiosConfig
-        );
+        // No need to set feedback_given — completed section is now derived from
+        // the interviews[] array directly (checks interviewer_id per round).
         showSuccess(`✅ Feedback for Round L${form.round} submitted! Candidate moved to Completed.`);
       }
       closeModal();

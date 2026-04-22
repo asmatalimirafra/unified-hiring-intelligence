@@ -124,14 +124,37 @@ def get_all_candidates(hr_id=None):
 
 def get_candidates_for_interviewer(interviewer_email):
     """
-    Return candidates that have been scheduled for a specific interviewer.
-    Used by the Interviewer portal.
+    Return ALL candidates relevant to this interviewer:
+    - Currently scheduled for them (pending round), OR
+    - Have a completed interview round conducted by them (by interviewer_id lookup)
+    This ensures candidates remain visible in the Completed section after feedback
+    clears the status/interview_details fields.
     """
-    return list(candidates_collection.find(
+    # First resolve interviewer_email → interviewer_id (user_id in users collection)
+    user = users_collection.find_one({"email": interviewer_email}, {"user_id": 1})
+    interviewer_id = user.get("user_id") if user else None
+
+    query_conditions = [
+        # Scheduled (pending feedback) — matched by email in interview_details
         {
             "status": "Scheduled",
             "interview_details.interviewer_email": interviewer_email
-        },
+        }
+    ]
+
+    if interviewer_id:
+        # Completed rounds — matched by interviewer_id inside interviews array
+        query_conditions.append(
+            {"interviews": {"$elemMatch": {"interviewer_id": interviewer_id}}}
+        )
+    else:
+        # Fallback: match by email stored in interview_details even after status cleared
+        query_conditions.append(
+            {"interview_details.interviewer_email": interviewer_email}
+        )
+
+    return list(candidates_collection.find(
+        {"$or": query_conditions},
         {"_id": 0, "resume_file": 0}
     ))
 

@@ -12,7 +12,9 @@ function getRoundAvg(interviews = [], round) {
   const r = interviews.find(i => i.round === round);
   if (!r?.ratings) return null;
   const vals = Object.values(r.ratings);
-  return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+  if (!vals.length) return null;
+  const raw = vals.reduce((a, b) => a + b, 0) / vals.length;
+  return Math.round(raw * 100) / 100; // round to 2dp to avoid floating point drift
 }
 
 function getOverallAvg(interviews = []) {
@@ -66,6 +68,11 @@ export default function ScheduleInterview() {
   // FIX 3: Select confirmation modal
   const [selectModal, setSelectModal] = useState({ open: false, candidate: null });
 
+  // Interviewers popup — shows who conducted which round
+  const [interviewersModal, setInterviewersModal] = useState({ open: false, candidate: null });
+  const openInterviewersModal  = (c) => setInterviewersModal({ open: true, candidate: c });
+  const closeInterviewersModal = ()  => setInterviewersModal({ open: false, candidate: null });
+
   const [submitting, setSubmitting] = useState(false);
   const [statusMsg,  setStatusMsg]  = useState('');
   const [statusType, setStatusType] = useState('');
@@ -104,7 +111,8 @@ export default function ScheduleInterview() {
         if (!feedbackDone) return false; // round truly in progress — do not reject yet
       }
       const lastAvg = getLastRoundAvg(c.interviews || []);
-      return lastAvg !== null && lastAvg < 3;
+      // Round to 2 decimals to avoid floating point drift (e.g. 2.9999 instead of 3.0)
+      return lastAvg !== null && Math.round(lastAvg * 100) / 100 < 3;
     });
 
     for (const c of toReject) {
@@ -162,7 +170,7 @@ export default function ScheduleInterview() {
     if (isTrulyScheduled(c)) return false;
     // If rounds are done, only show in pending if last round passed (>= 3)
     const lastAvg = getLastRoundAvg(c.interviews || []);
-    if (lastAvg !== null && lastAvg < 3) return false;
+    if (lastAvg !== null && Math.round(lastAvg * 100) / 100 < 3) return false;
     return applyRoleFilter(c);
   });
 
@@ -347,7 +355,13 @@ export default function ScheduleInterview() {
                     <td>{getRoleName(c.applied_role_id) || c.applied_role}</td>
                     <td>
                       {lastRound !== null
-                        ? <span className="round-pill">L{lastRound} done</span>
+                        ? <span
+                            className="round-pill round-pill-clickable"
+                            onClick={() => openInterviewersModal(c)}
+                            title="Click to see interviewers per round"
+                          >
+                            L{lastRound} done 👥
+                          </span>
                         : <span className="no-rounds">None yet</span>}
                     </td>
                     <td>
@@ -435,7 +449,13 @@ export default function ScheduleInterview() {
                     <td><span className="round-pill">L{nextRound}</span></td>
                     <td>
                       {completedRounds > 0
-                        ? <span className="round-pill completed">L{completedRounds} done</span>
+                        ? <span
+                            className="round-pill completed round-pill-clickable"
+                            onClick={() => openInterviewersModal(c)}
+                            title="Click to see interviewers per round"
+                          >
+                            L{completedRounds} done 👥
+                          </span>
                         : <span className="no-rounds">None yet</span>}
                     </td>
                     <td>{c.interview_details?.interviewer_email || '—'}</td>
@@ -495,7 +515,17 @@ export default function ScheduleInterview() {
                     <td>{c.candidate_id}</td>
                     <td><strong>{c.name}</strong> 🏆</td>
                     <td>{getRoleName(c.applied_role_id) || c.applied_role}</td>
-                    <td>{(c.interviews || []).length} round(s)</td>
+                    <td>
+                      {(c.interviews || []).length > 0
+                        ? <span
+                            className="round-pill round-pill-clickable"
+                            onClick={() => openInterviewersModal(c)}
+                            title="Click to see interviewers per round"
+                          >
+                            {(c.interviews || []).length} round(s) 👥
+                          </span>
+                        : <span className="no-rounds">None yet</span>}
+                    </td>
                     <td>{avg !== null ? <strong>{avg.toFixed(2)} / 5</strong> : '—'}</td>
                     <td>{verdict ? <span className={`verdict-tag ${verdict.cls}`}>{verdict.label}</span> : '—'}</td>
                     <td>
@@ -540,7 +570,17 @@ export default function ScheduleInterview() {
                     <td>{c.candidate_id}</td>
                     <td>{c.name}</td>
                     <td>{getRoleName(c.applied_role_id) || c.applied_role}</td>
-                    <td>{(c.interviews || []).length} round(s)</td>
+                    <td>
+                      {(c.interviews || []).length > 0
+                        ? <span
+                            className="round-pill round-pill-clickable"
+                            onClick={() => openInterviewersModal(c)}
+                            title="Click to see interviewers per round"
+                          >
+                            {(c.interviews || []).length} round(s) 👥
+                          </span>
+                        : <span className="no-rounds">None yet</span>}
+                    </td>
                     <td>{avg !== null ? <strong>{avg.toFixed(2)} / 5</strong> : '—'}</td>
                     <td>{verdict ? <span className={`verdict-tag ${verdict.cls}`}>{verdict.label}</span> : '—'}</td>
                     <td>
@@ -717,6 +757,72 @@ export default function ScheduleInterview() {
                 <button className="btn-confirm btn-select-confirm" onClick={handleSelectCandidate}>
                   🏆 Select Candidate
                 </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Modal: Interviewers per Round ──────────────────────────────────── */}
+      {interviewersModal.open && interviewersModal.candidate && (() => {
+        const c = interviewersModal.candidate;
+        const interviews = [...(c.interviews || [])].sort((a, b) => a.round - b.round);
+        return (
+          <div className="modal-backdrop" onClick={closeInterviewersModal}>
+            <div className="modal-box" onClick={e => e.stopPropagation()}>
+              <div className="modal-header">
+                <div>
+                  <h3>👥 Interviewers — {c.name}</h3>
+                  <p className="modal-sub">
+                    {getRoleName(c.applied_role_id) || c.applied_role}
+                    &nbsp;·&nbsp;
+                    <span style={{ fontSize: '0.8rem', color: '#888' }}>{c.candidate_id}</span>
+                  </p>
+                </div>
+                <button className="modal-close" onClick={closeInterviewersModal}>✕</button>
+              </div>
+              <div className="modal-body">
+                {interviews.length === 0 ? (
+                  <p style={{ color: '#888', textAlign: 'center' }}>No interviews completed yet.</p>
+                ) : (
+                  <table className="select-rounds-table">
+                    <thead>
+                      <tr>
+                        <th>Round</th>
+                        <th>Interviewer ID</th>
+                        <th>Round Avg</th>
+                        <th>Date</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {interviews.map((iv, idx) => {
+                        const roundAvg = getRoundAvg(c.interviews, iv.round);
+                        const dt = iv.datetime
+                          ? new Date(iv.datetime).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                          : '—';
+                        return (
+                          <tr key={idx}>
+                            <td><span className="round-pill">L{iv.round}</span></td>
+                            <td>
+                              <span style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                                {iv.interviewer_id || '—'}
+                              </span>
+                            </td>
+                            <td>
+                              <strong className={roundAvg !== null && Math.round(roundAvg * 100) / 100 >= 3 ? 'score-pass' : 'score-fail'}>
+                                {roundAvg !== null ? roundAvg.toFixed(2) : '—'}
+                              </strong>
+                            </td>
+                            <td style={{ fontSize: '0.85rem', color: '#555' }}>{dt}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+              <div className="modal-footer">
+                <button className="btn-cancel" onClick={closeInterviewersModal}>Close</button>
               </div>
             </div>
           </div>
