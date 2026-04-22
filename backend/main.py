@@ -3,7 +3,7 @@ import re
 from datetime import datetime
 from typing import Optional
 
-from fastapi import FastAPI, UploadFile, Form, HTTPException, Body, Query
+from fastapi import FastAPI, UploadFile, Form, HTTPException, Body, Query, BackgroundTasks
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -262,6 +262,7 @@ async def get_roles_closed():
 
 @app.post("/add-candidate/", status_code=201)
 async def add_candidate(
+    background_tasks: BackgroundTasks,
     name: str = Form(...),
     applied_role: str = Form(...),
     resume_file: UploadFile = Form(...),
@@ -351,7 +352,12 @@ async def add_candidate(
     if mongo_status is None:
         raise HTTPException(status_code=409, detail=f"Candidate ID '{candidate_id_str}' already exists.")
 
-    qdrant_status = store_resume_embedding(candidate_id_num, resume_text, name, applied_role)
+    # Run Qdrant embedding in background — it uses Ollama which is slow (60-120s).
+    # The candidate is already saved to MongoDB so the HR portal works immediately.
+    # Qdrant is only needed for Fitment Scorer which runs later.
+    background_tasks.add_task(
+        store_resume_embedding, candidate_id_num, resume_text, name, applied_role
+    )
 
     return {
         "candidate_id": candidate_id_str,
@@ -359,7 +365,7 @@ async def add_candidate(
         "applied_role_id": applied_role_id,
         "ats_score": ats_score,
         "mongo_status": mongo_status,
-        "qdrant_status": qdrant_status
+        "qdrant_status": "queued"   # embedding runs in background
     }
 
 @app.get("/get-candidates/")

@@ -323,7 +323,7 @@ export default function AddCandidate() {
                 <div className="processing-spinner" />
                 <p className="processing-text">Processing Resume…</p>
                 <p className="processing-sub">Extracting details &amp; calculating ATS score.</p>
-                <p className="processing-sub">This usually takes 5–10 seconds.</p>
+                <p className="processing-sub">Usually done in a few seconds.</p>
                 <button
                   type="button"
                   className="btn-cancel-upload"
