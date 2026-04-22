@@ -55,128 +55,124 @@ from services.ollama_utils import (
 
 from services.auth_utils import verify_password
 
-# ── ATS Score: lenient keyword-match of resume vs JD ────────────────────────
+# ── ATS Score: industry-grade lenient keyword matching ───────────────────────
 def calculate_ats_score(resume_text: str, jd_text: str) -> float:
     """
-    Lenient ATS score (0-100) designed as an initial filter, not a strict gate.
-
-    Key design decisions:
-    1. Only score against SHORT meaningful tokens from the JD (likely skills/tools),
-       not every word — avoids penalising for filler words like "responsibilities"
-    2. Partial/stem matching — "python" matches "python3", "pythonic"
-    3. Common abbreviation expansion — "ml" matches "machine learning" and vice versa
-    4. Score floor of 40 if resume has decent length (gives benefit of doubt)
-    5. Threshold for rejection is 50% — generous enough for most valid candidates
+    ATS score (0-100) that mirrors real ATS systems:
+    1. Split merged PDF words (pdfplumber merges MachineLearning -> two tokens)
+    2. Strip HTML from JD (ReactQuill stores HTML)
+    3. Remove ALL boilerplate - only keep skill/tech tokens
+    4. Expand abbreviations both ways (ml<->machine learning)
+    5. Stem/prefix matching - python matches python3
     """
-    import re
+    import re as _re
 
     def strip_html(text):
-        text = re.sub(r"<[^>]+>", " ", text)
+        text = _re.sub(r"<[^>]+>", " ", text)
         text = text.replace("&nbsp;", " ").replace("&amp;", "&")
         text = text.replace("&lt;", "<").replace("&gt;", ">")
         text = text.replace("&quot;", '"').replace("&#39;", "'")
         return text
 
-    # Words that appear in every JD but mean nothing for matching
-    STOPWORDS = {
+    def split_merged(text):
+        text = _re.sub(r'([a-z])([A-Z])', r'\g<1> \g<2>', text)
+        text = _re.sub(r'([a-zA-Z])([0-9])', r'\g<1> \g<2>', text)
+        text = _re.sub(r'([0-9])([a-zA-Z])', r'\g<1> \g<2>', text)
+        return text
+
+    FILLER = {
         "the","and","for","are","was","were","with","this","that","have","has",
         "had","not","from","you","your","will","can","should","would","could",
         "may","our","their","its","also","all","any","but","more","than","into",
         "over","such","being","been","each","which","when","they","some","who",
         "what","how","about","other","like","just","then","there","these","those",
-        "per","etc","via","must","able","work","use","used","using","good","well",
-        "team","year","years","role","roles","strong","experience","minimum",
-        "required","preferred","including","following","responsibilities","duties",
-        "candidate","qualifications","requirements","position","job","company",
-        "apply","plus","bonus","nice","have","looking","join","seeking","hire",
-        "excellent","knowledge","skills","ability","working","related","relevant",
-        "develop","design","build","implement","degree","bachelor","master",
-        "equivalent","field","least","hands","proven","track","record"
+        "work","use","used","using","must","able","good","well","per","etc","via",
+        "develop","design","build","implement","deploy","write","create","manage",
+        "collaborate","communicate","maintain","support","lead","drive","ensure",
+        "provide","deliver","define","identify","analyze","analyse","improve",
+        "optimize","research","test","debug","review","monitor","handle","help",
+        "coordinate","report","assist","contribute","participate","engage",
+        "team","year","years","role","roles","position","job","company","new",
+        "candidate","qualifications","requirements","responsibilities","duties",
+        "following","including","minimum","required","preferred","plus","bonus",
+        "apply","join","seeking","hire","looking","experience","knowledge",
+        "skills","ability","working","related","relevant","strong","excellent",
+        "proven","hands","degree","bachelor","master","equivalent","field",
+        "understanding","familiarity","proficiency","growing","passionate",
+        "cross","functional","clean","maintainable","practices","techniques",
+        "architectures","models","pipelines","teams","science","technology",
+        "communication","enthusiastic","motivated","innovative","ownership",
+        "an","in","on","of","or","at","to","is","it","be","by","as","we","us",
+        "up","do","go","no","so","if","he","she","me","my","am","a","i","title",
+        "about","who","what","want","get","make","take","see","come","well",
+        "analytical","detail","oriented","paced","environment","enterprise",
     }
 
-    # Abbreviation expansion map — both directions
     ABBREV = {
-        "ml":  ["machine", "learning"],
-        "ai":  ["artificial", "intelligence"],
-        "dl":  ["deep", "learning"],
-        "nlp": ["natural", "language", "processing"],
-        "cv":  ["computer", "vision"],
-        "llm": ["large", "language", "model"],
-        "rag": ["retrieval", "augmented", "generation"],
-        "api": ["application", "programming", "interface"],
-        "ci":  ["continuous", "integration"],
-        "cd":  ["continuous", "deployment"],
-        "oop": ["object", "oriented", "programming"],
-        "sql": ["structured", "query", "language"],
-        "aws": ["amazon", "web", "services"],
-        "gcp": ["google", "cloud", "platform"],
-        "k8s": ["kubernetes"],
-        "js":  ["javascript"],
-        "ts":  ["typescript"],
+        "ml":   ["machine","learning"],
+        "ai":   ["artificial","intelligence"],
+        "dl":   ["deep","learning"],
+        "nlp":  ["natural","language","processing"],
+        "cv":   ["computer","vision"],
+        "llm":  ["large","language","model"],
+        "llms": ["large","language","models"],
+        "rag":  ["retrieval","augmented","generation"],
+        "api":  ["application","programming","interface"],
+        "ci":   ["continuous","integration"],
+        "cd":   ["continuous","deployment"],
+        "cicd": ["continuous","integration","deployment"],
+        "oop":  ["object","oriented","programming"],
+        "sql":  ["structured","query","language"],
+        "aws":  ["amazon","web","services"],
+        "gcp":  ["google","cloud","platform"],
+        "k8s":  ["kubernetes"],
+        "js":   ["javascript"],
+        "ts":   ["typescript"],
+        "db":   ["database"],
+        "ui":   ["user","interface"],
+        "ux":   ["user","experience"],
     }
 
-    def expand_abbrevs(token_set):
-        """Add expanded forms for any abbreviations found in the token set."""
+    def expand(token_set):
         extra = set()
-        for token in list(token_set):
-            if token in ABBREV:
-                extra.update(ABBREV[token])
-            # Reverse: if token is an expansion, add abbreviation
-            for abbr, expansions in ABBREV.items():
-                if token in expansions:
+        for t in token_set:
+            if t in ABBREV:
+                extra.update(ABBREV[t])
+            for abbr, exps in ABBREV.items():
+                if t in exps:
                     extra.add(abbr)
         return token_set | extra
 
-    def tokenise(text):
+    def tokenise(text, is_resume=False):
+        if is_resume:
+            text = split_merged(text)
         clean = strip_html(text)
-        words = re.findall(r"[a-zA-Z0-9#\+\.\_]+", clean.lower())
-        tokens = {w for w in words if len(w) > 1 and w not in STOPWORDS}
-        return expand_abbrevs(tokens)
+        words = _re.findall(r"[a-zA-Z][a-zA-Z0-9#\.+\-_]*", clean.lower())
+        tokens = {w for w in words if len(w) >= 2 and w not in FILLER}
+        return expand(tokens)
 
-    def partial_match(jd_kw, resume_tokens):
-        """
-        Returns True if the JD keyword matches any resume token with these rules:
-        1. Exact match
-        2. Resume token starts with JD keyword (stem match): "python" matches "python3"
-        3. JD keyword starts with resume token (stem match): "pytorch" matched by "pytorch"
-        Only apply stem matching for tokens >= 4 chars to avoid false positives.
-        """
+    def matches(jd_kw, resume_tokens):
         if jd_kw in resume_tokens:
             return True
         if len(jd_kw) >= 4:
+            prefix = jd_kw[:4]
             for rt in resume_tokens:
-                if rt.startswith(jd_kw) or jd_kw.startswith(rt):
+                if len(rt) >= 4 and rt[:4] == prefix:
                     return True
         return False
 
     if not resume_text or not jd_text:
-        return 0.0
+        return 50.0
 
-    jd_tokens     = tokenise(jd_text)
-    resume_tokens = tokenise(resume_text)
+    jd_tokens     = tokenise(jd_text, is_resume=False)
+    resume_tokens = tokenise(resume_text, is_resume=True)
 
     if not jd_tokens:
-        return 0.0
+        return 50.0
 
-    # ── Only score against SHORT tokens (1-15 chars) from the JD ─────────────
-    # Long tokens are usually sentences or compound phrases, not keywords.
-    # Short tokens are skills, tools, technologies — what actually matters.
-    jd_keywords = {t for t in jd_tokens if len(t) <= 15}
-
-    if not jd_keywords:
-        return 0.0
-
-    matched_count = sum(1 for kw in jd_keywords if partial_match(kw, resume_tokens))
-    raw_score = (matched_count / len(jd_keywords)) * 100
-
-    # ── Score floor: if resume is substantial (>200 words), give min 40% ─────
-    # Prevents valid candidates from being rejected just because the JD uses
-    # different terminology. A real human reviewer would still consider them.
-    resume_word_count = len(resume_text.split())
-    if resume_word_count > 200 and raw_score < 40:
-        raw_score = 40.0
-
-    return round(min(raw_score, 100.0), 2)
+    matched_count = sum(1 for kw in jd_tokens if matches(kw, resume_tokens))
+    score = (matched_count / len(jd_tokens)) * 100
+    return round(min(score, 100.0), 2)
 
 from fastapi.responses import StreamingResponse
 from bson import ObjectId
