@@ -57,6 +57,7 @@ function RolesPage() {
 
   const [openRoles, setOpenRoles] = useState([]);
   const [closedRoles, setClosedRoles] = useState([]);
+  const [allRolesGlobal, setAllRolesGlobal] = useState([]); // ← all roles across ALL HRs, for duplicate ID check only
   const [selectedJD, setSelectedJD] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -82,6 +83,7 @@ function RolesPage() {
 
   useEffect(() => {
     fetchRoles();
+    fetchAllRolesGlobal();
   }, []); // eslint-disable-line
 
   const fetchRoles = async () => {
@@ -97,6 +99,19 @@ function RolesPage() {
       setClosedRoles(roles.filter(role => role.status === "closed"));
     } catch (err) {
       console.error('Failed to fetch roles:', err);
+    }
+  };
+
+  // ── Fetch ALL roles across every HR account — used only for Role ID duplicate check ──
+  const fetchAllRolesGlobal = async () => {
+    try {
+      const response = await axios.get(`${BASE_URL}/get-roles/`, {
+        headers: { "ngrok-skip-browser-warning": "true" }
+        // No hr_id param → returns all roles globally
+      });
+      setAllRolesGlobal(Array.isArray(response.data) ? response.data : []);
+    } catch (err) {
+      console.error('Failed to fetch global roles for duplicate check:', err);
     }
   };
 
@@ -174,11 +189,11 @@ function RolesPage() {
   const handleRoleIdChange = (e) => {
     const value = e.target.value;
     setNewRoleData({ ...newRoleData, role_id: value });
-    const allRoles = [...openRoles, ...closedRoles];
-    const isDuplicate = allRoles.some(
+    // ── Check against ALL roles globally (not just this HR's) ────────────
+    const isDuplicate = allRolesGlobal.some(
       (role) => String(role.role_id) === String(value.trim())
     );
-    setRoleIdError(isDuplicate ? '⚠️ This Role ID already exists. Please use a unique ID.' : '');
+    setRoleIdError(isDuplicate ? '⚠️ This Role ID is already taken. Please use a unique ID.' : '');
   };
 
   const handleAddRole = async (e) => {
@@ -202,6 +217,7 @@ function RolesPage() {
       setNewRoleData({ role_id: '', role: '', positions: 1, jd_text: '' });
       setRoleIdError('');
       fetchRoles();
+      fetchAllRolesGlobal(); // ← keep global list in sync
     } catch (err) {
       console.error('Error adding role:', err);
       if (err.response?.status === 400) {

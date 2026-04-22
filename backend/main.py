@@ -509,6 +509,14 @@ async def add_interview(
     if candidate_updated == 0:
         raise HTTPException(status_code=404, detail=f"Candidate ID '{candidate_id}' not found.")
 
+    # ── Clear "Scheduled" status now that the round is complete ──────────────
+    # Moves the candidate out of the Scheduled section on the HR portal so
+    # the HR portal can correctly evaluate the score and auto-reject if < 3.
+    candidates_collection.update_one(
+        {"candidate_id": candidate_id},
+        {"$unset": {"status": "", "interview_details": ""}}
+    )
+
     interview_log = {
         "candidate_id": candidate_id,
         "round": round_num,

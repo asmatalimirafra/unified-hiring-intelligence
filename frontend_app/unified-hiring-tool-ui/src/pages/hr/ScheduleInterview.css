@@ -388,3 +388,68 @@
 /* ── Selected section & row ──────────────────────────────────────────────── */
 .selected-section { border: 2px solid #86efac; }
 .selected-row td  { background: #f0fdf4 !important; }
+
+/* ── New classes for ScheduleInterview fixes ─────────────────────────────── */
+
+/* FIX 2: Disabled Add Interview button */
+.btn-schedule-disabled {
+  background: #e2e8f0 !important;
+  color: #94a3b8 !important;
+  border-color: #cbd5e1 !important;
+  cursor: not-allowed !important;
+  opacity: 0.7;
+}
+
+/* FIX 3: Wide modal for Select Candidate */
+.modal-box-wide {
+  width: 780px;
+  max-width: 95vw;
+}
+
+/* FIX 3: Per-round table inside Select modal */
+.select-rounds-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  margin-bottom: 1.2rem;
+}
+.select-rounds-table th {
+  background: #f1f5f9;
+  padding: 8px 12px;
+  text-align: left;
+  font-weight: 600;
+  color: #475569;
+  border-bottom: 2px solid #e2e8f0;
+}
+.select-rounds-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: top;
+}
+
+/* FIX 3: Score colours */
+.score-pass { color: #16a34a; }
+.score-fail { color: #dc2626; }
+
+/* FIX 3: Overall summary row at bottom of Select modal */
+.select-summary {
+  display: flex;
+  align-items: center;
+  gap: 1.2rem;
+  padding: 0.8rem 1rem;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+.select-overall { display: flex; align-items: center; gap: 0.5rem; }
+.select-overall-label { font-size: 0.9rem; color: #64748b; }
+.select-overall-score { font-size: 1.3rem; }
+
+/* FIX 3: Select confirm button — distinct green */
+.btn-select-confirm {
+  background: #16a34a !important;
+  border-color: #16a34a !important;
+}
+.btn-select-confirm:hover {
+  background: #15803d !important;
+}
