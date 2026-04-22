@@ -91,12 +91,18 @@ export default function ScheduleInterview() {
     } catch (err) { console.error('Failed to fetch candidates:', err); }
   };
 
-  // ── FIX 1: Silently auto-reject candidates who scored < 3 in their latest round
-  // The backend now clears status after feedback is submitted, so we no longer
-  // need to skip "Scheduled" candidates — if interviews[] has data, the round is done.
+  // ── Auto-reject candidates who scored < 3 in their latest completed round ────
+  // Skips candidates where the interview is still pending (not yet done).
+  // Uses the same isTrulyScheduled logic to avoid acting on in-progress interviews.
   const autoRejectIfNeeded = async (cands) => {
     const toReject = cands.filter(c => {
       if (c.candidate_selected || c.candidate_rejected) return false;
+      // Skip if interview is scheduled but feedback not yet submitted
+      if (c.status === 'Scheduled') {
+        const nextRound = getNextRound(c.interviews || []);
+        const feedbackDone = (c.interviews || []).some(i => i.round === nextRound);
+        if (!feedbackDone) return false; // round truly in progress — do not reject yet
+      }
       const lastAvg = getLastRoundAvg(c.interviews || []);
       return lastAvg !== null && lastAvg < 3;
     });
@@ -131,18 +137,37 @@ export default function ScheduleInterview() {
   const applyRoleFilter = (c) =>
     !selectedRoleId || String(c.applied_role_id) === String(selectedRoleId);
 
-  // Pending = open role, not selected/rejected, NOT currently scheduled
-  const pending = allCands.filter(c =>
-    openRoleIds.has(String(c.applied_role_id)) &&
-    !c.candidate_selected &&
-    !c.candidate_rejected &&
-    c.status !== 'Scheduled' &&
-    applyRoleFilter(c)
-  );
+  // A candidate is "truly scheduled" only if:
+  // - status is "Scheduled"  AND
+  // - the interviewer has NOT yet submitted feedback for the scheduled round
+  //   (i.e. the interviews[] array has no entry for the next expected round)
+  // Once feedback is submitted, backend clears status — but for old DB records
+  // that are stuck, we also check: if interviews has data for the scheduled round,
+  // the round is done and the candidate should NOT stay in Scheduled.
+  const isTrulyScheduled = (c) => {
+    if (c.status !== 'Scheduled') return false;
+    const nextRound = getNextRound(c.interviews || []);
+    const scheduledRound = nextRound; // the round we scheduled is always the next one
+    // If interviews already contains this round's feedback, the round is done
+    const feedbackDone = (c.interviews || []).some(i => i.round === scheduledRound);
+    return !feedbackDone;
+  };
 
-  // Scheduled = status "Scheduled", not yet selected/rejected
+  // Pending = open role, not selected/rejected, not truly scheduled,
+  //           AND last round avg >= 3 (or no rounds done yet — fresh candidate)
+  const pending = allCands.filter(c => {
+    if (!openRoleIds.has(String(c.applied_role_id))) return false;
+    if (c.candidate_selected || c.candidate_rejected) return false;
+    if (isTrulyScheduled(c)) return false;
+    // If rounds are done, only show in pending if last round passed (>= 3)
+    const lastAvg = getLastRoundAvg(c.interviews || []);
+    if (lastAvg !== null && lastAvg < 3) return false;
+    return applyRoleFilter(c);
+  });
+
+  // Scheduled = truly scheduled (interview not yet done)
   const scheduledRows = allCands.filter(c =>
-    c.status === 'Scheduled' &&
+    isTrulyScheduled(c) &&
     !c.candidate_selected &&
     !c.candidate_rejected &&
     applyRoleFilter(c)
