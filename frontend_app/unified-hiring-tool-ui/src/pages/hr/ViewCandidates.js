@@ -71,11 +71,20 @@ function ViewCandidates() {
   };
 
   // ── Status label: shows rounds done + scheduled state ─────────────────────
-  // e.g. "L1 done", "L1 done · L2 Scheduled", "No interviews yet"
+  // Uses scheduled_round (stored at scheduling time) to verify a round is truly
+  // pending — avoids showing "Scheduled" when status wasn't cleared after feedback.
   const getStatusLabel = (c) => {
     const interviews = c.interviews || [];
     const completedRounds = interviews.length;
-    const isScheduled = c.status === 'Scheduled';
+
+    // A candidate is truly scheduled only if:
+    // - status is "Scheduled" AND
+    // - feedback hasn't been given yet for the scheduled round
+    const scheduledRound =
+      c.interview_details?.scheduled_round   // stored at scheduling time
+      ?? (completedRounds + 1);              // fallback for old records
+    const feedbackAlreadyDone = interviews.some(i => i.round === scheduledRound);
+    const isScheduled = c.status === 'Scheduled' && !feedbackAlreadyDone;
 
     if (completedRounds === 0 && !isScheduled) {
       return <span className="badge bg-secondary">No interviews yet</span>;
@@ -83,7 +92,6 @@ function ViewCandidates() {
 
     const parts = [];
 
-    // Show each completed round
     if (completedRounds > 0) {
       const maxDone = Math.max(...interviews.map(i => i.round));
       parts.push(
@@ -93,12 +101,10 @@ function ViewCandidates() {
       );
     }
 
-    // Show scheduled state on top of that
     if (isScheduled) {
-      const nextRound = completedRounds + 1;
       parts.push(
         <span key="sched" className="badge bg-warning text-dark">
-          L{nextRound} Scheduled →{' '}
+          L{scheduledRound} Scheduled →{' '}
           {c.interview_details?.interviewer_name || c.interview_details?.interviewer_email || 'Interviewer'}
         </span>
       );
