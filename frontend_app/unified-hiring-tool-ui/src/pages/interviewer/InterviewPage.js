@@ -364,6 +364,7 @@ function InterviewPage() {
                           <td>
                             <span className="hr-tag">
                               👤 {c.interview_details?.scheduled_by_hr_name
+                                || c.last_interview_info?.scheduled_by_hr_name
                                 || c.interview_details?.scheduled_by_hr_id
                                 || "—"}
                             </span>
@@ -374,6 +375,7 @@ function InterviewPage() {
                             {formatDateTime(
                               c.interview_details?.scheduled_datetime
                               || c.interview_details?.scheduled_date
+                              || c.last_interview_info?.scheduled_datetime
                             )}
                           </td>
 
@@ -477,6 +479,7 @@ function InterviewPage() {
                           <td>
                             <span className="hr-tag">
                               👤 {c.interview_details?.scheduled_by_hr_name
+                                || c.last_interview_info?.scheduled_by_hr_name
                                 || c.interview_details?.scheduled_by_hr_id
                                 || "—"}
                             </span>

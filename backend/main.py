@@ -412,7 +412,15 @@ async def schedule_interview(
             "meeting_link": meeting_link or "",
             "scheduled_by_hr_id": hr_id or "",
             "scheduled_by_hr_name": hr_name or "",
-            "scheduled_round": scheduled_round,   # ← exact round being scheduled
+            "scheduled_round": scheduled_round,
+        },
+        # Persisted separately — NOT cleared when interview_details is $unset after feedback.
+        # Used by Interviewer portal (Fitment, Compare, Interview pages) to show
+        # HR name and scheduled date even after the round is completed.
+        "last_interview_info": {
+            "scheduled_by_hr_name": hr_name or "",
+            "scheduled_by_hr_id": hr_id or "",
+            "scheduled_datetime": scheduled_datetime,
         }
     }
 

@@ -152,11 +152,13 @@ function CompareCandidates() {
               ) : (
                 candidates.map((c) => {
                   const hrName = c.interview_details?.scheduled_by_hr_name
+                    || c.last_interview_info?.scheduled_by_hr_name
                     || hrMap[c.hr_id]
                     || c.hr_id
                     || '—';
                   const rawDt = c.interview_details?.scheduled_datetime
-                    || c.interview_details?.scheduled_date;
+                    || c.interview_details?.scheduled_date
+                    || c.last_interview_info?.scheduled_datetime;
                   const scheduledDate = rawDt
                     ? new Date(rawDt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
                     : '—';
