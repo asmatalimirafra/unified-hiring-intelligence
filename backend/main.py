@@ -3,7 +3,7 @@ import re
 from datetime import datetime
 from typing import Optional
 
-from fastapi import FastAPI, UploadFile, Form, HTTPException, Body, Query, BackgroundTasks
+from fastapi import FastAPI, UploadFile, Form, HTTPException, Body, Query
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -55,123 +55,50 @@ from services.ollama_utils import (
 
 from services.auth_utils import verify_password
 
-# ── ATS Score: industry-grade lenient keyword matching ───────────────────────
+# ── ATS Score: lightweight keyword-match of resume vs JD ─────────────────────
 def calculate_ats_score(resume_text: str, jd_text: str) -> float:
     """
-    ATS score (0-100) that mirrors real ATS systems:
-    1. Split merged PDF words (pdfplumber merges MachineLearning -> two tokens)
-    2. Strip HTML from JD (ReactQuill stores HTML)
-    3. Remove ALL boilerplate - only keep skill/tech tokens
-    4. Expand abbreviations both ways (ml<->machine learning)
-    5. Stem/prefix matching - python matches python3
+    Fast, deterministic ATS score (0-100) based on keyword overlap.
+    Strips HTML from JD (ReactQuill stores HTML), then tokenises both texts.
+    Score = (matched_keywords / total_jd_keywords) * 100, capped at 100.
     """
-    import re as _re
+    import re
 
     def strip_html(text):
-        text = _re.sub(r"<[^>]+>", " ", text)
+        """Remove all HTML tags and decode common entities."""
+        text = re.sub(r"<[^>]+>", " ", text)
         text = text.replace("&nbsp;", " ").replace("&amp;", "&")
         text = text.replace("&lt;", "<").replace("&gt;", ">")
         text = text.replace("&quot;", '"').replace("&#39;", "'")
         return text
 
-    def split_merged(text):
-        text = _re.sub(r'([a-z])([A-Z])', r'\g<1> \g<2>', text)
-        text = _re.sub(r'([a-zA-Z])([0-9])', r'\g<1> \g<2>', text)
-        text = _re.sub(r'([0-9])([a-zA-Z])', r'\g<1> \g<2>', text)
-        return text
-
-    FILLER = {
+    STOPWORDS = {
         "the","and","for","are","was","were","with","this","that","have","has",
         "had","not","from","you","your","will","can","should","would","could",
         "may","our","their","its","also","all","any","but","more","than","into",
         "over","such","being","been","each","which","when","they","some","who",
         "what","how","about","other","like","just","then","there","these","those",
-        "work","use","used","using","must","able","good","well","per","etc","via",
-        "develop","design","build","implement","deploy","write","create","manage",
-        "collaborate","communicate","maintain","support","lead","drive","ensure",
-        "provide","deliver","define","identify","analyze","analyse","improve",
-        "optimize","research","test","debug","review","monitor","handle","help",
-        "coordinate","report","assist","contribute","participate","engage",
-        "team","year","years","role","roles","position","job","company","new",
-        "candidate","qualifications","requirements","responsibilities","duties",
-        "following","including","minimum","required","preferred","plus","bonus",
-        "apply","join","seeking","hire","looking","experience","knowledge",
-        "skills","ability","working","related","relevant","strong","excellent",
-        "proven","hands","degree","bachelor","master","equivalent","field",
-        "understanding","familiarity","proficiency","growing","passionate",
-        "cross","functional","clean","maintainable","practices","techniques",
-        "architectures","models","pipelines","teams","science","technology",
-        "communication","enthusiastic","motivated","innovative","ownership",
-        "an","in","on","of","or","at","to","is","it","be","by","as","we","us",
-        "up","do","go","no","so","if","he","she","me","my","am","a","i","title",
-        "about","who","what","want","get","make","take","see","come","well",
-        "analytical","detail","oriented","paced","environment","enterprise",
+        "per","etc","via","i.e","e.g","must","able","work","use","used","using",
+        "good","well","team","year","years","role","roles","strong","experience"
     }
 
-    ABBREV = {
-        "ml":   ["machine","learning"],
-        "ai":   ["artificial","intelligence"],
-        "dl":   ["deep","learning"],
-        "nlp":  ["natural","language","processing"],
-        "cv":   ["computer","vision"],
-        "llm":  ["large","language","model"],
-        "llms": ["large","language","models"],
-        "rag":  ["retrieval","augmented","generation"],
-        "api":  ["application","programming","interface"],
-        "ci":   ["continuous","integration"],
-        "cd":   ["continuous","deployment"],
-        "cicd": ["continuous","integration","deployment"],
-        "oop":  ["object","oriented","programming"],
-        "sql":  ["structured","query","language"],
-        "aws":  ["amazon","web","services"],
-        "gcp":  ["google","cloud","platform"],
-        "k8s":  ["kubernetes"],
-        "js":   ["javascript"],
-        "ts":   ["typescript"],
-        "db":   ["database"],
-        "ui":   ["user","interface"],
-        "ux":   ["user","experience"],
-    }
-
-    def expand(token_set):
-        extra = set()
-        for t in token_set:
-            if t in ABBREV:
-                extra.update(ABBREV[t])
-            for abbr, exps in ABBREV.items():
-                if t in exps:
-                    extra.add(abbr)
-        return token_set | extra
-
-    def tokenise(text, is_resume=False):
-        if is_resume:
-            text = split_merged(text)
+    def tokenise(text):
+        # Strip HTML first, then extract alphanumeric tokens (incl. C++, C#, .NET)
         clean = strip_html(text)
-        words = _re.findall(r"[a-zA-Z][a-zA-Z0-9#\.+\-_]*", clean.lower())
-        tokens = {w for w in words if len(w) >= 2 and w not in FILLER}
-        return expand(tokens)
-
-    def matches(jd_kw, resume_tokens):
-        if jd_kw in resume_tokens:
-            return True
-        if len(jd_kw) >= 4:
-            prefix = jd_kw[:4]
-            for rt in resume_tokens:
-                if len(rt) >= 4 and rt[:4] == prefix:
-                    return True
-        return False
+        words = re.findall(r"[a-zA-Z0-9#\+\.\_]+", clean.lower())
+        return {w for w in words if len(w) > 1 and w not in STOPWORDS}
 
     if not resume_text or not jd_text:
-        return 50.0
+        return 0.0
 
-    jd_tokens     = tokenise(jd_text, is_resume=False)
-    resume_tokens = tokenise(resume_text, is_resume=True)
+    jd_keywords   = tokenise(jd_text)
+    resume_tokens = tokenise(resume_text)
 
-    if not jd_tokens:
-        return 50.0
+    if not jd_keywords:
+        return 0.0
 
-    matched_count = sum(1 for kw in jd_tokens if matches(kw, resume_tokens))
-    score = (matched_count / len(jd_tokens)) * 100
+    matched = jd_keywords & resume_tokens
+    score   = (len(matched) / len(jd_keywords)) * 100
     return round(min(score, 100.0), 2)
 
 from fastapi.responses import StreamingResponse
@@ -335,7 +262,6 @@ async def get_roles_closed():
 
 @app.post("/add-candidate/", status_code=201)
 async def add_candidate(
-    background_tasks: BackgroundTasks,
     name: str = Form(...),
     applied_role: str = Form(...),
     resume_file: UploadFile = Form(...),
@@ -425,18 +351,7 @@ async def add_candidate(
     if mongo_status is None:
         raise HTTPException(status_code=409, detail=f"Candidate ID '{candidate_id_str}' already exists.")
 
-    # ── Run Qdrant embedding in a fire-and-forget thread ────────────────────
-    # SentenceTransformer model.encode() is CPU-heavy (30-60s).
-    # Running it in a daemon thread means the HTTP response returns immediately
-    # and the embedding completes in the background without blocking anything.
-    import threading
-    def _embed_in_background():
-        try:
-            store_resume_embedding(candidate_id_num, resume_text, name, applied_role)
-            print(f"✅ Background embedding done for {candidate_id_str}")
-        except Exception as e:
-            print(f"⚠️ Background embedding failed for {candidate_id_str}: {e}")
-    threading.Thread(target=_embed_in_background, daemon=True).start()
+    qdrant_status = store_resume_embedding(candidate_id_num, resume_text, name, applied_role)
 
     return {
         "candidate_id": candidate_id_str,
@@ -444,7 +359,7 @@ async def add_candidate(
         "applied_role_id": applied_role_id,
         "ats_score": ats_score,
         "mongo_status": mongo_status,
-        "qdrant_status": "queued"
+        "qdrant_status": qdrant_status
     }
 
 @app.get("/get-candidates/")
@@ -581,7 +496,15 @@ async def schedule_interview(
             "meeting_link": meeting_link or "",
             "scheduled_by_hr_id": hr_id or "",
             "scheduled_by_hr_name": hr_name or "",
-            "scheduled_round": scheduled_round,   # ← exact round being scheduled
+            "scheduled_round": scheduled_round,
+        },
+        # Persisted top-level field — NOT cleared when interview_details is $unset.
+        # Used by Interviewer portal to show HR name and scheduled date
+        # even after feedback clears interview_details.
+        "last_interview_info": {
+            "scheduled_by_hr_name": hr_name or "",
+            "scheduled_by_hr_id": hr_id or "",
+            "scheduled_datetime": scheduled_datetime or "",
         }
     }
 

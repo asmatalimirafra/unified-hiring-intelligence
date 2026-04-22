@@ -188,15 +188,6 @@ export default function ScheduleInterview() {
   const selected = allCands.filter(c => c.candidate_selected && applyRoleFilter(c));
   const rejected  = allCands.filter(c => c.candidate_rejected && applyRoleFilter(c));
 
-  // ATS-rejected = ats_score exists AND < 50 AND not already selected/rejected by interview
-  const atsRejected = allCands.filter(c =>
-    !c.candidate_selected &&
-    !c.candidate_rejected &&
-    openRoleIds.has(String(c.applied_role_id)) &&
-    c.ats_score !== null && c.ats_score !== undefined &&
-    c.ats_score < 50 &&
-    applyRoleFilter(c)
-  );
 
   // ── Modals ─────────────────────────────────────────────────────────────────
   const openModal = (candidate) => {
@@ -607,61 +598,6 @@ export default function ScheduleInterview() {
           </table>
         )}
       </section>
-
-      {/* ── SECTION 5: ATS Rejected ───────────────────────────────────────── */}
-      {atsRejected.length > 0 && (
-        <section className="section-card" style={{ marginTop: '2rem', borderLeft: '4px solid #f87171' }}>
-          <div className="section-header">
-            <span className="section-icon">🚫</span>
-            <h3>ATS Rejected Candidates</h3>
-            <span className="count-badge rejected-badge">{atsRejected.length}</span>
-          </div>
-          <p style={{ fontSize: '0.82rem', color: '#888', margin: '0 0 1rem 0' }}>
-            These candidates scored below 50% on the initial ATS keyword match and are not eligible for interview scheduling.
-          </p>
-          <table className="schedule-table">
-            <thead>
-              <tr>
-                <th>Candidate ID</th>
-                <th>Name</th>
-                <th>Applied Role</th>
-                <th>ATS Score</th>
-                <th>Resume</th>
-                <th>Schedule</th>
-              </tr>
-            </thead>
-            <tbody>
-              {atsRejected.map(c => (
-                <tr key={c.candidate_id} style={{ background: '#fff5f5' }}>
-                  <td>{c.candidate_id}</td>
-                  <td>{c.name}</td>
-                  <td>{getRoleName(c.applied_role_id) || c.applied_role}</td>
-                  <td>
-                    <span style={{ color: '#dc2626', fontWeight: 600 }}>
-                      {c.ats_score?.toFixed(1)}% ✗
-                    </span>
-                  </td>
-                  <td>
-                    <a href={`${BASE_URL}/get-resume/${c.candidate_id}?ngrok-skip-browser-warning=true`}
-                      target="_blank" rel="noopener noreferrer" className="resume-link">
-                      View PDF
-                    </a>
-                  </td>
-                  <td>
-                    <button
-                      className="btn-schedule btn-schedule-disabled"
-                      disabled
-                      title="ATS score below 50% — not eligible for scheduling"
-                    >
-                      🚫 Blocked
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      )}
 
       {/* ── Modal: Schedule Next Round ─────────────────────────────────────── */}
       {modal.open && modal.candidate && (
