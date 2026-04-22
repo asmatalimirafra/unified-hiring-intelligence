@@ -55,6 +55,52 @@ from services.ollama_utils import (
 
 from services.auth_utils import verify_password
 
+# ── ATS Score: lightweight keyword-match of resume vs JD ─────────────────────
+def calculate_ats_score(resume_text: str, jd_text: str) -> float:
+    """
+    Fast, deterministic ATS score (0-100) based on keyword overlap.
+    Strips HTML from JD (ReactQuill stores HTML), then tokenises both texts.
+    Score = (matched_keywords / total_jd_keywords) * 100, capped at 100.
+    """
+    import re
+
+    def strip_html(text):
+        """Remove all HTML tags and decode common entities."""
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = text.replace("&nbsp;", " ").replace("&amp;", "&")
+        text = text.replace("&lt;", "<").replace("&gt;", ">")
+        text = text.replace("&quot;", '"').replace("&#39;", "'")
+        return text
+
+    STOPWORDS = {
+        "the","and","for","are","was","were","with","this","that","have","has",
+        "had","not","from","you","your","will","can","should","would","could",
+        "may","our","their","its","also","all","any","but","more","than","into",
+        "over","such","being","been","each","which","when","they","some","who",
+        "what","how","about","other","like","just","then","there","these","those",
+        "per","etc","via","i.e","e.g","must","able","work","use","used","using",
+        "good","well","team","year","years","role","roles","strong","experience"
+    }
+
+    def tokenise(text):
+        # Strip HTML first, then extract alphanumeric tokens (incl. C++, C#, .NET)
+        clean = strip_html(text)
+        words = re.findall(r"[a-zA-Z0-9#\+\.\_]+", clean.lower())
+        return {w for w in words if len(w) > 1 and w not in STOPWORDS}
+
+    if not resume_text or not jd_text:
+        return 0.0
+
+    jd_keywords   = tokenise(jd_text)
+    resume_tokens = tokenise(resume_text)
+
+    if not jd_keywords:
+        return 0.0
+
+    matched = jd_keywords & resume_tokens
+    score   = (len(matched) / len(jd_keywords)) * 100
+    return round(min(score, 100.0), 2)
+
 from fastapi.responses import StreamingResponse
 from bson import ObjectId
 import io
@@ -246,6 +292,17 @@ async def add_candidate(
 
     print("📬 Extracted metadata:", metadata)
 
+    # ── ATS Score: compare resume against the role's JD at upload time ───────
+    # role_id may be stored as string or int — try both to be safe
+    role_doc = (
+        db["roles"].find_one({"role_id": str(applied_role_id)}) or
+        db["roles"].find_one({"role_id": int(applied_role_id)}) or
+        db["roles"].find_one({"role_id": applied_role_id})
+    )
+    jd_text_for_ats = role_doc.get("job_description", "") if role_doc else ""
+    ats_score = calculate_ats_score(resume_text, jd_text_for_ats)
+    print(f"📊 ATS Score for {candidate_id_str}: {ats_score}% (JD length: {len(jd_text_for_ats)} chars, role_doc found: {role_doc is not None})")
+
     ext = resume_file.filename.split(".")[-1]
     stored_file_name = f"{name.replace(' ', '_')}_{applied_role.replace(' ', '_')}_{candidate_id_str}.{ext}"
 
@@ -262,7 +319,8 @@ async def add_candidate(
         location=location,
         phone=phone,
         timestamp=datetime.now(),
-        hr_id=hr_id
+        hr_id=hr_id,
+        ats_score=ats_score
     )
 
     if mongo_status is None:
@@ -274,6 +332,7 @@ async def add_candidate(
         "candidate_id": candidate_id_str,
         "stored_as": stored_file_name,
         "applied_role_id": applied_role_id,
+        "ats_score": ats_score,
         "mongo_status": mongo_status,
         "qdrant_status": qdrant_status
     }
@@ -412,15 +471,7 @@ async def schedule_interview(
             "meeting_link": meeting_link or "",
             "scheduled_by_hr_id": hr_id or "",
             "scheduled_by_hr_name": hr_name or "",
-            "scheduled_round": scheduled_round,
-        },
-        # Persisted separately — NOT cleared when interview_details is $unset after feedback.
-        # Used by Interviewer portal (Fitment, Compare, Interview pages) to show
-        # HR name and scheduled date even after the round is completed.
-        "last_interview_info": {
-            "scheduled_by_hr_name": hr_name or "",
-            "scheduled_by_hr_id": hr_id or "",
-            "scheduled_datetime": scheduled_datetime,
+            "scheduled_round": scheduled_round,   # ← exact round being scheduled
         }
     }
 

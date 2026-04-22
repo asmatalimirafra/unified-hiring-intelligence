@@ -21,6 +21,7 @@ export default function AddCandidate() {
     resume_file: null,
   });
   const [candidateId, setCandidateId] = useState('');
+  const [atsScore, setAtsScore] = useState(null);
   const [addedOn, setAddedOn] = useState('');
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
@@ -71,6 +72,7 @@ export default function AddCandidate() {
     setFormData({ name: '', applied_role: '', email: '', phone: '', github: '', location: '', resume_file: null });
     setCandidateId('');
     setAddedOn('');
+    setAtsScore(null);
     setStatusMsg('');
     setStatusType('');
   };
@@ -108,6 +110,7 @@ export default function AddCandidate() {
       // If we reach here the candidate was added — store the ID so Cancel can delete it
       const added = res.data;
       setCandidateId(added.candidate_id);
+      setAtsScore(added.ats_score ?? null);
       setAddedOn(new Date().toLocaleDateString('en-IN', {
         day: '2-digit', month: 'short', year: 'numeric',
         hour: '2-digit', minute: '2-digit'
@@ -338,6 +341,14 @@ export default function AddCandidate() {
           <p className="review-note">Please review the extracted information and make any necessary corrections:</p>
           {addedOn && (
             <div className="timestamp-badge">🕐 Added on: <strong>{addedOn}</strong></div>
+          )}
+          {atsScore !== null && (
+            <div className={`ats-score-badge ${atsScore >= 50 ? 'ats-pass' : 'ats-fail'}`}>
+              📊 ATS Score: <strong>{atsScore.toFixed(1)}%</strong>
+              {atsScore < 50
+                ? ' — Below 50%: this candidate will not appear in the interview schedule.'
+                : ' — Above 50%: eligible for interview scheduling.'}
+            </div>
           )}
 
           <div className="form-group">

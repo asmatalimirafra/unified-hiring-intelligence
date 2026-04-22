@@ -64,6 +64,17 @@ function ViewCandidates() {
     return count ? (total / count).toFixed(1) : '-';
   };
 
+  // ATS score badge helper — green >=75%, yellow 50-74%, red <50%
+  const getAtsBadge = (score) => {
+    if (score === null || score === undefined)
+      return <span className="badge bg-secondary">—</span>;
+    if (score >= 75)
+      return <span className="badge bg-success" title="ATS: High match">{score.toFixed(1)}% ✓</span>;
+    if (score >= 50)
+      return <span className="badge bg-warning text-dark" title="ATS: Moderate match">{score.toFixed(1)}% ✓</span>;
+    return <span className="badge bg-danger" title="ATS: Below threshold — not eligible for scheduling">{score.toFixed(1)}% ✗</span>;
+  };
+
   const getAllRounds = (list) => {
     const rounds = new Set();
     list.forEach(c => (c.interviews || []).forEach(i => rounds.add(i.round)));
@@ -124,13 +135,25 @@ function ViewCandidates() {
     ? candidates.filter(c => String(c.applied_role_id) === String(selectedRoleId))
     : [];
 
-  // Pending = not yet selected or rejected
-  const pending   = filtered.filter(c => !c.candidate_selected && !c.candidate_rejected);
   // Completed = HR has given a final verdict
   const completed = filtered.filter(c => c.candidate_selected || c.candidate_rejected);
 
-  const pendingRounds   = getAllRounds(pending);
-  const completedRounds = getAllRounds(completed);
+  // ATS-rejected = not yet decided, but ATS score < 50% (or scored 0)
+  const atsRejected = filtered.filter(c =>
+    !c.candidate_selected && !c.candidate_rejected &&
+    (c.ats_score !== null && c.ats_score !== undefined) &&
+    c.ats_score < 50
+  );
+
+  // Pending = not decided, ATS >= 50% (or no ATS score yet for old records)
+  const pending = filtered.filter(c =>
+    !c.candidate_selected && !c.candidate_rejected &&
+    (c.ats_score === null || c.ats_score === undefined || c.ats_score >= 50)
+  );
+
+  const pendingRounds    = getAllRounds(pending);
+  const completedRounds  = getAllRounds(completed);
+  const atsRejRounds     = getAllRounds(atsRejected);
 
   // ── Pending table ──────────────────────────────────────────────────────────
   const renderPendingTable = (list, rounds) => (
@@ -144,6 +167,7 @@ function ViewCandidates() {
             <tr>
               <th>Candidate ID</th>
               <th>Name</th>
+              <th>ATS Score</th>
               <th>Status</th>
               {rounds.map(r => <th key={r}>L{r} Avg</th>)}
               <th>Overall Avg</th>
@@ -158,6 +182,7 @@ function ViewCandidates() {
               <tr key={c.candidate_id}>
                 <td>{c.candidate_id}</td>
                 <td>{c.name}</td>
+                <td>{getAtsBadge(c.ats_score)}</td>
                 {/* Status: shows rounds done + scheduled badge */}
                 <td>{getStatusLabel(c)}</td>
                 {rounds.map(r => <td key={r}>{getAvgScore(c, r)}</td>)}
@@ -216,6 +241,7 @@ function ViewCandidates() {
             <tr>
               <th>Candidate ID</th>
               <th>Name</th>
+              <th>ATS Score</th>
               <th>Status</th>
               {rounds.map(r => <th key={r}>L{r} Avg</th>)}
               <th>Overall Avg</th>
@@ -235,6 +261,7 @@ function ViewCandidates() {
                 <tr key={c.candidate_id}>
                   <td>{c.candidate_id}</td>
                   <td>{c.name}</td>
+                  <td>{getAtsBadge(c.ats_score)}</td>
                   {/* Status: shows how many rounds were completed */}
                   <td>
                     {maxDone !== null
@@ -291,6 +318,76 @@ function ViewCandidates() {
     </div>
   );
 
+  // ── ATS-Rejected table ────────────────────────────────────────────────────
+  const renderAtsRejectedTable = (list, rounds) => (
+    <div className="candidate-section">
+      <h4>🚫 Rejected Candidates Based on ATS Score</h4>
+      <p style={{ fontSize: '0.85rem', color: '#888', marginBottom: '0.75rem' }}>
+        These candidates scored below 50% on the ATS keyword match and are not eligible for interview scheduling.
+      </p>
+      {list.length === 0 ? (
+        <p className="empty-message">No ATS-rejected candidates.</p>
+      ) : (
+        <table className="table table-bordered">
+          <thead>
+            <tr>
+              <th>Candidate ID</th>
+              <th>Name</th>
+              <th>ATS Score</th>
+              <th>Applied Role</th>
+              <th>Resume</th>
+              <th>Schedule</th>
+              <th>Delete</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map(c => (
+              <tr key={c.candidate_id} style={{ backgroundColor: '#fff5f5' }}>
+                <td>{c.candidate_id}</td>
+                <td>{c.name}</td>
+                <td>{getAtsBadge(c.ats_score)}</td>
+                <td>{c.applied_role}</td>
+                <td>
+                  <button
+                    className="btn btn-outline-primary btn-sm"
+                    title="View Resume"
+                    onClick={() =>
+                      window.open(
+                        `${BASE_URL}/get-resume/${c.candidate_id}?ngrok-skip-browser-warning=true`,
+                        '_blank', 'noopener,noreferrer'
+                      )
+                    }
+                  >
+                    <FaEye />
+                  </button>
+                </td>
+                {/* Schedule disabled — ATS score too low */}
+                <td>
+                  <button
+                    className="btn btn-outline-secondary btn-sm"
+                    disabled
+                    title={`ATS score ${c.ats_score?.toFixed(1)}% is below 50% — not eligible for scheduling`}
+                  >
+                    <FaCalendarPlus />
+                  </button>
+                </td>
+                <td>
+                  <button
+                    className="btn btn-outline-danger btn-sm"
+                    onClick={() => handleDeleteCandidate(c.candidate_id)}
+                    title="Delete Candidate"
+                  >
+                    <FaTrashAlt />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+
   return (
     <div className="page-wrapper">
       <h3>View Candidates</h3>
@@ -312,7 +409,8 @@ function ViewCandidates() {
 
       {selectedRoleId && (
         <>
-          {renderPendingTable(pending,   pendingRounds)}
+          {renderPendingTable(pending, pendingRounds)}
+          {renderAtsRejectedTable(atsRejected, atsRejRounds)}
           {renderCompletedTable(completed, completedRounds)}
         </>
       )}
