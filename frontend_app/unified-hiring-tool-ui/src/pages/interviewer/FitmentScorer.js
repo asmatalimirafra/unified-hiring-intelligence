@@ -189,7 +189,6 @@ function FitmentScorer() {
                     || hrMap[candidate.hr_id]
                     || candidate.hr_id
                     || '—';
-                  // Support both field names and last_interview_info fallback
                   const rawDt = candidate.interview_details?.scheduled_datetime
                     || candidate.interview_details?.scheduled_date
                     || candidate.last_interview_info?.scheduled_datetime;

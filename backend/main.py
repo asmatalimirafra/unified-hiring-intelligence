@@ -498,13 +498,13 @@ async def schedule_interview(
             "scheduled_by_hr_name": hr_name or "",
             "scheduled_round": scheduled_round,
         },
-        # Persisted top-level field — NOT cleared when interview_details is $unset.
-        # Used by Interviewer portal to show HR name and scheduled date
-        # even after feedback clears interview_details.
+        # Top-level snapshot — survives $unset of interview_details after feedback
         "last_interview_info": {
-            "scheduled_by_hr_name": hr_name or "",
-            "scheduled_by_hr_id": hr_id or "",
-            "scheduled_datetime": scheduled_datetime or "",
+            "scheduled_by_hr_name":  hr_name or "",
+            "scheduled_by_hr_id":    hr_id or "",
+            "scheduled_datetime":    scheduled_datetime or "",
+            "interviewer_name":      interviewer.get("name", ""),
+            "interviewer_email":     interviewer_email,
         }
     }
 
@@ -609,11 +609,31 @@ async def add_interview(
     if candidate_updated == 0:
         raise HTTPException(status_code=404, detail=f"Candidate ID '{candidate_id}' not found.")
 
-    # Clear "Scheduled" status now that the round is complete — moves the candidate
-    # out of the Scheduled section on the HR portal so scores can be evaluated.
+    # ── Before clearing interview_details, snapshot the scheduling info ──────
+    # interview_details holds scheduled_by_hr_name and scheduled_datetime.
+    # These are lost when we $unset interview_details after feedback.
+    # Save them to last_interview_info (top-level, never cleared) so the
+    # Interviewer portal can always show who scheduled the interview.
+    existing = candidates_collection.find_one(
+        {"candidate_id": candidate_id},
+        {"interview_details": 1}
+    )
+    interview_details = existing.get("interview_details", {}) if existing else {}
+    last_interview_info = {
+        "scheduled_by_hr_name":  interview_details.get("scheduled_by_hr_name", ""),
+        "scheduled_by_hr_id":    interview_details.get("scheduled_by_hr_id", ""),
+        "scheduled_datetime":    interview_details.get("scheduled_datetime", ""),
+        "interviewer_name":      interview_details.get("interviewer_name", ""),
+        "interviewer_email":     interview_details.get("interviewer_email", ""),
+    }
+
+    # Clear "Scheduled" status and save last_interview_info atomically
     candidates_collection.update_one(
         {"candidate_id": candidate_id},
-        {"$unset": {"status": "", "interview_details": ""}}
+        {
+            "$unset": {"status": "", "interview_details": ""},
+            "$set":   {"last_interview_info": last_interview_info}
+        }
     )
 
     interview_log = {
