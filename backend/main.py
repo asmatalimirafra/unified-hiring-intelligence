@@ -55,51 +55,128 @@ from services.ollama_utils import (
 
 from services.auth_utils import verify_password
 
-# ── ATS Score: lightweight keyword-match of resume vs JD ─────────────────────
+# ── ATS Score: lenient keyword-match of resume vs JD ────────────────────────
 def calculate_ats_score(resume_text: str, jd_text: str) -> float:
     """
-    Fast, deterministic ATS score (0-100) based on keyword overlap.
-    Strips HTML from JD (ReactQuill stores HTML), then tokenises both texts.
-    Score = (matched_keywords / total_jd_keywords) * 100, capped at 100.
+    Lenient ATS score (0-100) designed as an initial filter, not a strict gate.
+
+    Key design decisions:
+    1. Only score against SHORT meaningful tokens from the JD (likely skills/tools),
+       not every word — avoids penalising for filler words like "responsibilities"
+    2. Partial/stem matching — "python" matches "python3", "pythonic"
+    3. Common abbreviation expansion — "ml" matches "machine learning" and vice versa
+    4. Score floor of 40 if resume has decent length (gives benefit of doubt)
+    5. Threshold for rejection is 50% — generous enough for most valid candidates
     """
     import re
 
     def strip_html(text):
-        """Remove all HTML tags and decode common entities."""
         text = re.sub(r"<[^>]+>", " ", text)
         text = text.replace("&nbsp;", " ").replace("&amp;", "&")
         text = text.replace("&lt;", "<").replace("&gt;", ">")
         text = text.replace("&quot;", '"').replace("&#39;", "'")
         return text
 
+    # Words that appear in every JD but mean nothing for matching
     STOPWORDS = {
         "the","and","for","are","was","were","with","this","that","have","has",
         "had","not","from","you","your","will","can","should","would","could",
         "may","our","their","its","also","all","any","but","more","than","into",
         "over","such","being","been","each","which","when","they","some","who",
         "what","how","about","other","like","just","then","there","these","those",
-        "per","etc","via","i.e","e.g","must","able","work","use","used","using",
-        "good","well","team","year","years","role","roles","strong","experience"
+        "per","etc","via","must","able","work","use","used","using","good","well",
+        "team","year","years","role","roles","strong","experience","minimum",
+        "required","preferred","including","following","responsibilities","duties",
+        "candidate","qualifications","requirements","position","job","company",
+        "apply","plus","bonus","nice","have","looking","join","seeking","hire",
+        "excellent","knowledge","skills","ability","working","related","relevant",
+        "develop","design","build","implement","degree","bachelor","master",
+        "equivalent","field","least","hands","proven","track","record"
     }
 
+    # Abbreviation expansion map — both directions
+    ABBREV = {
+        "ml":  ["machine", "learning"],
+        "ai":  ["artificial", "intelligence"],
+        "dl":  ["deep", "learning"],
+        "nlp": ["natural", "language", "processing"],
+        "cv":  ["computer", "vision"],
+        "llm": ["large", "language", "model"],
+        "rag": ["retrieval", "augmented", "generation"],
+        "api": ["application", "programming", "interface"],
+        "ci":  ["continuous", "integration"],
+        "cd":  ["continuous", "deployment"],
+        "oop": ["object", "oriented", "programming"],
+        "sql": ["structured", "query", "language"],
+        "aws": ["amazon", "web", "services"],
+        "gcp": ["google", "cloud", "platform"],
+        "k8s": ["kubernetes"],
+        "js":  ["javascript"],
+        "ts":  ["typescript"],
+    }
+
+    def expand_abbrevs(token_set):
+        """Add expanded forms for any abbreviations found in the token set."""
+        extra = set()
+        for token in list(token_set):
+            if token in ABBREV:
+                extra.update(ABBREV[token])
+            # Reverse: if token is an expansion, add abbreviation
+            for abbr, expansions in ABBREV.items():
+                if token in expansions:
+                    extra.add(abbr)
+        return token_set | extra
+
     def tokenise(text):
-        # Strip HTML first, then extract alphanumeric tokens (incl. C++, C#, .NET)
         clean = strip_html(text)
         words = re.findall(r"[a-zA-Z0-9#\+\.\_]+", clean.lower())
-        return {w for w in words if len(w) > 1 and w not in STOPWORDS}
+        tokens = {w for w in words if len(w) > 1 and w not in STOPWORDS}
+        return expand_abbrevs(tokens)
+
+    def partial_match(jd_kw, resume_tokens):
+        """
+        Returns True if the JD keyword matches any resume token with these rules:
+        1. Exact match
+        2. Resume token starts with JD keyword (stem match): "python" matches "python3"
+        3. JD keyword starts with resume token (stem match): "pytorch" matched by "pytorch"
+        Only apply stem matching for tokens >= 4 chars to avoid false positives.
+        """
+        if jd_kw in resume_tokens:
+            return True
+        if len(jd_kw) >= 4:
+            for rt in resume_tokens:
+                if rt.startswith(jd_kw) or jd_kw.startswith(rt):
+                    return True
+        return False
 
     if not resume_text or not jd_text:
         return 0.0
 
-    jd_keywords   = tokenise(jd_text)
+    jd_tokens     = tokenise(jd_text)
     resume_tokens = tokenise(resume_text)
+
+    if not jd_tokens:
+        return 0.0
+
+    # ── Only score against SHORT tokens (1-15 chars) from the JD ─────────────
+    # Long tokens are usually sentences or compound phrases, not keywords.
+    # Short tokens are skills, tools, technologies — what actually matters.
+    jd_keywords = {t for t in jd_tokens if len(t) <= 15}
 
     if not jd_keywords:
         return 0.0
 
-    matched = jd_keywords & resume_tokens
-    score   = (len(matched) / len(jd_keywords)) * 100
-    return round(min(score, 100.0), 2)
+    matched_count = sum(1 for kw in jd_keywords if partial_match(kw, resume_tokens))
+    raw_score = (matched_count / len(jd_keywords)) * 100
+
+    # ── Score floor: if resume is substantial (>200 words), give min 40% ─────
+    # Prevents valid candidates from being rejected just because the JD uses
+    # different terminology. A real human reviewer would still consider them.
+    resume_word_count = len(resume_text.split())
+    if resume_word_count > 200 and raw_score < 40:
+        raw_score = 40.0
+
+    return round(min(raw_score, 100.0), 2)
 
 from fastapi.responses import StreamingResponse
 from bson import ObjectId
