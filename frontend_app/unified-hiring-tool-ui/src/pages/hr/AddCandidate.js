@@ -103,8 +103,9 @@ export default function AddCandidate() {
           "Content-Type": "multipart/form-data",
           "ngrok-skip-browser-warning": "true"
         },
-        timeout: 30000,
-        signal: abortControllerRef.current.signal   // ← attach abort signal
+        // No hard timeout — regex extraction is fast (<2s).
+        // User can still cancel via the Cancel button (AbortController).
+        signal: abortControllerRef.current.signal
       });
 
       // If we reach here the candidate was added — store the ID so Cancel can delete it
@@ -158,9 +159,9 @@ export default function AddCandidate() {
           default:  errorMessage = `❌ Upload failed: ${err.response.data?.detail || err.response.statusText}`;
         }
       } else if (err.code === 'ECONNABORTED') {
-        errorMessage = '❌ Upload timeout. Please try with a smaller file.';
+        errorMessage = '❌ Request timed out. The resume processing took too long — please try again.';
       } else if (err.message?.includes('Network Error')) {
-        errorMessage = '❌ Network error. Please check your connection.';
+        errorMessage = '❌ Network error. Please check your connection and try again.';
       }
       setStatusType('error');
       setStatusMsg(errorMessage);
@@ -320,8 +321,9 @@ export default function AddCandidate() {
             <div className="processing-overlay">
               <div className="processing-box">
                 <div className="processing-spinner" />
-                <p className="processing-text">Extracting resume details…</p>
-                <p className="processing-sub">This may take a few seconds</p>
+                <p className="processing-text">Processing Resume…</p>
+                <p className="processing-sub">Extracting details &amp; calculating ATS score.</p>
+                <p className="processing-sub">This usually takes 5–10 seconds.</p>
                 <button
                   type="button"
                   className="btn-cancel-upload"
