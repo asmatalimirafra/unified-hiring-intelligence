@@ -674,12 +674,26 @@ async def add_interview(
         if not 1 <= value <= 5:
             raise HTTPException(status_code=400, detail=f"Rating '{rating}' must be between 1 and 5.")
 
+    # Read interview_details BEFORE clearing it so scheduling info is preserved
+    # inside the interview record — allows frontend to display HR name, scheduled
+    # date, and meeting link even after interview_details is unset post-feedback.
+    candidate_doc = candidates_collection.find_one(
+        {"candidate_id": candidate_id},
+        {"interview_details": 1}
+    )
+    details = (candidate_doc or {}).get("interview_details", {})
+
     interview_data = {
         "round": round_num,
         "interviewer_id": interviewer_id,
         "ratings": ratings,
         "comments": comments,
-        "datetime": now
+        "datetime": now,
+        # Preserve scheduling context so it survives after interview_details is cleared
+        "scheduled_datetime":   details.get("scheduled_datetime", ""),
+        "meeting_link":         details.get("meeting_link", ""),
+        "scheduled_by_hr_name": details.get("scheduled_by_hr_name", ""),
+        "scheduled_by_hr_id":   details.get("scheduled_by_hr_id", ""),
     }
 
     candidate_updated = add_interview_to_candidate(candidate_id, interview_data)

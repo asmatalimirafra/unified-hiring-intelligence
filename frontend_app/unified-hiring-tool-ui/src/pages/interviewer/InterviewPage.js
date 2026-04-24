@@ -362,21 +362,30 @@ function InterviewPage() {
 
                           {/* HR who scheduled */}
                           <td>
-                            <span className="hr-tag">
-                              👤 {c.interview_details?.scheduled_by_hr_name
+                            {(() => {
+                              // After feedback, interview_details is cleared.
+                              // Fall back to the most recent interviews[] entry
+                              // where scheduled_by_hr_name is now preserved.
+                              const lastRound = [...(c.interviews || [])].sort((a, b) => b.round - a.round)[0];
+                              const hrName = c.interview_details?.scheduled_by_hr_name
                                 || c.last_interview_info?.scheduled_by_hr_name
+                                || lastRound?.scheduled_by_hr_name
                                 || c.interview_details?.scheduled_by_hr_id
-                                || "—"}
-                            </span>
+                                || "—";
+                              return <span className="hr-tag">👤 {hrName}</span>;
+                            })()}
                           </td>
 
                           {/* Scheduled date & time */}
                           <td className="datetime-cell">
-                            {formatDateTime(
-                              c.interview_details?.scheduled_datetime
-                              || c.interview_details?.scheduled_date
-                              || c.last_interview_info?.scheduled_datetime
-                            )}
+                            {(() => {
+                              const lastRound = [...(c.interviews || [])].sort((a, b) => b.round - a.round)[0];
+                              const rawDt = c.interview_details?.scheduled_datetime
+                                || c.interview_details?.scheduled_date
+                                || c.last_interview_info?.scheduled_datetime
+                                || lastRound?.scheduled_datetime;
+                              return formatDateTime(rawDt);
+                            })()}
                           </td>
 
                           {/* Meeting link */}
@@ -477,12 +486,15 @@ function InterviewPage() {
                             <div className="cand-id">{c.candidate_id}</div>
                           </td>
                           <td>
-                            <span className="hr-tag">
-                              👤 {c.interview_details?.scheduled_by_hr_name
+                            {(() => {
+                              const lastRound = [...(c.interviews || [])].sort((a, b) => b.round - a.round)[0];
+                              const hrName = c.interview_details?.scheduled_by_hr_name
                                 || c.last_interview_info?.scheduled_by_hr_name
+                                || lastRound?.scheduled_by_hr_name
                                 || c.interview_details?.scheduled_by_hr_id
-                                || "—"}
-                            </span>
+                                || "—";
+                              return <span className="hr-tag">👤 {hrName}</span>;
+                            })()}
                           </td>
                           <td>
                             <a

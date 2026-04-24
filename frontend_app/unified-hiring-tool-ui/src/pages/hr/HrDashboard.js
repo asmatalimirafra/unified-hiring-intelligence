@@ -109,7 +109,7 @@ export default function HrDashboard() {
         const year  = curYear();
 
         /* ── candidates pending (interview_completed !== true) ── */
-        setInterviewsPending(candidates.filter(c => !(c.interview_completed === true)).length);
+        setInterviewsPending(candidates.filter(c => !c.candidate_selected && !c.candidate_rejected).length);
 
         /* ── open roles count — from /get-roles/ status field ── */
         const open   = roles.filter(r => r.status === 'open');
@@ -228,11 +228,7 @@ export default function HrDashboard() {
       round1:  filtered.filter(c => (c.interviews||[]).some(i => i.round === 1)).length,
       round2:  filtered.filter(c => (c.interviews||[]).some(i => i.round === 2)).length,
       // Only count as Hired if interview_completed === true
-      hired:   filtered.filter(c => {
-        if (c.interview_completed !== true) return false;
-        const v = c.interview_aggregate?.verdict;
-        return v === 'Hire' || v === 'Strong Hire';
-      }).length,
+      hired:   filtered.filter(c => c.candidate_selected === true).length,
     });
   }, [allCandidatesData, rangeFunnel]);
 
@@ -255,25 +251,29 @@ export default function HrDashboard() {
   }, [allClosedRolesData, rangeClosed]);
 
   /* ── re-compute verdicts ────────────────────────────────────── */
+  // Count ALL selected/rejected candidates — no date filter
+  // (verdict is about the final decision, not when the interview happened)
   useEffect(() => {
     const vc = { strongHire: 0, hire: 0, weakHire: 0, noHire: 0 };
     let hires = 0;
     allCandidatesData.forEach(c => {
-      // Only count candidates in the Completed section (interview_completed === true)
-      if (c.interview_completed !== true) return;
-      const hasInterviewInRange = (c.interviews || []).some(iv =>
-        inRange(iv.datetime, rangeVerdicts.from, rangeVerdicts.to)
-      );
-      if (!hasInterviewInRange) return;
-      const v = c.interview_aggregate?.verdict;
-      if      (v === 'Strong Hire') { vc.strongHire++; hires++; }
-      else if (v === 'Hire')        { vc.hire++;        hires++; }
-      else if (v === 'Weak Hire')     vc.weakHire++;
-      else if (v === 'No Hire')       vc.noHire++;
+      if (!c.candidate_selected && !c.candidate_rejected) return;
+      const avg = (() => {
+        const ivs = c.interviews || [];
+        if (!ivs.length) return null;
+        let total = 0, count = 0;
+        ivs.forEach(i => { Object.values(i.ratings || {}).forEach(v => { total += v; count++; }); });
+        return count ? total / count : null;
+      })();
+      if      (avg !== null && avg >= 4) vc.strongHire++;
+      else if (avg !== null && avg >= 3) vc.hire++;
+      else if (avg !== null && avg >= 2.5) vc.weakHire++;
+      else if (avg !== null)             vc.noHire++;
+      if (c.candidate_selected === true) hires++;
     });
     setVerdictCounts(vc);
     setHireCount(hires);
-  }, [allCandidatesData, rangeVerdicts]);
+  }, [allCandidatesData]);
 
   /* ── weekly growth helper ───────────────────────────────────── */
   const getWeeklyGrowth = (weekly) => {
@@ -479,10 +479,6 @@ export default function HrDashboard() {
             <span className="hr-card-title">📊 Verdict breakdown</span>
             <span className="hr-tag good">Completed only</span>
           </div>
-          <DateRangePicker
-            from={rangeVerdicts.from} to={rangeVerdicts.to}
-            onChange={(f, t) => setRangeVerdicts({ from: f, to: t })}
-          />
           <div style={{ marginTop: '0.7rem' }}>
             <VerdictBar label="Strong Hire" value={verdictCounts.strongHire} color="#059669" />
             <VerdictBar label="Hire"        value={verdictCounts.hire}       color="#16a34a" />

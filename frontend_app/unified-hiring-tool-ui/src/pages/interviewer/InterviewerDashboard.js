@@ -64,7 +64,6 @@ function InterviewerDashboard() {
   const [rangeAvg,       setRangeAvg]       = useState({ from: monthStart(), to: monthEnd() });
   const [rangeToday,     setRangeToday]     = useState({ from: todayStr(),   to: todayStr()  });
   const [rangeBreakdown, setRangeBreakdown] = useState({ from: monthStart(), to: monthEnd() });
-  const [rangeVerdicts,  setRangeVerdicts]  = useState({ from: monthStart(), to: monthEnd() });
 
   useEffect(() => {
     const fetchAll = async () => {
@@ -125,9 +124,9 @@ function InterviewerDashboard() {
     }).length;
   }, [myInterviews]);
 
-  // Pending = assigned candidates where interview_completed is NOT true
+  // Pending = assigned candidates not yet selected or rejected
   const pendingCandidatesList = useMemo(() =>
-    allCandidates.filter(c => !(c.interview_completed === true)),
+    allCandidates.filter(c => !c.candidate_selected && !c.candidate_rejected),
     [allCandidates]
   );
   const pendingFeedbackCount = pendingCandidatesList.length;
@@ -187,25 +186,6 @@ function InterviewerDashboard() {
     };
   }, [myInterviews, rangeBreakdown]);
 
-  const verdicts = useMemo(() => {
-    const counts = { strongHire: 0, hire: 0, weakHire: 0, noHire: 0 };
-    allCandidates.forEach(c => {
-      if (c.interview_completed !== true) return;
-      const wasMe = (c.interviews || []).some(iv =>
-        String(iv.interviewer_id) === myId &&
-        inRange(iv.datetime, rangeVerdicts.from, rangeVerdicts.to)
-      );
-      if (!wasMe) return;
-      const agg = c.interview_aggregate;
-      if (!agg) return;
-      const v = agg.verdict;
-      if (v === 'Strong Hire') counts.strongHire++;
-      else if (v === 'Hire')   counts.hire++;
-      else if (v === 'Weak Hire') counts.weakHire++;
-      else counts.noHire++;
-    });
-    return counts;
-  }, [allCandidates, myId, rangeVerdicts]);
 
   // ── Chart ─────────────────────────────────────────────────────────────────
   const chartData = useMemo(() => {
@@ -422,37 +402,6 @@ function InterviewerDashboard() {
                 ? ((scoreBreakdown.communication + scoreBreakdown.problem_solving + scoreBreakdown.domain_knowledge) / 3).toFixed(1)
                 : '—'} / 5
             </strong>
-          </div>
-        </div>
-
-        <div className="dash-card">
-          <div className="card-header">
-            <span className="card-title">
-              <i className="bi bi-clipboard2-check" /> Verdicts
-              <span style={{ fontSize:'0.68rem', color:'#00b894', fontWeight:600 }}> completed only</span>
-            </span>
-          </div>
-          <DateRangePicker
-            from={rangeVerdicts.from} to={rangeVerdicts.to}
-            onChange={(f, t) => setRangeVerdicts({ from: f, to: t })}
-          />
-          <div className="verdict-grid" style={{ marginTop: '0.8rem' }}>
-            <div className="verdict-box strong-hire">
-              <div className="verdict-num">{verdicts.strongHire}</div>
-              <div className="verdict-lbl">Strong Hire</div>
-            </div>
-            <div className="verdict-box hire">
-              <div className="verdict-num">{verdicts.hire}</div>
-              <div className="verdict-lbl">Hire</div>
-            </div>
-            <div className="verdict-box weak-hire">
-              <div className="verdict-num">{verdicts.weakHire}</div>
-              <div className="verdict-lbl">Weak Hire</div>
-            </div>
-            <div className="verdict-box no-hire">
-              <div className="verdict-num">{verdicts.noHire}</div>
-              <div className="verdict-lbl">No Hire</div>
-            </div>
           </div>
         </div>
 
