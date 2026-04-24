@@ -216,6 +216,7 @@ export default function ScheduleInterview() {
   const handleSchedule = async () => {
     if (!form.interviewer_email.trim()) { setStatusMsg('Please enter the interviewer email.'); setStatusType('error'); return; }
     if (!form.scheduled_datetime)       { setStatusMsg('Please select a date and time.');       setStatusType('error'); return; }
+    if (!form.meeting_link.trim())      { setStatusMsg('Please enter a meeting link.');          setStatusType('error'); return; }
     setSubmitting(true); setStatusMsg('Scheduling...'); setStatusType('info');
     try {
       await axios.post(`${BASE_URL}/schedule-interview/`, {
@@ -236,6 +237,7 @@ export default function ScheduleInterview() {
   const handleEditSchedule = async () => {
     if (!editForm.interviewer_email.trim()) { setStatusMsg('Please enter the interviewer email.'); setStatusType('error'); return; }
     if (!editForm.scheduled_datetime)       { setStatusMsg('Please select a date and time.');       setStatusType('error'); return; }
+    if (!editForm.meeting_link.trim())      { setStatusMsg('Please enter a meeting link.');          setStatusType('error'); return; }
     setSubmitting(true); setStatusMsg('Updating...'); setStatusType('info');
     try {
       await axios.post(`${BASE_URL}/schedule-interview/`, {
@@ -624,10 +626,11 @@ export default function ScheduleInterview() {
               <div className="field-group">
                 <label>Date & Time *</label>
                 <input type="datetime-local" value={form.scheduled_datetime}
+                  min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
                   onChange={e => setForm({ ...form, scheduled_datetime: e.target.value })} />
               </div>
               <div className="field-group">
-                <label>Meeting Link</label>
+                <label>Meeting Link *</label>
                 <input type="url" placeholder="https://meet.google.com/xxx-xxxx-xxx"
                   value={form.meeting_link}
                   onChange={e => setForm({ ...form, meeting_link: e.target.value })} />
@@ -669,10 +672,11 @@ export default function ScheduleInterview() {
               <div className="field-group">
                 <label>Date & Time *</label>
                 <input type="datetime-local" value={editForm.scheduled_datetime}
+                  min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
                   onChange={e => setEditForm({ ...editForm, scheduled_datetime: e.target.value })} />
               </div>
               <div className="field-group">
-                <label>Meeting Link</label>
+                <label>Meeting Link *</label>
                 <input type="url" placeholder="https://meet.google.com/xxx-xxxx-xxx"
                   value={editForm.meeting_link}
                   onChange={e => setEditForm({ ...editForm, meeting_link: e.target.value })} />
