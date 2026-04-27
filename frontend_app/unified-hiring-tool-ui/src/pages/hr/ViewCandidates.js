@@ -64,13 +64,13 @@ function ViewCandidates() {
     return count ? (total / count).toFixed(1) : '-';
   };
 
-  // ATS score badge helper — green >=75%, yellow 50-74%, red <50%
+  // ATS score badge helper — green >=75%, yellow 30-74%, red <30%
   const getAtsBadge = (score) => {
     if (score === null || score === undefined)
       return <span className="badge bg-secondary">—</span>;
     if (score >= 75)
       return <span className="badge bg-success" title="ATS: High match">{score.toFixed(1)}% ✓</span>;
-    if (score >= 50)
+    if (score >= 30)
       return <span className="badge bg-warning text-dark" title="ATS: Moderate match">{score.toFixed(1)}% ✓</span>;
     return <span className="badge bg-danger" title="ATS: Below threshold — not eligible for scheduling">{score.toFixed(1)}% ✗</span>;
   };
@@ -138,17 +138,17 @@ function ViewCandidates() {
   // Completed = HR has given a final verdict
   const completed = filtered.filter(c => c.candidate_selected || c.candidate_rejected);
 
-  // ATS-rejected = not yet decided, but ATS score < 50% (or scored 0)
+  // ATS-rejected = not yet decided, but ATS score < 30% (or scored 0)
   const atsRejected = filtered.filter(c =>
     !c.candidate_selected && !c.candidate_rejected &&
     (c.ats_score !== null && c.ats_score !== undefined) &&
-    c.ats_score < 50
+    c.ats_score < 30
   );
 
-  // Pending = not decided, ATS >= 50% (or no ATS score yet for old records)
+  // Pending = not decided, ATS >= 30% (or no ATS score yet for old records)
   const pending = filtered.filter(c =>
     !c.candidate_selected && !c.candidate_rejected &&
-    (c.ats_score === null || c.ats_score === undefined || c.ats_score >= 50)
+    (c.ats_score === null || c.ats_score === undefined || c.ats_score >= 30)
   );
 
   const pendingRounds    = getAllRounds(pending);
@@ -323,7 +323,7 @@ function ViewCandidates() {
     <div className="candidate-section">
       <h4>🚫 Rejected Candidates Based on ATS Score</h4>
       <p style={{ fontSize: '0.85rem', color: '#888', marginBottom: '0.75rem' }}>
-        These candidates scored below 50% on the ATS keyword match and are not eligible for interview scheduling.
+        These candidates scored below 30% on the ATS keyword match and are not eligible for interview scheduling.
       </p>
       {list.length === 0 ? (
         <p className="empty-message">No ATS-rejected candidates.</p>
@@ -366,7 +366,7 @@ function ViewCandidates() {
                   <button
                     className="btn btn-outline-secondary btn-sm"
                     disabled
-                    title={`ATS score ${c.ats_score?.toFixed(1)}% is below 50% — not eligible for scheduling`}
+                    title={`ATS score ${c.ats_score?.toFixed(1)}% is below 30% — not eligible for scheduling`}
                   >
                     <FaCalendarPlus />
                   </button>

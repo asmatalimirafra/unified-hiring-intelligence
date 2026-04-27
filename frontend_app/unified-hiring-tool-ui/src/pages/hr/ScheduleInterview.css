@@ -530,3 +530,18 @@
   color: #fff;
   transform: scale(1.05);
 }
+
+
+/* ── ATS score badge — add these to ScheduleInterview.css ── */
+.ats-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.ats-high { background: #d1fae5; color: #065f46; }   /* green  — ≥60% */
+.ats-mid  { background: #fef3c7; color: #92400e; }   /* yellow — 30–59% */
+.ats-low  { background: #fee2e2; color: #991b1b; }   /* red    — <30%  */
+.ats-na   { background: #f3f4f6; color: #9ca3af; }   /* grey   — no score */

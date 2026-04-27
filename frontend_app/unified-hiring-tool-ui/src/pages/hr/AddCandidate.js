@@ -77,9 +77,7 @@ export default function AddCandidate() {
     setStatusType('');
   };
 
-  const handleUpload = async (e) => {
-    e.preventDefault();
-
+  const handleUpload = async () => {
     if (!formData.name.trim())   { setStatusType('error'); setStatusMsg('Please enter candidate name.'); return; }
     if (!formData.applied_role)  { setStatusType('error'); setStatusMsg('Please select an applied role.'); return; }
     if (!formData.resume_file)   { setStatusType('error'); setStatusMsg('Please upload a resume file.'); return; }
@@ -182,48 +180,9 @@ export default function AddCandidate() {
     setStatusType('');
   };
 
-  const handleUpdate = async () => {
-    if (!candidateId) return;
-    setLoading(true);
-    setStatusMsg('Updating candidate...');
-    setStatusType('info');
-    try {
-      await axios.put(`${BASE_URL}/update-candidate/${candidateId}`, {
-        name:         formData.name.trim(),
-        applied_role: formData.applied_role,
-        email:        formData.email.trim(),
-        phone:        formData.phone.trim(),
-        github:       formData.github.trim(),
-        location:     formData.location.trim(),
-      }, { headers: { "ngrok-skip-browser-warning": "true" } });
-      setStatusType('success');
-      setStatusMsg('✅ Candidate updated successfully!');
-    } catch (err) {
-      setStatusType('error');
-      setStatusMsg('❌ Failed to update candidate.');
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  const handleDelete = async () => {
-    if (!candidateId) return;
-    if (!window.confirm(`Are you sure you want to delete candidate "${formData.name}"?\n\nThis action cannot be undone.`)) return;
-    setLoading(true);
-    try {
-      await axios.delete(`${BASE_URL}/delete-candidate/${candidateId}`, {
-        headers: { "ngrok-skip-browser-warning": "true" }
-      });
-      setStatusType('success');
-      setStatusMsg('🗑 Candidate deleted successfully.');
-      setTimeout(() => resetForm(), 2000);
-    } catch (err) {
-      setStatusType('error');
-      setStatusMsg('❌ Failed to delete candidate.');
-    } finally {
-      setLoading(false);
-    }
-  };
+
+
 
   // ── Cancel in Step 2 — deletes the already-added candidate, then resets ──
   const handleCancelStep2 = async () => {
@@ -249,7 +208,7 @@ export default function AddCandidate() {
   };
 
   const handleSaveAndExit = () => {
-    if (window.confirm('Are you sure you want to save and exit?')) window.location.reload();
+    if (window.confirm('Save and exit?')) window.location.reload();
   };
 
   const handleReset = () => {
@@ -261,7 +220,7 @@ export default function AddCandidate() {
       <h2>Add New Candidate</h2>
 
       {step === 1 && (
-        <form onSubmit={handleUpload} className="upload-form">
+        <div className="upload-form">
           <div className="form-group">
             <label htmlFor="name">Candidate Name *</label>
             <input
@@ -308,7 +267,7 @@ export default function AddCandidate() {
           </div>
 
           <div className="form-actions">
-            <button type="submit" className="btn-upload" disabled={loading}>
+            <button type="button" className="btn-upload" disabled={loading} onClick={handleUpload}>
               {loading ? 'Processing Resume...' : 'Upload & Process Resume'}
             </button>
             <button type="button" className="btn-reset" onClick={handleReset} disabled={loading}>
@@ -334,7 +293,7 @@ export default function AddCandidate() {
               </div>
             </div>
           )}
-        </form>
+        </div>
       )}
 
       {step === 2 && (
@@ -345,11 +304,11 @@ export default function AddCandidate() {
             <div className="timestamp-badge">🕐 Added on: <strong>{addedOn}</strong></div>
           )}
           {atsScore !== null && (
-            <div className={`ats-score-badge ${atsScore >= 50 ? 'ats-pass' : 'ats-fail'}`}>
+            <div className={`ats-score-badge ${atsScore >= 30 ? 'ats-pass' : 'ats-fail'}`}>
               📊 ATS Score: <strong>{atsScore.toFixed(1)}%</strong>
               {atsScore < 50
-                ? ' — Below 50%: this candidate will not appear in the interview schedule.'
-                : ' — Above 50%: eligible for interview scheduling.'}
+                ? ' — Below 30%: this candidate will not appear in the interview schedule.'
+                : ' — Above 30%: eligible for interview scheduling.'}
             </div>
           )}
 
@@ -384,10 +343,10 @@ export default function AddCandidate() {
 
           <div className="action-buttons">
             <button className="btn-exit" onClick={handleSaveAndExit} disabled={loading}>
-              <FaCheckCircle /> Save & Exit
+              <FaCheckCircle /> Save &amp; Exit
             </button>
-            {/* Cancel now deletes the candidate before resetting */}
-            <button className="btn-delete" onClick={handleCancelStep2} disabled={loading}>
+            {/* Cancel deletes the candidate record and resets the form */}
+            <button className="btn-cancel" onClick={handleCancelStep2} disabled={loading}>
               Cancel
             </button>
           </div>

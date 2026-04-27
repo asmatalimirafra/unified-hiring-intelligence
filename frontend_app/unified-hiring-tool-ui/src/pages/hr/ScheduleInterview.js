@@ -170,7 +170,7 @@ export default function ScheduleInterview() {
     if (c.candidate_selected || c.candidate_rejected) return false;
     if (isTrulyScheduled(c)) return false;
     // Exclude ATS-failed candidates (score exists and is < 50)
-    if (c.ats_score !== null && c.ats_score !== undefined && c.ats_score < 50) return false;
+    if (c.ats_score !== null && c.ats_score !== undefined && c.ats_score < 30) return false; // ATS is a coarse spam filter only — real alignment is measured by Fitment score
     // If rounds are done, only show in pending if last round passed (>= 3)
     const lastAvg = getLastRoundAvg(c.interviews || []);
     if (lastAvg !== null && Math.round(lastAvg * 100) / 100 < 3) return false;
@@ -333,6 +333,7 @@ export default function ScheduleInterview() {
                 <th>Rounds Done</th>
                 <th>Avg Score</th>
                 <th>Verdict</th>
+                <th title="Keyword overlap with JD — use Fitment score for deep alignment">ATS %</th>
                 <th>Resume</th>
                 <th>Add Interview</th>
                 <th>Select</th>
@@ -379,6 +380,13 @@ export default function ScheduleInterview() {
                       {verdict
                         ? <span className={`verdict-tag ${verdict.cls}`}>{verdict.label}</span>
                         : '—'}
+                    </td>
+                    <td>
+                      {c.ats_score !== null && c.ats_score !== undefined
+                        ? <span className={`ats-badge ${c.ats_score >= 60 ? 'ats-high' : c.ats_score >= 30 ? 'ats-mid' : 'ats-low'}`}>
+                            {c.ats_score.toFixed(1)}%
+                          </span>
+                        : <span className="ats-badge ats-na">—</span>}
                     </td>
                     <td>
                       <a href={`${BASE_URL}/get-resume/${c.candidate_id}?ngrok-skip-browser-warning=true`}
