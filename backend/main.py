@@ -678,14 +678,77 @@ async def reject_candidate(candidate_id: str):
 
 @app.post("/undo-candidate-verdict/{candidate_id}", status_code=200)
 async def undo_candidate_verdict(candidate_id: str):
-    """Move a selected or rejected candidate back to Pending."""
+    """
+    Move a selected or rejected candidate back to Pending.
+    Also clears candidate_joined / candidate_not_joined defensively in case the
+    candidate had advanced past Selected — HR shouldn't be left with stale flags
+    if they decide to unwind a verdict.
+    """
     result = candidates_collection.update_one(
         {"candidate_id": candidate_id},
-        {"$set": {"candidate_selected": False, "candidate_rejected": False}}
+        {"$set": {
+            "candidate_selected":   False,
+            "candidate_rejected":   False,
+            "candidate_joined":     False,
+            "candidate_not_joined": False,
+        }}
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail=f"Candidate '{candidate_id}' not found.")
     return {"message": f"Candidate {candidate_id} moved back to Pending."}
+
+
+# ─── Post-offer status tracking (Joined / Not Joined) ───────────────────────
+# Once HR has marked a candidate as Selected and generated an offer letter,
+# they can update the post-offer outcome:
+#   • Joined      — candidate accepted the offer and joined the company.
+#   • Not Joined  — candidate declined or ghosted after offer.
+#
+# These flags are mutually exclusive (only one can be true at a time). The
+# offer_generated flag is NEVER touched here — once an offer is out, it stays
+# generated even if HR uses Undo to move the candidate back to Selected.
+# Both flags are stored as plain booleans on the candidate document, mirroring
+# the existing candidate_selected / candidate_rejected pattern.
+# ────────────────────────────────────────────────────────────────────────────
+
+@app.post("/mark-joined/{candidate_id}", status_code=200)
+async def mark_joined(candidate_id: str):
+    """Mark a selected candidate as joined. Clears not_joined flag if set."""
+    result = candidates_collection.update_one(
+        {"candidate_id": candidate_id},
+        {"$set": {"candidate_joined": True, "candidate_not_joined": False}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail=f"Candidate '{candidate_id}' not found.")
+    return {"message": f"Candidate {candidate_id} marked as joined."}
+
+
+@app.post("/mark-not-joined/{candidate_id}", status_code=200)
+async def mark_not_joined(candidate_id: str):
+    """Mark a selected candidate as not joined. Clears joined flag if set."""
+    result = candidates_collection.update_one(
+        {"candidate_id": candidate_id},
+        {"$set": {"candidate_not_joined": True, "candidate_joined": False}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail=f"Candidate '{candidate_id}' not found.")
+    return {"message": f"Candidate {candidate_id} marked as not joined."}
+
+
+@app.post("/undo-joined-status/{candidate_id}", status_code=200)
+async def undo_joined_status(candidate_id: str):
+    """
+    Move a Joined or Not-Joined candidate back to Selected.
+    Clears both flags but leaves offer_generated / offer_details intact so HR
+    doesn't have to regenerate the same offer letter.
+    """
+    result = candidates_collection.update_one(
+        {"candidate_id": candidate_id},
+        {"$set": {"candidate_joined": False, "candidate_not_joined": False}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail=f"Candidate '{candidate_id}' not found.")
+    return {"message": f"Candidate {candidate_id} moved back to Selected."}
 
 
 # ─── ATS Manual Override ────────────────────────────────────────────────────
