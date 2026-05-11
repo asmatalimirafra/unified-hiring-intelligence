@@ -57,7 +57,6 @@ function RolesPage() {
 
   const [openRoles, setOpenRoles] = useState([]);
   const [closedRoles, setClosedRoles] = useState([]);
-  const [allRolesGlobal, setAllRolesGlobal] = useState([]); // ← all roles across ALL HRs, for duplicate ID check only
   const [selectedJD, setSelectedJD] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -70,20 +69,19 @@ function RolesPage() {
   });
 
   const [showAddModal, setShowAddModal] = useState(false);
+  // role_id is no longer a user-entered field — backend auto-generates it
+  // (max(existing role_ids) + 1) on /add-role/.
   const [newRoleData, setNewRoleData] = useState({
-    role_id: '',
     role: '',
     positions: 1,
     jd_text: ''
   });
-
-  const [roleIdError, setRoleIdError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 
   useEffect(() => {
     fetchRoles();
-    fetchAllRolesGlobal();
   }, []); // eslint-disable-line
 
   const fetchRoles = async () => {
@@ -99,19 +97,6 @@ function RolesPage() {
       setClosedRoles(roles.filter(role => role.status === "closed"));
     } catch (err) {
       console.error('Failed to fetch roles:', err);
-    }
-  };
-
-  // ── Fetch ALL roles across every HR account — used only for Role ID duplicate check ──
-  const fetchAllRolesGlobal = async () => {
-    try {
-      const response = await axios.get(`${BASE_URL}/get-roles/`, {
-        headers: { "ngrok-skip-browser-warning": "true" }
-        // No hr_id param → returns all roles globally
-      });
-      setAllRolesGlobal(Array.isArray(response.data) ? response.data : []);
-    } catch (err) {
-      console.error('Failed to fetch global roles for duplicate check:', err);
     }
   };
 
@@ -186,47 +171,71 @@ function RolesPage() {
     }
   };
 
-  const handleRoleIdChange = (e) => {
-    const value = e.target.value;
-    setNewRoleData({ ...newRoleData, role_id: value });
-    // ── Check against ALL roles globally (not just this HR's) ────────────
-    const isDuplicate = allRolesGlobal.some(
-      (role) => String(role.role_id) === String(value.trim())
-    );
-    setRoleIdError(isDuplicate ? '⚠️ This Role ID is already taken. Please use a unique ID.' : '');
-  };
-
   const handleAddRole = async (e) => {
     e.preventDefault();
-    if (roleIdError) return;
+    setSubmitting(true);
 
     const formData = new FormData();
-    formData.append('role_id', newRoleData.role_id);
+    // role_id is intentionally NOT sent — the backend generates it.
     formData.append('role', newRoleData.role);
     formData.append('positions', newRoleData.positions);
     formData.append('jd_text', newRoleData.jd_text);
-    // ── Tag role with HR account ──────────────────────────────────────────
     if (hrId) formData.append('hr_id', hrId);
 
     try {
-      await axios.post(`${BASE_URL}/add-role/`, formData, {
+      const res = await axios.post(`${BASE_URL}/add-role/`, formData, {
         headers: { "ngrok-skip-browser-warning": "true" }
       });
-      alert('Role added successfully!');
+      // Backend returns the auto-generated role_id — surface it so HR knows
+      const newId = res.data?.role_id;
+      alert(`Role added successfully! Role ID: ${newId}`);
       setShowAddModal(false);
-      setNewRoleData({ role_id: '', role: '', positions: 1, jd_text: '' });
-      setRoleIdError('');
+      setNewRoleData({ role: '', positions: 1, jd_text: '' });
       fetchRoles();
-      fetchAllRolesGlobal(); // ← keep global list in sync
     } catch (err) {
       console.error('Error adding role:', err);
-      if (err.response?.status === 400) {
-        setRoleIdError(`⚠️ ${err.response.data.detail}`);
-      } else {
-        alert('Failed to add role. Check console for details.');
-      }
+      const msg = err.response?.data?.detail || 'Failed to add role. Check console for details.';
+      alert(`❌ ${msg}`);
+    } finally {
+      setSubmitting(false);
     }
   };
+
+  // ── Vacancy cell ──────────────────────────────────────────────────────────
+  // Renders "left / total" for open roles. If all positions are filled
+  // (left === 0) we highlight the cell so it's visually obvious.
+  const renderVacancies = (role) => {
+    const total = role.positions ?? 0;
+    // vacancies_left is provided by the backend; fall back to total if the
+    // backend hasn't been updated yet (graceful degradation).
+    const left  = role.vacancies_left !== undefined ? role.vacancies_left : total;
+    const allFilled = left === 0 && total > 0;
+    return (
+      <span
+        className={allFilled ? 'badge bg-danger' : 'badge bg-success'}
+        title={`${left} vacancy/vacancies remaining out of ${total} total`}
+        style={{ fontSize: '0.85rem' }}
+      >
+        {left} / {total}
+      </span>
+    );
+  };
+
+  // ── Created / Last edited cell ────────────────────────────────────────────
+  // Shows two stacked timestamps. If the role was never edited (last_edited_at
+  // equals created_at), we still show both lines for visual consistency.
+  const renderCreatedAndEdited = (role) => (
+    <div style={{ fontSize: '0.8rem', lineHeight: '1.35' }}>
+      <div>
+        <span style={{ color: '#888' }}>Created:</span><br />
+        {formatTimestamp(role.created_at)}
+      </div>
+      <div style={{ marginTop: '4px' }}>
+        <span style={{ color: '#888' }}>Last edited:</span><br />
+        {formatTimestamp(role.last_edited_at || role.created_at)}
+      </div>
+    </div>
+  );
 
   const renderTable = (roles, isClosed = false) => (
     <table className="table table-bordered mt-4">
@@ -235,8 +244,8 @@ function RolesPage() {
           <th>Role ID</th>
           <th>Position</th>
           <th>Job Description</th>
-          <th>Vacancies</th>
-          <th>{isClosed ? 'Closed On' : 'Created On'}</th>
+          <th>{isClosed ? 'Vacancies' : 'Vacancies (left / total)'}</th>
+          <th>{isClosed ? 'Closed On' : 'Created / Last edited'}</th>
           <th>Actions</th>
         </tr>
       </thead>
@@ -261,8 +270,19 @@ function RolesPage() {
               </div>
             </td>
 
-            <td>{role.positions}</td>
-            <td>{isClosed ? formatTimestamp(role.closed_on) : formatTimestamp(role.created_at)}</td>
+            {/* Vacancies column:
+                - Open roles  → "left / total" with red highlight when all filled
+                - Closed roles → just the original total positions
+                  (closed roles aren't actively hiring, so "left" is moot) */}
+            <td style={{ textAlign: 'center' }}>
+              {isClosed ? role.positions : renderVacancies(role)}
+            </td>
+
+            <td>
+              {isClosed
+                ? formatTimestamp(role.closed_on)
+                : renderCreatedAndEdited(role)}
+            </td>
 
             <td>
               {!isClosed ? (
@@ -408,31 +428,34 @@ function RolesPage() {
                 <h5 className="modal-title">Create New Job Role</h5>
                 <FaTimesCircle
                   style={{ cursor: "pointer", fontSize: "22px", color: "#dc3545" }}
-                  onClick={() => { setShowAddModal(false); setRoleIdError(''); }}
+                  onClick={() => setShowAddModal(false)}
                 />
               </div>
               <form onSubmit={handleAddRole}>
                 <div className="modal-body">
-                  <div className="mb-3">
-                    <label className="form-label">Role ID (Numeric)</label>
-                    <input
-                      type="text"
-                      className={`form-control ${roleIdError ? 'is-invalid' : ''}`}
-                      required
-                      onChange={handleRoleIdChange}
-                    />
-                    {roleIdError && (
-                      <div className="invalid-feedback d-block" style={{ color: '#dc3545', fontSize: '0.875rem' }}>
-                        {roleIdError}
-                      </div>
-                    )}
+                  {/* Role ID input removed — backend auto-generates the next ID.
+                      A small note tells HR what's happening so the missing field
+                      doesn't feel like a UI gap. */}
+                  <div
+                    className="mb-3 p-2"
+                    style={{
+                      background: '#f1f8ff',
+                      border: '1px solid #d0e2ff',
+                      borderRadius: '4px',
+                      fontSize: '0.85rem',
+                      color: '#555'
+                    }}
+                  >
+                    ℹ️ Role ID will be assigned automatically.
                   </div>
+
                   <div className="mb-3">
                     <label className="form-label">Role Name</label>
                     <input
                       type="text"
                       className="form-control"
                       required
+                      value={newRoleData.role}
                       onChange={(e) => setNewRoleData({ ...newRoleData, role: e.target.value })}
                     />
                   </div>
@@ -443,6 +466,7 @@ function RolesPage() {
                       className="form-control"
                       min="1"
                       required
+                      value={newRoleData.positions}
                       onChange={(e) => setNewRoleData({ ...newRoleData, positions: e.target.value })}
                     />
                   </div>
@@ -462,12 +486,13 @@ function RolesPage() {
                   <button
                     type="button"
                     className="btn btn-secondary"
-                    onClick={() => { setShowAddModal(false); setRoleIdError(''); }}
+                    onClick={() => setShowAddModal(false)}
+                    disabled={submitting}
                   >
                     Cancel
                   </button>
-                  <button type="submit" className="btn btn-success" disabled={!!roleIdError}>
-                    Save Role
+                  <button type="submit" className="btn btn-success" disabled={submitting}>
+                    {submitting ? 'Saving...' : 'Save Role'}
                   </button>
                 </div>
               </form>
