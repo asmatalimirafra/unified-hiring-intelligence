@@ -613,6 +613,54 @@ async def undo_candidate_verdict(candidate_id: str):
         raise HTTPException(status_code=404, detail=f"Candidate '{candidate_id}' not found.")
     return {"message": f"Candidate {candidate_id} moved back to Pending."}
 
+
+# ─── ATS Manual Override ────────────────────────────────────────────────────
+# These two endpoints let HR override the automatic ATS-rejection decision.
+# A candidate with ats_score < 30% is normally placed in the "Rejected" list
+# on the View Candidates page. HR can manually approve such a candidate (e.g.
+# when they believe the candidate has potential beyond what keywords reveal)
+# and move them to Pending, making them eligible for interview scheduling.
+# We DO NOT modify ats_score — only set a separate manual_override flag —
+# so the original ATS signal is preserved for audit and analytics.
+# ────────────────────────────────────────────────────────────────────────────
+
+@app.post("/override-ats-rejection/{candidate_id}", status_code=200)
+async def override_ats_rejection(candidate_id: str):
+    """
+    HR manually approves a candidate whose ATS score is below the 30% threshold.
+    The candidate moves from the ATS-rejected list to the Pending list,
+    making them eligible for interview scheduling.
+    Note: ats_score itself is NOT modified — only the manual_override flag is set,
+    preserving the original ATS signal for audit purposes.
+    """
+    candidate = candidates_collection.find_one({"candidate_id": candidate_id})
+    if not candidate:
+        raise HTTPException(status_code=404, detail=f"Candidate '{candidate_id}' not found.")
+
+    result = candidates_collection.update_one(
+        {"candidate_id": candidate_id},
+        {"$set": {"manual_override": True}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail=f"Candidate '{candidate_id}' not found.")
+    return {"message": f"Candidate {candidate_id} manually moved to Pending."}
+
+
+@app.post("/revoke-ats-override/{candidate_id}", status_code=200)
+async def revoke_ats_override(candidate_id: str):
+    """
+    Revert a manual override — the candidate goes back to the ATS-rejected list
+    (assuming their ats_score is still below threshold).
+    """
+    result = candidates_collection.update_one(
+        {"candidate_id": candidate_id},
+        {"$unset": {"manual_override": ""}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail=f"Candidate '{candidate_id}' not found.")
+    return {"message": f"Candidate {candidate_id} moved back to ATS-rejected."}
+
+
 @app.delete("/delete-candidate/{candidate_id}")
 async def delete_candidate_api(candidate_id: str):
     deleted = delete_candidate(candidate_id)

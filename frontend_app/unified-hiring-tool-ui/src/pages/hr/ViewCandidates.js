@@ -131,6 +131,43 @@ function ViewCandidates() {
     }
   };
 
+  // ── ATS override handlers ──────────────────────────────────────────────────
+  // HR can manually approve a candidate whose ATS score is below 30%, moving
+  // them from the Rejected list to the Pending list (and Schedule page).
+  // Undo reverses the decision.
+  const handleSendToPending = async (candidate) => {
+    const score = candidate.ats_score?.toFixed(1) ?? '?';
+    if (!window.confirm(
+      `"${candidate.name}" scored ${score}% on ATS, below the 30% threshold.\n\n` +
+      `Are you sure you want to manually move this candidate to Pending Interviews?`
+    )) return;
+    try {
+      await axios.post(
+        `${BASE_URL}/override-ats-rejection/${candidate.candidate_id}`,
+        {}, axiosConfig
+      );
+      fetchCandidates();
+    } catch (err) {
+      alert(`Failed to move candidate: ${err.response?.data?.detail || 'Please try again.'}`);
+    }
+  };
+
+  const handleRevokeOverride = async (candidate) => {
+    if (!window.confirm(
+      `Revert the manual approval for "${candidate.name}"?\n\n` +
+      `They will move back to the ATS-rejected list.`
+    )) return;
+    try {
+      await axios.post(
+        `${BASE_URL}/revoke-ats-override/${candidate.candidate_id}`,
+        {}, axiosConfig
+      );
+      fetchCandidates();
+    } catch (err) {
+      alert(`Failed to revoke: ${err.response?.data?.detail || 'Please try again.'}`);
+    }
+  };
+
   const filtered = Array.isArray(candidates)
     ? candidates.filter(c => String(c.applied_role_id) === String(selectedRoleId))
     : [];
@@ -138,17 +175,23 @@ function ViewCandidates() {
   // Completed = HR has given a final verdict
   const completed = filtered.filter(c => c.candidate_selected || c.candidate_rejected);
 
-  // ATS-rejected = not yet decided, but ATS score < 30% (or scored 0)
+  // ATS-rejected = not yet decided, ATS score < 30%, AND not manually overridden
   const atsRejected = filtered.filter(c =>
     !c.candidate_selected && !c.candidate_rejected &&
+    !c.manual_override &&
     (c.ats_score !== null && c.ats_score !== undefined) &&
     c.ats_score < 30
   );
 
-  // Pending = not decided, ATS >= 30% (or no ATS score yet for old records)
+  // Pending = not decided, AND either ATS >= 30% OR manually overridden by HR
   const pending = filtered.filter(c =>
     !c.candidate_selected && !c.candidate_rejected &&
-    (c.ats_score === null || c.ats_score === undefined || c.ats_score >= 30)
+    (
+      c.ats_score === null ||
+      c.ats_score === undefined ||
+      c.ats_score >= 30 ||
+      c.manual_override === true
+    )
   );
 
   const pendingRounds    = getAllRounds(pending);
@@ -181,7 +224,31 @@ function ViewCandidates() {
             {list.map(c => (
               <tr key={c.candidate_id}>
                 <td>{c.candidate_id}</td>
-                <td>{c.name}</td>
+                {/* Name cell — shows the "Manually approved" badge with an Undo
+                    button for candidates HR manually moved from Rejected. */}
+                <td>
+                  {c.name}
+                  {c.manual_override && (
+                    <>
+                      <br />
+                      <span
+                        className="badge bg-info text-dark mt-1"
+                        style={{ fontSize: '0.7rem' }}
+                        title={`Manually approved by HR despite ATS score of ${c.ats_score?.toFixed(1) ?? '?'}%`}
+                      >
+                        ⚠️ Manually approved
+                      </span>
+                      <button
+                        className="btn btn-link btn-sm p-0 ms-2"
+                        style={{ fontSize: '0.7rem' }}
+                        onClick={() => handleRevokeOverride(c)}
+                        title="Revert to ATS-rejected"
+                      >
+                        Undo
+                      </button>
+                    </>
+                  )}
+                </td>
                 <td>{getAtsBadge(c.ats_score)}</td>
                 {/* Status: shows rounds done + scheduled badge */}
                 <td>{getStatusLabel(c)}</td>
@@ -323,7 +390,9 @@ function ViewCandidates() {
     <div className="candidate-section">
       <h4>🚫 Rejected Candidates Based on ATS Score</h4>
       <p style={{ fontSize: '0.85rem', color: '#888', marginBottom: '0.75rem' }}>
-        These candidates scored below 30% on the ATS keyword match and are not eligible for interview scheduling.
+        These candidates scored below 30% on the ATS keyword match.
+        Use "Send to Pending" to manually approve candidates you believe may
+        still perform well in interviews.
       </p>
       {list.length === 0 ? (
         <p className="empty-message">No ATS-rejected candidates.</p>
@@ -336,7 +405,7 @@ function ViewCandidates() {
               <th>ATS Score</th>
               <th>Applied Role</th>
               <th>Resume</th>
-              <th>Schedule</th>
+              <th>Action</th>
               <th>Delete</th>
             </tr>
           </thead>
@@ -361,14 +430,17 @@ function ViewCandidates() {
                     <FaEye />
                   </button>
                 </td>
-                {/* Schedule disabled — ATS score too low */}
+                {/* Send to Pending — overrides ATS rejection.
+                    Replaces the previously disabled Schedule button so HR can
+                    manually approve a candidate they think will do well in
+                    interviews despite a low ATS score. */}
                 <td>
                   <button
-                    className="btn btn-outline-secondary btn-sm"
-                    disabled
-                    title={`ATS score ${c.ats_score?.toFixed(1)}% is below 30% — not eligible for scheduling`}
+                    className="btn btn-outline-warning btn-sm"
+                    onClick={() => handleSendToPending(c)}
+                    title="Manually approve and move to Pending Interviews"
                   >
-                    <FaCalendarPlus />
+                    Send to Pending
                   </button>
                 </td>
                 <td>

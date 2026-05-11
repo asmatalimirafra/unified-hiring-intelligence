@@ -163,14 +163,21 @@ export default function ScheduleInterview() {
   };
 
   // Pending = open role, not selected/rejected, not truly scheduled,
-  //           ATS score >= 50% (or no ATS score for old records),
+  //           ATS score >= 30% (or no ATS score for old records, OR manually
+  //           overridden by HR via the View Candidates page),
   //           AND last round avg >= 3 (or no rounds done yet)
   const pending = allCands.filter(c => {
     if (!openRoleIds.has(String(c.applied_role_id))) return false;
     if (c.candidate_selected || c.candidate_rejected) return false;
     if (isTrulyScheduled(c)) return false;
-    // Exclude ATS-failed candidates (score exists and is < 50)
-    if (c.ats_score !== null && c.ats_score !== undefined && c.ats_score < 30) return false; // ATS is a coarse spam filter only — real alignment is measured by Fitment score
+    // Exclude ATS-failed candidates unless HR has manually overridden them.
+    // manual_override = true means HR explicitly approved this candidate
+    // despite a low ATS score (set from the View Candidates rejected list).
+    if (
+      c.ats_score !== null && c.ats_score !== undefined &&
+      c.ats_score < 30 &&
+      !c.manual_override
+    ) return false; // ATS is a coarse spam filter only — real alignment is measured by Fitment score
     // If rounds are done, only show in pending if last round passed (>= 3)
     const lastAvg = getLastRoundAvg(c.interviews || []);
     if (lastAvg !== null && Math.round(lastAvg * 100) / 100 < 3) return false;
@@ -358,7 +365,23 @@ export default function ScheduleInterview() {
                 return (
                   <tr key={c.candidate_id}>
                     <td>{c.candidate_id}</td>
-                    <td>{c.name}</td>
+                    {/* Show a small "Manually approved" badge next to the name
+                        so HR knows this candidate bypassed the ATS threshold. */}
+                    <td>
+                      {c.name}
+                      {c.manual_override && (
+                        <>
+                          {' '}
+                          <span
+                            className="ats-badge ats-mid"
+                            style={{ fontSize: '0.7rem', marginLeft: '0.25rem' }}
+                            title={`Manually approved by HR despite ATS score of ${c.ats_score?.toFixed(1) ?? '?'}%`}
+                          >
+                            ⚠️ Manual
+                          </span>
+                        </>
+                      )}
+                    </td>
                     <td>{getRoleName(c.applied_role_id) || c.applied_role}</td>
                     <td>
                       {lastRound !== null
