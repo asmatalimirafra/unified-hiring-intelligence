@@ -296,48 +296,84 @@ app.add_middleware(
 # ROLES
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _next_role_id() -> str:
+    """
+    Compute the next auto-increment role_id by scanning ALL existing roles
+    (across every HR account) and returning max(numeric role_ids) + 1.
+    Returns a string so the existing schema (role_id as str) stays unchanged.
+    Existing roles with non-numeric IDs are ignored — the increment is based
+    only on roles whose IDs parse as integers.
+    """
+    max_id = 0
+    for doc in db["roles"].find({}, {"role_id": 1, "_id": 0}):
+        rid = doc.get("role_id")
+        try:
+            n = int(rid)
+            if n > max_id:
+                max_id = n
+        except (TypeError, ValueError):
+            continue  # skip legacy / non-numeric IDs
+    return str(max_id + 1)
+
+
 @app.post("/add-role/", status_code=201)
 async def add_role(
-    role_id: str = Form(...),
     role: str = Form(...),
     positions: int = Form(...),
     hr_id: Optional[str] = Form(None),
     jd_text: Optional[str] = Form(None),
     jd_file: Optional[UploadFile] = Form(None)
 ):
+    """
+    Create a new role. The role_id is now auto-generated server-side
+    (max(existing_role_ids) + 1) so HR no longer enters it manually.
+    last_edited_at is initialised to created_at so the UI can show both
+    timestamps from the moment the role is created.
+    """
     if not jd_text and (jd_file is None or jd_file.filename == ""):
         raise HTTPException(status_code=422, detail="Please provide either JD text or upload a JD file.")
 
-    try:
-        role_id_int = int(role_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="role_id must be numeric.")
+    # ── Auto-generate the next role_id (atomic-ish via retry loop) ──────────
+    # We retry up to 5 times in case two HRs hit this endpoint at the exact
+    # same moment and both compute the same next id. The unique index on
+    # role_id (in mongo_service.py) will make the second insert fail,
+    # at which point we pick the next id and try again.
+    for attempt in range(5):
+        role_id = _next_role_id()
+        try:
+            role_id_int = int(role_id)
+        except ValueError:
+            raise HTTPException(status_code=500, detail="Generated role_id is not numeric — data corruption.")
 
-    existing_role = db["roles"].find_one({"role_id": role_id})
-    if existing_role:
+        filename = f"{role.replace(' ', '_')}_{role_id}_jd"
+
+        # Resolve JD text from uploaded file if needed (do this once, not per attempt)
+        if attempt == 0 and jd_file and jd_file.filename:
+            file_content = await jd_file.read()
+            if jd_file.filename.endswith(".pdf"):
+                jd_text = extract_text_from_pdf(file_content)
+            elif jd_file.filename.endswith(".docx"):
+                jd_text = extract_text_from_docx(file_content)
+            else:
+                raise HTTPException(status_code=400, detail="Only PDF and DOCX files are supported.")
+
+        mongo_status = store_job_description(role_id, role, positions, jd_text, filename, hr_id=hr_id)
+        if mongo_status is not None:
+            break  # success — stop retrying
+        # Otherwise: collision (rare). Loop will pick a higher id.
+    else:
+        # All retries exhausted
         raise HTTPException(
-            status_code=400,
-            detail=f"Role ID '{role_id}' already exists. Please use a unique Role ID."
+            status_code=500,
+            detail="Failed to allocate a unique role_id after several attempts. Please try again."
         )
 
-    filename = f"{role.replace(' ', '_')}_{role_id}_jd"
-
-    if jd_file and jd_file.filename:
-        file_content = await jd_file.read()
-        if jd_file.filename.endswith(".pdf"):
-            jd_text = extract_text_from_pdf(file_content)
-        elif jd_file.filename.endswith(".docx"):
-            jd_text = extract_text_from_docx(file_content)
-        else:
-            raise HTTPException(status_code=400, detail="Only PDF and DOCX files are supported.")
-
-    mongo_status = store_job_description(role_id, role, positions, jd_text, filename, hr_id=hr_id)
-
-    if mongo_status is None:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Role ID '{role_id}' already exists. Please use a unique Role ID."
-        )
+    # Set last_edited_at = created_at for a fresh role. This lets the UI
+    # always display both columns without special-casing newly-created roles.
+    db["roles"].update_one(
+        {"role_id": role_id},
+        {"$set": {"last_edited_at": datetime.now()}}
+    )
 
     qdrant_status = store_jd_embedding(role_id_int, jd_text)
 
@@ -353,11 +389,49 @@ async def get_roles(hr_id: Optional[str] = Query(None)):
     """
     Returns roles filtered by hr_id when provided.
     Called by HR portal (with hr_id) and Interviewer portal (without — sees all open roles for dropdown).
+
+    Each role is augmented with:
+      - hired_count:    number of candidates marked selected for that role
+      - vacancies_left: max(positions - hired_count, 0)
+
+    This is computed live (not stored) so it stays in sync regardless of how
+    selections/un-selections are made elsewhere in the system.
     """
-    return get_all_roles(hr_id=hr_id)
+    roles = get_all_roles(hr_id=hr_id)
+    if not roles:
+        return roles
+
+    # Build a single aggregate of hired counts grouped by role_id, then
+    # attach the relevant count to each role. One DB query, not N.
+    role_id_strs = [str(r.get("role_id")) for r in roles if r.get("role_id") is not None]
+
+    hired_by_role = {}
+    if role_id_strs:
+        # Match candidates whose applied_role_id (stored as either str or int
+        # historically) corresponds to one of the roles we're returning, AND
+        # who have been selected.
+        pipeline = [
+            {"$match": {"candidate_selected": True}},
+            {"$group": {"_id": "$applied_role_id", "count": {"$sum": 1}}},
+        ]
+        for row in candidates_collection.aggregate(pipeline):
+            # Normalise the key to string so int/str storage variations match
+            hired_by_role[str(row["_id"])] = row["count"]
+
+    for r in roles:
+        rid = str(r.get("role_id"))
+        hired = hired_by_role.get(rid, 0)
+        positions = r.get("positions", 0) or 0
+        r["hired_count"] = hired
+        r["vacancies_left"] = max(positions - hired, 0)
+
+    return roles
 
 @app.put("/update-role/{role_id}")
 async def update_role_api(role_id: str, update_data: dict = Body(...)):
+    # Stamp last_edited_at on every successful edit so the UI can show
+    # both "Created on" and "Last edited" timestamps side by side.
+    update_data["last_edited_at"] = datetime.now()
     modified = update_role(role_id, update_data)
     if modified:
         # ✅ If role name changed, cascade update to all candidates with this role_id
@@ -1172,6 +1246,3 @@ async def interviewer_chat(request: dict):
         media_type="text/plain",
         headers={"X-Thread-Id": thread_id}
     )
-
-
-
