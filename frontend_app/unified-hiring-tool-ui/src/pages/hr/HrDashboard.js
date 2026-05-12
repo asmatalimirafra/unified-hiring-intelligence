@@ -65,27 +65,23 @@ export default function HrDashboard() {
   const [rolesClosedCount,   setRolesClosedCount]   = useState(0);
   const [allClosedRolesData, setAllClosedRolesData] = useState([]);
   const [openRolesList,      setOpenRolesList]      = useState([]);
-  const [interviewerRanking, setInterviewerRanking] = useState([]);
   const [recentActivity,     setRecentActivity]     = useState([]);
 
   // Raw data stored for range-picker re-computation
   const [allInterviewerData, setAllInterviewerData] = useState([]);
   const [allCandidatesData,  setAllCandidatesData]  = useState([]);
 
-  // Date range pickers
-  const [rangeInterviewsStat, setRangeInterviewsStat] = useState({ from: monthStartStr(), to: monthEndStr() });
-  const [rangeInterviews,     setRangeInterviews]     = useState({ from: monthStartStr(), to: monthEndStr() });
-  const [rangeVerdicts,       setRangeVerdicts]       = useState({ from: monthStartStr(), to: monthEndStr() });
-  const [rangeFunnel,         setRangeFunnel]         = useState({ from: monthStartStr(), to: monthEndStr() });
-  const [rangeClosed,         setRangeClosed]         = useState({ from: '2020-01-01', to: monthEndStr() });
+  /* ── ONE common date range picker ──────────────────────────── */
+  const [range, setRange] = useState({ from: monthStartStr(), to: monthEndStr() });
 
-  // Computed from range pickers
-  const [interviewsInRange, setInterviewsInRange] = useState(0);
-  const [hireCount,         setHireCount]         = useState(0);
-  const [verdictCounts,     setVerdictCounts]     = useState({ strongHire: 0, hire: 0, weakHire: 0, noHire: 0 });
-  const [interviewWeekly,   setInterviewWeekly]   = useState([0, 0, 0, 0]);
-  const [funnelInRange,     setFunnelInRange]     = useState({ applied: 0, round1: 0, round2: 0, hired: 0 });
-  const [closedWeeklyRange, setClosedWeeklyRange] = useState([0, 0, 0, 0]);
+  // Computed from the common range
+  const [interviewsInRange,  setInterviewsInRange]  = useState(0);
+  const [hireCount,          setHireCount]          = useState(0);
+  const [verdictCounts,      setVerdictCounts]      = useState({ strongHire: 0, hire: 0, weakHire: 0, noHire: 0 });
+  const [interviewWeekly,    setInterviewWeekly]    = useState([0, 0, 0, 0]);
+  const [funnelInRange,      setFunnelInRange]      = useState({ applied: 0, round1: 0, round2: 0, hired: 0 });
+  const [closedWeeklyRange,  setClosedWeeklyRange]  = useState([0, 0, 0, 0]);
+  const [interviewerRanking, setInterviewerRanking] = useState([]);
 
   /* ── fetch ──────────────────────────────────────────────────── */
   useEffect(() => {
@@ -105,24 +101,17 @@ export default function HrDashboard() {
         setAllInterviewerData(interviewers);
         setAllCandidatesData(candidates);
 
-        const month = curMonth();
-        const year  = curYear();
-
-        /* ── candidates pending (interview_completed !== true) ── */
+        /* ── candidates pending ───────────────────────────── */
         setInterviewsPending(candidates.filter(c => !c.candidate_selected && !c.candidate_rejected).length);
 
-        /* ── open roles count — from /get-roles/ status field ── */
+        /* ── open / closed counts ─────────────────────────── */
         const open   = roles.filter(r => r.status === 'open');
         const closed = roles.filter(r => r.status === 'closed');
         setOpenPositions(open.length);
-
-        /* ── closed roles count — from /get-roles/ status field ─ */
         setRolesClosedCount(closed.length);
-
-        /* ── store closed roles for the chart (use status field) ─ */
         setAllClosedRolesData(closed);
 
-        /* ── open roles list with candidate counts ──────────── */
+        /* ── open roles list with candidate counts ────────── */
         setOpenRolesList(open.map(role => ({
           ...role,
           candidateCount: candidates.filter(
@@ -130,22 +119,7 @@ export default function HrDashboard() {
           ).length,
         })));
 
-        /* ── interviewer ranking (current month) ────────────── */
-        const ranked = interviewers
-          .map(i => {
-            const cnt = (i.interviews_taken || []).filter(({ datetime }) => {
-              const d = new Date(datetime);
-              return d.getMonth() === month && d.getFullYear() === year;
-            }).length;
-            return { name: i.name, department: i.department || '—', count: cnt };
-          })
-          .filter(i => i.count > 0)
-          .sort((a, b) => b.count - a.count)
-          .slice(0, 5);
-        const maxCount = ranked[0]?.count || 1;
-        setInterviewerRanking(ranked.map(i => ({ ...i, pct: Math.round((i.count / maxCount) * 100) })));
-
-        /* ── recent activity ────────────────────────────────── */
+        /* ── recent activity ──────────────────────────────── */
         const events = [];
         [...candidates]
           .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
@@ -199,65 +173,64 @@ export default function HrDashboard() {
     let cnt = 0;
     allInterviewerData.forEach(i => {
       (i.interviews_taken || []).forEach(({ datetime }) => {
-        if (inRange(datetime, rangeInterviewsStat.from, rangeInterviewsStat.to)) cnt++;
+        if (inRange(datetime, range.from, range.to)) cnt++;
       });
     });
     setInterviewsInRange(cnt);
-  }, [allInterviewerData, rangeInterviewsStat]);
+  }, [allInterviewerData, range]);
 
   /* ── re-compute interviews CHART ────────────────────────────── */
   useEffect(() => {
     const weekly = [0, 0, 0, 0];
     allInterviewerData.forEach(i => {
       (i.interviews_taken || []).forEach(({ datetime }) => {
-        if (!inRange(datetime, rangeInterviews.from, rangeInterviews.to)) return;
+        if (!inRange(datetime, range.from, range.to)) return;
         const day = new Date(datetime).getDate();
         weekly[Math.min(Math.floor((day - 1) / 7), 3)]++;
       });
     });
     setInterviewWeekly(weekly);
-  }, [allInterviewerData, rangeInterviews]);
+  }, [allInterviewerData, range]);
 
   /* ── re-compute hiring funnel ───────────────────────────────── */
   useEffect(() => {
     const filtered = allCandidatesData.filter(c =>
-      (c.interviews || []).some(iv => inRange(iv.datetime, rangeFunnel.from, rangeFunnel.to))
+      (c.interviews || []).some(iv => inRange(iv.datetime, range.from, range.to))
     );
     setFunnelInRange({
       applied: filtered.length,
       round1:  filtered.filter(c => (c.interviews||[]).some(i => i.round === 1)).length,
       round2:  filtered.filter(c => (c.interviews||[]).some(i => i.round === 2)).length,
-      // Only count as Hired if interview_completed === true
       hired:   filtered.filter(c => c.candidate_selected === true).length,
     });
-  }, [allCandidatesData, rangeFunnel]);
+  }, [allCandidatesData, range]);
 
   /* ── re-compute closed roles chart ─────────────────────────── */
   useEffect(() => {
     const weekly = [0, 0, 0, 0];
     allClosedRolesData.forEach((role) => {
-      // Safely extract closed_on — handles ISO string, Date object, or MongoDB $date wrapper
       let raw = role.closed_on;
       if (raw && typeof raw === 'object' && raw.$date) raw = raw.$date;
       if (!raw) return;
       const d = new Date(raw);
       if (isNaN(d.getTime())) return;
       const dateStr = d.toLocaleDateString('en-CA');
-      if (dateStr < rangeClosed.from || dateStr > rangeClosed.to) return;
+      if (dateStr < range.from || dateStr > range.to) return;
       const day = d.getDate();
       weekly[Math.min(Math.floor((day - 1) / 7), 3)]++;
     });
     setClosedWeeklyRange(weekly);
-  }, [allClosedRolesData, rangeClosed]);
+  }, [allClosedRolesData, range]);
 
   /* ── re-compute verdicts ────────────────────────────────────── */
-  // Count ALL selected/rejected candidates — no date filter
-  // (verdict is about the final decision, not when the interview happened)
   useEffect(() => {
     const vc = { strongHire: 0, hire: 0, weakHire: 0, noHire: 0 };
     let hires = 0;
     allCandidatesData.forEach(c => {
       if (!c.candidate_selected && !c.candidate_rejected) return;
+      const aggAt = c.interview_aggregate?.aggregated_at;
+      if (!aggAt || !inRange(aggAt, range.from, range.to)) return;
+
       const avg = (() => {
         const ivs = c.interviews || [];
         if (!ivs.length) return null;
@@ -273,7 +246,21 @@ export default function HrDashboard() {
     });
     setVerdictCounts(vc);
     setHireCount(hires);
-  }, [allCandidatesData]);
+  }, [allCandidatesData, range]);
+
+  /* ── re-compute interviewer ranking ─────────────────────────── */
+  useEffect(() => {
+    const ranked = allInterviewerData
+      .map(i => {
+        const cnt = (i.interviews_taken || []).filter(({ datetime }) => inRange(datetime, range.from, range.to)).length;
+        return { name: i.name, department: i.department || '—', count: cnt };
+      })
+      .filter(i => i.count > 0)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+    const maxCount = ranked[0]?.count || 1;
+    setInterviewerRanking(ranked.map(i => ({ ...i, pct: Math.round((i.count / maxCount) * 100) })));
+  }, [allInterviewerData, range]);
 
   /* ── weekly growth helper ───────────────────────────────────── */
   const getWeeklyGrowth = (weekly) => {
@@ -372,13 +359,20 @@ export default function HrDashboard() {
   return (
     <div className="hr-dashboard">
 
-      {/* ── Header ─────────────────────────────────────────────── */}
+      {/* ── Header with COMMON date range picker ────────────────── */}
       <motion.div className="hr-header" initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.5 }}>
         <div>
           <h2 className="dashboard-header">
             👋 Welcome back, <span className="username">{user.name || 'HR Professional'}</span>
           </h2>
           <p className="subhead">{dateLabel}</p>
+        </div>
+        <div className="hr-common-range">
+          <span className="hr-common-range-label">Date range:</span>
+          <DateRangePicker
+            from={range.from} to={range.to}
+            onChange={(f, t) => setRange({ from: f, to: t })}
+          />
         </div>
       </motion.div>
 
@@ -388,7 +382,8 @@ export default function HrDashboard() {
           { icon:'⏳', val: interviewsPending,  lbl:'Candidates pending',     accent:'#f59e0b', bg:'#fff8e1', delta: 'Awaiting review' },
           { icon:'💼', val: openPositions,      lbl:'Open roles',             accent:'#2563eb', bg:'#e6f0fb', delta: 'Active now' },
           { icon:'🔒', val: rolesClosedCount,   lbl:'Roles closed',           accent:'#dc2626', bg:'#fde8e8', delta: 'Total closed roles' },
-          { icon:'🎯', val: hireCount,           lbl:'Hire verdicts',          accent:'#7c3aed', bg:'#ede9fe', delta: 'See verdict picker' },
+          { icon:'🎯', val: hireCount,          lbl:'Hire verdicts',          accent:'#7c3aed', bg:'#ede9fe', delta: 'In selected range' },
+          { icon:'📊', val: interviewsInRange,  lbl:'Interviews in range',    accent:'#059669', bg:'#e8f5e9', delta: 'In selected range' },
         ].map((s, i) => (
           <motion.div
             key={i}
@@ -404,23 +399,6 @@ export default function HrDashboard() {
             <div className="hr-stat-delta">{s.delta}</div>
           </motion.div>
         ))}
-
-        {/* Interviews in range — dedicated picker card */}
-        <motion.div
-          className="hr-stat-card hr-stat-card-picker"
-          style={{ borderLeftColor: '#059669' }}
-          initial={{ opacity:0, y:14 }}
-          animate={{ opacity:1, y:0 }}
-          transition={{ duration:0.4, delay: 0.28 }}
-        >
-          <div className="hr-stat-icon" style={{ background: '#e8f5e9' }}>📊</div>
-          <div className="hr-stat-val">{interviewsInRange}</div>
-          <div className="hr-stat-lbl">Interviews in range</div>
-          <DateRangePicker
-            from={rangeInterviewsStat.from} to={rangeInterviewsStat.to}
-            onChange={(f, t) => setRangeInterviewsStat({ from: f, to: t })}
-          />
-        </motion.div>
       </div>
 
       {/* ── Row 2: Open roles + Funnel + Verdicts ──────────────── */}
@@ -457,11 +435,8 @@ export default function HrDashboard() {
         <div className="hr-card">
           <div className="hr-card-header">
             <span className="hr-card-title">🔽 Hiring funnel</span>
+            <span className="hr-tag info">In range</span>
           </div>
-          <DateRangePicker
-            from={rangeFunnel.from} to={rangeFunnel.to}
-            onChange={(f, t) => setRangeFunnel({ from: f, to: t })}
-          />
           <div style={{ marginTop: '0.7rem' }}>
             <FunnelBar label="Applied"  value={funnelInRange.applied} max={funnelInRange.applied} color="#2563eb" />
             <FunnelBar label="Round 1"  value={funnelInRange.round1}  max={funnelInRange.applied} color="#7c3aed" />
@@ -477,7 +452,7 @@ export default function HrDashboard() {
         <div className="hr-card">
           <div className="hr-card-header">
             <span className="hr-card-title">📊 Verdict breakdown</span>
-            <span className="hr-tag good">Completed only</span>
+            <span className="hr-tag good">In range</span>
           </div>
           <div style={{ marginTop: '0.7rem' }}>
             <VerdictBar label="Strong Hire" value={verdictCounts.strongHire} color="#059669" />
@@ -498,10 +473,6 @@ export default function HrDashboard() {
             <span className="hr-card-title">📉 Roles closed</span>
             <GrowthBadge value={getWeeklyGrowth(closedWeeklyRange)} />
           </div>
-          <DateRangePicker
-            from={rangeClosed.from} to={rangeClosed.to}
-            onChange={(f, t) => setRangeClosed({ from: f, to: t })}
-          />
           <div style={{ height:'160px', width:'100%', marginTop:'0.6rem' }}>
             <Bar data={closedChartData} options={closedChartOptions} />
           </div>
@@ -515,10 +486,6 @@ export default function HrDashboard() {
             <span className="hr-card-title">📈 Interviews conducted</span>
             <GrowthBadge value={getWeeklyGrowth(interviewWeekly)} />
           </div>
-          <DateRangePicker
-            from={rangeInterviews.from} to={rangeInterviews.to}
-            onChange={(f, t) => setRangeInterviews({ from: f, to: t })}
-          />
           <div style={{ height:'160px', width:'100%', marginTop:'0.6rem' }}>
             <Bar data={interviewChartData} options={interviewChartOptions} />
           </div>
@@ -535,10 +502,10 @@ export default function HrDashboard() {
         <div className="hr-card">
           <div className="hr-card-header">
             <span className="hr-card-title">👥 Interviewer activity</span>
-            <span className="hr-tag info">This month</span>
+            <span className="hr-tag info">In range</span>
           </div>
           {interviewerRanking.length === 0 ? (
-            <div className="hr-empty">No interview activity this month</div>
+            <div className="hr-empty">No interview activity in this range</div>
           ) : (
             interviewerRanking.map((iv, i) => (
               <div className="hr-iv-row" key={i}>

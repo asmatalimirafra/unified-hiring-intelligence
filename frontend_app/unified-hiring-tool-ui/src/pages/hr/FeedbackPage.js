@@ -3,8 +3,8 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { Radar } from 'react-chartjs-2';
-import { Button, Table, Spinner } from 'react-bootstrap';
-import { FaEye, FaDownload, FaTimes, FaFileAlt } from 'react-icons/fa';
+import { Button, Table, Spinner, Tabs, Tab } from 'react-bootstrap';
+import { FaEye, FaDownload, FaTimes, FaFileAlt, FaUndo, FaCheck, FaUserTimes } from 'react-icons/fa';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import OfferLetterModal from '../../components/OfferLetterModal';
@@ -13,6 +13,7 @@ import './FeedbackPage.css';
 const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 const axiosConfig = { headers: { 'ngrok-skip-browser-warning': 'true' } };
 
+// ── Helpers ─────────────────────────────────────────────────────────────────
 function getRoundAvg(interviews = [], round) {
   const r = interviews.find(i => i.round === round);
   if (!r?.ratings) {
@@ -36,6 +37,16 @@ function getOverallAvg(interviews = []) {
   return count > 0 ? (total / count).toFixed(2) : null;
 }
 
+// Section classification — a candidate falls into exactly ONE section.
+// Order of checks matters because flags can co-exist on legacy records.
+function getSection(c) {
+  if (c.candidate_joined)     return 'joined';
+  if (c.candidate_not_joined) return 'not_joined';
+  if (c.candidate_rejected)   return 'rejected';
+  if (c.candidate_selected)   return 'selected';
+  return null;
+}
+
 export default function FeedbackPage() {
   const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
   const hrId = storedUser.user_id || null;
@@ -49,6 +60,10 @@ export default function FeedbackPage() {
   const [showModal, setShowModal]                 = useState(false);
   const [fetchingAggregate, setFetchingAggregate] = useState(false);
 
+  // Active tab key for the four-section view. Defaults to 'selected' so HR lands
+  // on the most actionable list first; resets to 'selected' when the role changes.
+  const [activeTab, setActiveTab] = useState('selected');
+
   // ── Offer letter modal state ─────────────────────────────────────────────
   const [offerCandidate, setOfferCandidate] = useState(null);
 
@@ -57,10 +72,9 @@ export default function FeedbackPage() {
     try {
       await axios.post(
         `${BASE_URL}/mark-offer-generated/${candidateId}`,
-        { offer_details: offerDetails },   // ← save form data to MongoDB
+        { offer_details: offerDetails },
         axiosConfig
       );
-      // Update local state so button switches to "Preview Offer" immediately
       setCandidates(prev =>
         prev.map(c => c.candidate_id === candidateId
           ? { ...c, offer_generated: true, offer_details: offerDetails }
@@ -89,10 +103,15 @@ export default function FeedbackPage() {
     try {
       const params = hrId ? { hr_id: hrId } : {};
       const res = await axios.get(`${BASE_URL}/get-candidates/`, { ...axiosConfig, params });
+      // Include candidates in ANY of the four post-interview states
       const filtered = Array.isArray(res.data)
         ? res.data.filter(
-            c => String(c.applied_role_id) === String(roleId) &&
-                 (c.candidate_selected === true || c.candidate_rejected === true)
+            c => String(c.applied_role_id) === String(roleId) && (
+              c.candidate_selected   === true ||
+              c.candidate_rejected   === true ||
+              c.candidate_joined     === true ||
+              c.candidate_not_joined === true
+            )
           )
         : [];
       setCandidates(filtered);
@@ -101,6 +120,12 @@ export default function FeedbackPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Re-fetch whenever a status-changing action happens. Called by every
+  // handler below so the four sections stay in sync after every action.
+  const refresh = () => {
+    if (selectedRole) fetchCandidates(selectedRole);
   };
 
   const handleViewAggregate = async (candidate) => {
@@ -118,6 +143,49 @@ export default function FeedbackPage() {
       console.error('Failed to fetch aggregate:', err);
     } finally {
       setFetchingAggregate(false);
+    }
+  };
+
+  // ── Joined / Not Joined / Undo handlers ─────────────────────────────────
+  const handleMarkJoined = async (candidate) => {
+    if (!window.confirm(`Mark "${candidate.name}" as Joined?`)) return;
+    try {
+      await axios.post(`${BASE_URL}/mark-joined/${candidate.candidate_id}`, {}, axiosConfig);
+      refresh();
+    } catch (err) {
+      alert(`Failed: ${err.response?.data?.detail || 'Please try again.'}`);
+    }
+  };
+
+  const handleMarkNotJoined = async (candidate) => {
+    if (!window.confirm(`Mark "${candidate.name}" as Not Joined?`)) return;
+    try {
+      await axios.post(`${BASE_URL}/mark-not-joined/${candidate.candidate_id}`, {}, axiosConfig);
+      refresh();
+    } catch (err) {
+      alert(`Failed: ${err.response?.data?.detail || 'Please try again.'}`);
+    }
+  };
+
+  // Undo from Joined / Not Joined → back to Selected (offer stays generated)
+  const handleUndoJoinedStatus = async (candidate) => {
+    if (!window.confirm(`Move "${candidate.name}" back to Selected?`)) return;
+    try {
+      await axios.post(`${BASE_URL}/undo-joined-status/${candidate.candidate_id}`, {}, axiosConfig);
+      refresh();
+    } catch (err) {
+      alert(`Failed: ${err.response?.data?.detail || 'Please try again.'}`);
+    }
+  };
+
+  // Undo from Rejected → back to Pending (uses existing endpoint)
+  const handleUndoRejected = async (candidate) => {
+    if (!window.confirm(`Move "${candidate.name}" back to Pending? They will reappear on the Schedule page.`)) return;
+    try {
+      await axios.post(`${BASE_URL}/undo-candidate-verdict/${candidate.candidate_id}`, {}, axiosConfig);
+      refresh();
+    } catch (err) {
+      alert(`Failed: ${err.response?.data?.detail || 'Please try again.'}`);
     }
   };
 
@@ -177,8 +245,192 @@ export default function FeedbackPage() {
     return () => document.removeEventListener('keydown', handleEsc);
   }, []);
 
+  // ── Partition candidates into the four sections ─────────────────────────
+  const selectedList   = candidates.filter(c => getSection(c) === 'selected');
+  const joinedList     = candidates.filter(c => getSection(c) === 'joined');
+  const notJoinedList  = candidates.filter(c => getSection(c) === 'not_joined');
+  const rejectedList   = candidates.filter(c => getSection(c) === 'rejected');
+
   const allRounds = getAllRounds(candidates);
   const selectedRoleName = roles.find(r => String(r.role_id) === String(selectedRole))?.role || '';
+
+  // ── Shared row renderer ────────────────────────────────────────────────
+  // Renders a single row with action buttons appropriate to the section.
+  // Keeping this in one place avoids divergence between the four tables.
+  const renderRow = (c, sectionKey) => {
+    const overall = getOverallAvg(c.interviews || []);
+    const overallNum = parseFloat(overall);
+    const canGenerateOffer = c.candidate_selected === true && overallNum >= 3;
+
+    // Joined / Not Joined buttons are only enabled in the Selected section,
+    // and only after an offer letter has been generated.
+    const inSelected = sectionKey === 'selected';
+    const offerOut   = c.offer_generated === true;
+    const canMarkPostOffer = inSelected && offerOut;
+
+    return (
+      <tr key={c.candidate_id}>
+        <td>{c.candidate_id}</td>
+        <td>{c.name}</td>
+        {allRounds.map(r => <td key={r}>{getRoundAvg(c.interviews || [], r)}</td>)}
+        <td>{overall ? <strong>{overall} / 5</strong> : '-'}</td>
+
+        {/* Resume */}
+        <td>
+          <Button
+            variant="outline-primary" size="sm"
+            onClick={() => window.open(
+              `${BASE_URL}/get-resume/${c.candidate_id}?ngrok-skip-browser-warning=true`,
+              '_blank', 'noopener,noreferrer'
+            )}
+          >
+            View Resume
+          </Button>
+        </td>
+
+        {/* View Aggregate */}
+        <td>
+          <Button variant="success" size="sm" onClick={() => handleViewAggregate(c)}>
+            <FaEye /> View Aggregate
+          </Button>
+        </td>
+
+        {/* Offer generated badge */}
+        <td style={{ textAlign: 'center' }}>
+          {c.offer_generated
+            ? <span className="badge bg-success">✓ Yes</span>
+            : <span className="badge bg-secondary">No</span>}
+        </td>
+
+        {/* Offer button — disabled for Rejected; enabled with rules elsewhere */}
+        <td>
+          {sectionKey === 'rejected' ? (
+            <Button variant="secondary" size="sm" disabled title="Not available for rejected candidates">
+              <FaFileAlt /> Generate Offer
+            </Button>
+          ) : c.offer_generated ? (
+            <Button
+              variant="success" size="sm"
+              title="Preview or edit the generated offer letter"
+              onClick={() => setOfferCandidate({ ...c, _mode: 'preview' })}
+            >
+              <FaFileAlt /> Preview Offer
+            </Button>
+          ) : (
+            <Button
+              variant={canGenerateOffer ? 'primary' : 'secondary'}
+              size="sm"
+              disabled={!canGenerateOffer}
+              title={
+                !c.candidate_selected
+                  ? 'Only available for Selected candidates'
+                  : overallNum < 3
+                    ? 'Avg score must be ≥ 3 to generate offer'
+                    : 'Generate Offer Letter'
+              }
+              onClick={() => canGenerateOffer && setOfferCandidate(c)}
+            >
+              <FaFileAlt /> Generate Offer
+            </Button>
+          )}
+        </td>
+
+        {/* Joined button */}
+        <td>
+          <Button
+            variant={canMarkPostOffer ? 'success' : 'secondary'}
+            size="sm"
+            disabled={!canMarkPostOffer}
+            title={
+              sectionKey === 'rejected' ? 'Not available for rejected candidates' :
+              !inSelected               ? 'Already in Joined / Not Joined section' :
+              !offerOut                 ? 'Generate offer letter first' :
+                                          'Mark this candidate as Joined'
+            }
+            onClick={() => canMarkPostOffer && handleMarkJoined(c)}
+          >
+            <FaCheck /> Joined
+          </Button>
+        </td>
+
+        {/* Not Joined button */}
+        <td>
+          <Button
+            variant={canMarkPostOffer ? 'warning' : 'secondary'}
+            size="sm"
+            disabled={!canMarkPostOffer}
+            title={
+              sectionKey === 'rejected' ? 'Not available for rejected candidates' :
+              !inSelected               ? 'Already in Joined / Not Joined section' :
+              !offerOut                 ? 'Generate offer letter first' :
+                                          'Mark this candidate as Not Joined'
+            }
+            onClick={() => canMarkPostOffer && handleMarkNotJoined(c)}
+          >
+            <FaUserTimes /> Not Joined
+          </Button>
+        </td>
+
+        {/* Undo — different target depending on section */}
+        <td>
+          {sectionKey === 'selected' ? (
+            // Selected section doesn't need Undo (it's the "base" post-interview state)
+            <span className="text-muted">—</span>
+          ) : sectionKey === 'rejected' ? (
+            <Button
+              variant="outline-secondary" size="sm"
+              title="Move back to Pending (will reappear on Schedule page)"
+              onClick={() => handleUndoRejected(c)}
+            >
+              <FaUndo /> Undo
+            </Button>
+          ) : (
+            // Joined or Not Joined → back to Selected
+            <Button
+              variant="outline-secondary" size="sm"
+              title="Move back to Selected section"
+              onClick={() => handleUndoJoinedStatus(c)}
+            >
+              <FaUndo /> Undo
+            </Button>
+          )}
+        </td>
+      </tr>
+    );
+  };
+
+  // ── Section table renderer ────────────────────────────────────────────
+  // The heading is intentionally omitted — the tab title already shows
+  // "🏆 Selected (3)" etc., so repeating it inside the panel feels noisy.
+  // title/icon args are kept for future flexibility (e.g. CSV export label).
+  const renderSection = (title, icon, list, sectionKey, emptyMessage) => (
+    <div className="candidate-section" style={{ marginTop: '1rem' }}>
+      {list.length === 0 ? (
+        <p className="text-muted">{emptyMessage}</p>
+      ) : (
+        <Table bordered hover responsive className="feedback-table">
+          <thead className="table-light">
+            <tr>
+              <th>Candidate ID</th>
+              <th>Name</th>
+              {allRounds.map(r => <th key={r}>L{r} Avg</th>)}
+              <th>Overall Avg</th>
+              <th>Resume</th>
+              <th>Aggregate</th>
+              <th>Offer Generated</th>
+              <th>Offer</th>
+              <th>Joined</th>
+              <th>Not Joined</th>
+              <th>Undo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map(c => renderRow(c, sectionKey))}
+          </tbody>
+        </Table>
+      )}
+    </div>
+  );
 
   return (
     <div className="page-wrapper feedback-page">
@@ -191,6 +443,7 @@ export default function FeedbackPage() {
           value={selectedRole}
           onChange={(e) => {
             setSelectedRole(e.target.value);
+            setActiveTab('selected'); // Reset to first tab when role changes
             fetchCandidates(e.target.value);
           }}
         >
@@ -211,95 +464,66 @@ export default function FeedbackPage() {
       ) : selectedRole && (
         <>
           {candidates.length === 0 ? (
-            <p className="text-muted">No candidates with a final verdict yet for this role. Press "Check Verdict" on the Schedule page first.</p>
+            <p className="text-muted">
+              No candidates with a final verdict yet for this role.
+              Press "Select" or "Reject" on the Schedule page first.
+            </p>
           ) : (
-            <Table bordered hover responsive className="feedback-table">
-              <thead className="table-light">
-                <tr>
-                  <th>Candidate ID</th>
-                  <th>Name</th>
-                  {allRounds.map(r => <th key={r}>L{r} Avg</th>)}
-                  <th>Overall Avg</th>
-                  <th>Verdict</th>
-                  <th>Resume</th>
-                  <th>Aggregate</th>
-                  <th>Offer Generated</th>
-                  <th>Offer</th>
-                </tr>
-              </thead>
-              <tbody>
-                {candidates.map(c => {
-                  const overall = getOverallAvg(c.interviews || []);
-                  // ✅ Generate Offer active only if Selected AND avg >= 3
-                  const canGenerateOffer = c.candidate_selected === true && parseFloat(overall) >= 3;
-                  return (
-                    <tr key={c.candidate_id}>
-                      <td>{c.candidate_id}</td>
-                      <td>{c.name}</td>
-                      {allRounds.map(r => <td key={r}>{getRoundAvg(c.interviews || [], r)}</td>)}
-                      <td>{overall ? <strong>{overall} / 5</strong> : '-'}</td>
-                      {/* ✅ Verdict column */}
-                      <td>
-                        {c.candidate_selected
-                          ? <span className="badge bg-success">🏆 Selected</span>
-                          : <span className="badge bg-danger">❌ Rejected</span>}
-                      </td>
-                      <td>
-                        <Button
-                          variant="outline-primary" size="sm"
-                          onClick={() => window.open(
-                            `${BASE_URL}/get-resume/${c.candidate_id}?ngrok-skip-browser-warning=true`,
-                            '_blank', 'noopener,noreferrer'
-                          )}
-                        >
-                          View Resume
-                        </Button>
-                      </td>
-                      <td>
-                        <Button variant="success" size="sm" onClick={() => handleViewAggregate(c)}>
-                          <FaEye /> View Aggregate
-                        </Button>
-                      </td>
-                      <td style={{ textAlign: 'center' }}>
-                        {c.offer_generated
-                          ? <span className="badge bg-success">✓ Yes</span>
-                          : <span className="badge bg-secondary">No</span>}
-                      </td>
-                      <td>
-                        {c.offer_generated ? (
-                          /* ── Already generated: show Preview button ── */
-                          <Button
-                            variant="success"
-                            size="sm"
-                            title="Preview or edit the generated offer letter"
-                            onClick={() => setOfferCandidate({ ...c, _mode: 'preview' })}
-                          >
-                            <FaFileAlt /> Preview Offer
-                          </Button>
-                        ) : (
-                          /* ── Not yet generated: show Generate button ── */
-                          <Button
-                            variant={canGenerateOffer ? 'primary' : 'secondary'}
-                            size="sm"
-                            disabled={!canGenerateOffer}
-                            title={
-                              !c.candidate_selected
-                                ? 'Only available for Selected candidates'
-                                : parseFloat(overall) < 3
-                                  ? 'Avg score must be ≥ 3 to generate offer'
-                                  : 'Generate Offer Letter'
-                            }
-                            onClick={() => canGenerateOffer && setOfferCandidate(c)}
-                          >
-                            <FaFileAlt /> Generate Offer
-                          </Button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </Table>
+            // ── Tabbed view ─────────────────────────────────────────────
+            // Bootstrap's Tabs component renders one tab content panel at a time.
+            // Each tab title includes a live count badge so HR can see section
+            // sizes at a glance without switching tabs.
+            <Tabs
+              activeKey={activeTab}
+              onSelect={(k) => setActiveTab(k || 'selected')}
+              className="feedback-tabs mb-3"
+              mountOnEnter
+              unmountOnExit
+            >
+              <Tab
+                eventKey="selected"
+                title={<span>🏆 Selected <span className="badge bg-secondary ms-1">{selectedList.length}</span></span>}
+              >
+                {renderSection(
+                  'Selected', '🏆',
+                  selectedList, 'selected',
+                  'No candidates currently in Selected.'
+                )}
+              </Tab>
+
+              <Tab
+                eventKey="joined"
+                title={<span>✅ Joined <span className="badge bg-secondary ms-1">{joinedList.length}</span></span>}
+              >
+                {renderSection(
+                  'Joined', '✅',
+                  joinedList, 'joined',
+                  'No candidates have joined yet.'
+                )}
+              </Tab>
+
+              <Tab
+                eventKey="not_joined"
+                title={<span>🚪 Not Joined <span className="badge bg-secondary ms-1">{notJoinedList.length}</span></span>}
+              >
+                {renderSection(
+                  'Not Joined', '🚪',
+                  notJoinedList, 'not_joined',
+                  'No candidates marked as not joined.'
+                )}
+              </Tab>
+
+              <Tab
+                eventKey="rejected"
+                title={<span>❌ Rejected <span className="badge bg-secondary ms-1">{rejectedList.length}</span></span>}
+              >
+                {renderSection(
+                  'Rejected', '❌',
+                  rejectedList, 'rejected',
+                  'No rejected candidates.'
+                )}
+              </Tab>
+            </Tabs>
           )}
         </>
       )}

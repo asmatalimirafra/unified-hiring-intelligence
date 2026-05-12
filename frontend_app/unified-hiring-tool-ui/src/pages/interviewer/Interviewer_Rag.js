@@ -44,9 +44,9 @@ const RichText = ({ text }) => {
         }
 
         // Bullet list: * or -
-        if (line.match(/^[\*\-] /)) {
+        if (line.match(/^[*-] /)) {
             const listItems = [];
-            while (i < lines.length && lines[i].match(/^[\*\-] /)) {
+            while (i < lines.length && lines[i].match(/^[*-] /)) {
                 listItems.push(<li key={i}>{parseInline(lines[i].slice(2))}</li>);
                 i++;
             }

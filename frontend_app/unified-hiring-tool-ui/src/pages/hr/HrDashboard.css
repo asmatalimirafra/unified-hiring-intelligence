@@ -56,6 +56,23 @@
   font-weight: 500;
 }
 
+/* ── Common date range picker in header ───────────── */
+.hr-common-range {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: white;
+  padding: 0.55rem 0.9rem;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  border: 1px solid #e2e8f0;
+}
+.hr-common-range-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #475569;
+}
+
 /* ── Stat grid (5 cards) ──────────────────────────── */
 .hr-stat-grid {
   display: grid;
@@ -471,13 +488,4 @@
   font-size: 0.75rem;
   color: #94a3b8;
   flex-shrink: 0;
-}
-
-/* ── Stat card with picker ────────────────────────── */
-.hr-stat-card-picker {
-  justify-content: flex-start;
-  gap: 3px;
-}
-.hr-stat-card-picker .hr-drp-wrap {
-  margin-top: 6px;
 }

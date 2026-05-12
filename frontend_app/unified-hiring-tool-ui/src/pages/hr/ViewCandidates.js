@@ -18,6 +18,10 @@ function ViewCandidates() {
   const [selectedRoleId, setSelectedRoleId] = useState('');
   const [candidates, setCandidates] = useState([]);
 
+  // Active tab for the three-section view. Defaults to 'pending' so HR lands
+  // on the most actionable list first. Resets when the role changes.
+  const [activeTab, setActiveTab] = useState('pending');
+
   useEffect(() => {
     fetchRoles();
     fetchCandidates();
@@ -28,7 +32,6 @@ function ViewCandidates() {
       const params = hrId ? { hr_id: hrId } : {};
       const res = await axios.get(`${BASE_URL}/get-roles/`, { ...axiosConfig, params });
       const allRoles = Array.isArray(res.data) ? res.data : [];
-      // Show all roles (open + closed) so completed candidates under closed roles still appear
       setRoles(allRoles);
     } catch (err) {
       console.error('Error fetching roles:', err);
@@ -64,7 +67,6 @@ function ViewCandidates() {
     return count ? (total / count).toFixed(1) : '-';
   };
 
-  // ATS score badge helper — green >=75%, yellow 30-74%, red <30%
   const getAtsBadge = (score) => {
     if (score === null || score === undefined)
       return <span className="badge bg-secondary">—</span>;
@@ -81,19 +83,13 @@ function ViewCandidates() {
     return [...rounds].sort((a, b) => a - b);
   };
 
-  // ── Status label: shows rounds done + scheduled state ─────────────────────
-  // Uses scheduled_round (stored at scheduling time) to verify a round is truly
-  // pending — avoids showing "Scheduled" when status wasn't cleared after feedback.
   const getStatusLabel = (c) => {
     const interviews = c.interviews || [];
     const completedRounds = interviews.length;
 
-    // A candidate is truly scheduled only if:
-    // - status is "Scheduled" AND
-    // - feedback hasn't been given yet for the scheduled round
     const scheduledRound =
-      c.interview_details?.scheduled_round   // stored at scheduling time
-      ?? (completedRounds + 1);              // fallback for old records
+      c.interview_details?.scheduled_round
+      ?? (completedRounds + 1);
     const feedbackAlreadyDone = interviews.some(i => i.round === scheduledRound);
     const isScheduled = c.status === 'Scheduled' && !feedbackAlreadyDone;
 
@@ -132,9 +128,6 @@ function ViewCandidates() {
   };
 
   // ── ATS override handlers ──────────────────────────────────────────────────
-  // HR can manually approve a candidate whose ATS score is below 30%, moving
-  // them from the Rejected list to the Pending list (and Schedule page).
-  // Undo reverses the decision.
   const handleSendToPending = async (candidate) => {
     const score = candidate.ats_score?.toFixed(1) ?? '?';
     if (!window.confirm(
@@ -168,14 +161,13 @@ function ViewCandidates() {
     }
   };
 
+  // ── Filtering / partitioning ──────────────────────────────────────────────
   const filtered = Array.isArray(candidates)
     ? candidates.filter(c => String(c.applied_role_id) === String(selectedRoleId))
     : [];
 
-  // Completed = HR has given a final verdict
   const completed = filtered.filter(c => c.candidate_selected || c.candidate_rejected);
 
-  // ATS-rejected = not yet decided, ATS score < 30%, AND not manually overridden
   const atsRejected = filtered.filter(c =>
     !c.candidate_selected && !c.candidate_rejected &&
     !c.manual_override &&
@@ -183,7 +175,6 @@ function ViewCandidates() {
     c.ats_score < 30
   );
 
-  // Pending = not decided, AND either ATS >= 30% OR manually overridden by HR
   const pending = filtered.filter(c =>
     !c.candidate_selected && !c.candidate_rejected &&
     (
@@ -196,205 +187,109 @@ function ViewCandidates() {
 
   const pendingRounds    = getAllRounds(pending);
   const completedRounds  = getAllRounds(completed);
-  const atsRejRounds     = getAllRounds(atsRejected);
 
-  // ── Pending table ──────────────────────────────────────────────────────────
-  const renderPendingTable = (list, rounds) => (
-    <div className="candidate-section">
-      <h4>⏳ Pending Interviews</h4>
-      {list.length === 0 ? (
-        <p className="empty-message">No candidates in this section.</p>
-      ) : (
-        <table className="table table-bordered">
-          <thead>
-            <tr>
-              <th>Candidate ID</th>
-              <th>Name</th>
-              <th>ATS Score</th>
-              <th>Status</th>
-              {rounds.map(r => <th key={r}>L{r} Avg</th>)}
-              <th>Overall Avg</th>
-              <th>Verdict</th>
-              <th>Resume</th>
-              <th>Schedule</th>
-              <th>Delete</th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.map(c => (
-              <tr key={c.candidate_id}>
-                <td>{c.candidate_id}</td>
-                {/* Name cell — shows the "Manually approved" badge with an Undo
-                    button for candidates HR manually moved from Rejected. */}
-                <td>
-                  {c.name}
-                  {c.manual_override && (
-                    <>
-                      <br />
-                      <span
-                        className="badge bg-info text-dark mt-1"
-                        style={{ fontSize: '0.7rem' }}
-                        title={`Manually approved by HR despite ATS score of ${c.ats_score?.toFixed(1) ?? '?'}%`}
-                      >
-                        ⚠️ Manually approved
-                      </span>
-                      <button
-                        className="btn btn-link btn-sm p-0 ms-2"
-                        style={{ fontSize: '0.7rem' }}
-                        onClick={() => handleRevokeOverride(c)}
-                        title="Revert to ATS-rejected"
-                      >
-                        Undo
-                      </button>
-                    </>
-                  )}
-                </td>
-                <td>{getAtsBadge(c.ats_score)}</td>
-                {/* Status: shows rounds done + scheduled badge */}
-                <td>{getStatusLabel(c)}</td>
-                {rounds.map(r => <td key={r}>{getAvgScore(c, r)}</td>)}
-                <td><strong>{getOverallAvg(c.interviews || [])}</strong></td>
-                <td><span className="badge bg-light text-muted">—</span></td>
-                <td>
-                  <button
-                    className="btn btn-outline-primary btn-sm"
-                    title="View Resume"
-                    onClick={() =>
-                      window.open(
-                        `${BASE_URL}/get-resume/${c.candidate_id}?ngrok-skip-browser-warning=true`,
-                        '_blank', 'noopener,noreferrer'
-                      )
-                    }
-                  >
-                    <FaEye />
-                  </button>
-                </td>
-                {/* Schedule: always active (navigate to Schedule page) */}
-                <td>
-                  <button
-                    className="btn btn-outline-success btn-sm"
-                    title="Go to Schedule page"
-                    onClick={() => navigate('/hr/schedule')}
-                  >
-                    <FaCalendarPlus />
-                  </button>
-                </td>
-                <td>
-                  <button
-                    className="btn btn-outline-danger btn-sm"
-                    onClick={() => handleDeleteCandidate(c.candidate_id)}
-                    title="Delete Candidate"
-                  >
-                    <FaTrashAlt />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </div>
-  );
+  // ── Section render functions ──────────────────────────────────────────────
+  // Each section renders standalone so only the active tab's content is
+  // mounted in the DOM. Keeps tab switching responsive even with lots of rows.
 
-  // ── Completed table ────────────────────────────────────────────────────────
-  const renderCompletedTable = (list, rounds) => (
-    <div className="candidate-section">
-      <h4>✅ Completed Interviews</h4>
-      {list.length === 0 ? (
-        <p className="empty-message">No candidates in this section.</p>
-      ) : (
-        <table className="table table-bordered">
-          <thead>
-            <tr>
-              <th>Candidate ID</th>
-              <th>Name</th>
-              <th>ATS Score</th>
-              <th>Status</th>
-              {rounds.map(r => <th key={r}>L{r} Avg</th>)}
-              <th>Overall Avg</th>
-              <th>Verdict</th>
-              <th>Resume</th>
-              <th>Schedule</th>
-              <th>Delete</th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.map(c => {
-              const completedCount = (c.interviews || []).length;
-              const maxDone = completedCount > 0
-                ? Math.max(...(c.interviews || []).map(i => i.round))
-                : null;
-              return (
-                <tr key={c.candidate_id}>
-                  <td>{c.candidate_id}</td>
-                  <td>{c.name}</td>
-                  <td>{getAtsBadge(c.ats_score)}</td>
-                  {/* Status: shows how many rounds were completed */}
-                  <td>
-                    {maxDone !== null
-                      ? <span className="badge bg-primary">L{maxDone} done</span>
-                      : <span className="badge bg-secondary">No interviews</span>}
-                  </td>
-                  {rounds.map(r => <td key={r}>{getAvgScore(c, r)}</td>)}
-                  <td><strong>{getOverallAvg(c.interviews || [])}</strong></td>
-                  {/* Verdict: Selected or Rejected */}
-                  <td>
-                    {c.candidate_selected
-                      ? <span className="badge bg-success">🏆 Selected</span>
-                      : <span className="badge bg-danger">❌ Rejected</span>}
-                  </td>
-                  <td>
-                    <button
-                      className="btn btn-outline-primary btn-sm"
-                      title="View Resume"
-                      onClick={() =>
-                        window.open(
-                          `${BASE_URL}/get-resume/${c.candidate_id}?ngrok-skip-browser-warning=true`,
-                          '_blank', 'noopener,noreferrer'
-                        )
-                      }
-                    >
-                      <FaEye />
-                    </button>
-                  </td>
-                  {/* Schedule column: static "Completed" badge — no action needed */}
-                  <td>
+  const renderPendingSection = () => (
+    pending.length === 0 ? (
+      <p className="empty-message">No candidates in this section.</p>
+    ) : (
+      <table className="table table-bordered">
+        <thead>
+          <tr>
+            <th>Candidate ID</th>
+            <th>Name</th>
+            <th>ATS Score</th>
+            <th>Status</th>
+            {pendingRounds.map(r => <th key={r}>L{r} Avg</th>)}
+            <th>Overall Avg</th>
+            <th>Verdict</th>
+            <th>Resume</th>
+            <th>Schedule</th>
+            <th>Delete</th>
+          </tr>
+        </thead>
+        <tbody>
+          {pending.map(c => (
+            <tr key={c.candidate_id}>
+              <td>{c.candidate_id}</td>
+              <td>
+                {c.name}
+                {c.manual_override && (
+                  <>
+                    <br />
                     <span
-                      className="badge bg-secondary"
-                      style={{ fontSize: '0.75rem', padding: '0.4rem 0.6rem' }}
-                      title="Interview process completed"
+                      className="badge bg-info text-dark mt-1"
+                      style={{ fontSize: '0.7rem' }}
+                      title={`Manually approved by HR despite ATS score of ${c.ats_score?.toFixed(1) ?? '?'}%`}
                     >
-                      Completed
+                      ⚠️ Manually approved
                     </span>
-                  </td>
-                  <td>
                     <button
-                      className="btn btn-outline-danger btn-sm"
-                      onClick={() => handleDeleteCandidate(c.candidate_id)}
-                      title="Delete Candidate"
+                      className="btn btn-link btn-sm p-0 ms-2"
+                      style={{ fontSize: '0.7rem' }}
+                      onClick={() => handleRevokeOverride(c)}
+                      title="Revert to ATS-rejected"
                     >
-                      <FaTrashAlt />
+                      Undo
                     </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
-    </div>
+                  </>
+                )}
+              </td>
+              <td>{getAtsBadge(c.ats_score)}</td>
+              <td>{getStatusLabel(c)}</td>
+              {pendingRounds.map(r => <td key={r}>{getAvgScore(c, r)}</td>)}
+              <td><strong>{getOverallAvg(c.interviews || [])}</strong></td>
+              <td><span className="badge bg-light text-muted">—</span></td>
+              <td>
+                <button
+                  className="btn btn-outline-primary btn-sm"
+                  title="View Resume"
+                  onClick={() =>
+                    window.open(
+                      `${BASE_URL}/get-resume/${c.candidate_id}?ngrok-skip-browser-warning=true`,
+                      '_blank', 'noopener,noreferrer'
+                    )
+                  }
+                >
+                  <FaEye />
+                </button>
+              </td>
+              <td>
+                <button
+                  className="btn btn-outline-success btn-sm"
+                  title="Go to Schedule page"
+                  onClick={() => navigate('/hr/schedule')}
+                >
+                  <FaCalendarPlus />
+                </button>
+              </td>
+              <td>
+                <button
+                  className="btn btn-outline-danger btn-sm"
+                  onClick={() => handleDeleteCandidate(c.candidate_id)}
+                  title="Delete Candidate"
+                >
+                  <FaTrashAlt />
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )
   );
 
-  // ── ATS-Rejected table ────────────────────────────────────────────────────
-  const renderAtsRejectedTable = (list, rounds) => (
-    <div className="candidate-section">
-      <h4>🚫 Rejected Candidates Based on ATS Score</h4>
+  const renderRejectedSection = () => (
+    <>
       <p style={{ fontSize: '0.85rem', color: '#888', marginBottom: '0.75rem' }}>
         These candidates scored below 30% on the ATS keyword match.
         Use "Send to Pending" to manually approve candidates you believe may
         still perform well in interviews.
       </p>
-      {list.length === 0 ? (
+      {atsRejected.length === 0 ? (
         <p className="empty-message">No ATS-rejected candidates.</p>
       ) : (
         <table className="table table-bordered">
@@ -410,7 +305,7 @@ function ViewCandidates() {
             </tr>
           </thead>
           <tbody>
-            {list.map(c => (
+            {atsRejected.map(c => (
               <tr key={c.candidate_id} style={{ backgroundColor: '#fff5f5' }}>
                 <td>{c.candidate_id}</td>
                 <td>{c.name}</td>
@@ -430,10 +325,6 @@ function ViewCandidates() {
                     <FaEye />
                   </button>
                 </td>
-                {/* Send to Pending — overrides ATS rejection.
-                    Replaces the previously disabled Schedule button so HR can
-                    manually approve a candidate they think will do well in
-                    interviews despite a low ATS score. */}
                 <td>
                   <button
                     className="btn btn-outline-warning btn-sm"
@@ -457,8 +348,101 @@ function ViewCandidates() {
           </tbody>
         </table>
       )}
-    </div>
+    </>
   );
+
+  const renderCompletedSection = () => (
+    completed.length === 0 ? (
+      <p className="empty-message">No candidates in this section.</p>
+    ) : (
+      <table className="table table-bordered">
+        <thead>
+          <tr>
+            <th>Candidate ID</th>
+            <th>Name</th>
+            <th>ATS Score</th>
+            <th>Status</th>
+            {completedRounds.map(r => <th key={r}>L{r} Avg</th>)}
+            <th>Overall Avg</th>
+            <th>Verdict</th>
+            <th>Resume</th>
+            <th>Schedule</th>
+            <th>Delete</th>
+          </tr>
+        </thead>
+        <tbody>
+          {completed.map(c => {
+            const completedCount = (c.interviews || []).length;
+            const maxDone = completedCount > 0
+              ? Math.max(...(c.interviews || []).map(i => i.round))
+              : null;
+            return (
+              <tr key={c.candidate_id}>
+                <td>{c.candidate_id}</td>
+                <td>{c.name}</td>
+                <td>{getAtsBadge(c.ats_score)}</td>
+                <td>
+                  {maxDone !== null
+                    ? <span className="badge bg-primary">L{maxDone} done</span>
+                    : <span className="badge bg-secondary">No interviews</span>}
+                </td>
+                {completedRounds.map(r => <td key={r}>{getAvgScore(c, r)}</td>)}
+                <td><strong>{getOverallAvg(c.interviews || [])}</strong></td>
+                <td>
+                  {c.candidate_selected
+                    ? <span className="badge bg-success">🏆 Selected</span>
+                    : <span className="badge bg-danger">❌ Rejected</span>}
+                </td>
+                <td>
+                  <button
+                    className="btn btn-outline-primary btn-sm"
+                    title="View Resume"
+                    onClick={() =>
+                      window.open(
+                        `${BASE_URL}/get-resume/${c.candidate_id}?ngrok-skip-browser-warning=true`,
+                        '_blank', 'noopener,noreferrer'
+                      )
+                    }
+                  >
+                    <FaEye />
+                  </button>
+                </td>
+                <td>
+                  <span
+                    className="badge bg-secondary"
+                    style={{ fontSize: '0.75rem', padding: '0.4rem 0.6rem' }}
+                    title="Interview process completed"
+                  >
+                    Completed
+                  </span>
+                </td>
+                <td>
+                  <button
+                    className="btn btn-outline-danger btn-sm"
+                    onClick={() => handleDeleteCandidate(c.candidate_id)}
+                    title="Delete Candidate"
+                  >
+                    <FaTrashAlt />
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    )
+  );
+
+  // ── Tab config ─────────────────────────────────────────────────────────────
+  // Single source of truth for the three tabs. Each entry has its icon,
+  // label, live count, and the render function for its panel.
+  const TABS = [
+    { key: 'pending',   icon: '⏳', label: 'Pending Interviews',  count: pending.length,     render: renderPendingSection   },
+    { key: 'rejected',  icon: '🚫', label: 'ATS Rejected',         count: atsRejected.length, render: renderRejectedSection  },
+    { key: 'completed', icon: '✅', label: 'Completed Interviews', count: completed.length,   render: renderCompletedSection },
+  ];
+
+  const currentTab = TABS.find(t => t.key === activeTab) || TABS[0];
 
   return (
     <div className="page-wrapper">
@@ -468,7 +452,10 @@ function ViewCandidates() {
         <select
           className="form-select"
           value={selectedRoleId}
-          onChange={e => setSelectedRoleId(e.target.value)}
+          onChange={e => {
+            setSelectedRoleId(e.target.value);
+            setActiveTab('pending'); // reset so HR doesn't land on an empty tab
+          }}
         >
           <option value="">-- Select a Role --</option>
           {roles.map(role => (
@@ -481,9 +468,30 @@ function ViewCandidates() {
 
       {selectedRoleId && (
         <>
-          {renderPendingTable(pending, pendingRounds)}
-          {renderAtsRejectedTable(atsRejected, atsRejRounds)}
-          {renderCompletedTable(completed, completedRounds)}
+          {/* ── Tab strip ─────────────────────────────────────────────────
+              Custom-styled to match the rest of the HR portal.
+              The Rejected tab gets a red count badge as a visual cue. */}
+          <div className="viewcand-tabs">
+            {TABS.map(t => (
+              <button
+                key={t.key}
+                className={`viewcand-tab ${activeTab === t.key ? 'active' : ''}`}
+                onClick={() => setActiveTab(t.key)}
+              >
+                <span className="viewcand-tab-icon">{t.icon}</span>
+                <span className="viewcand-tab-label">{t.label}</span>
+                <span className={`viewcand-tab-count ${t.key === 'rejected' ? 'count-danger' : ''}`}>
+                  {t.count}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {/* ── Active tab panel ──────────────────────────────────────── */}
+          <div className="candidate-section">
+            <h4>{currentTab.icon} {currentTab.label}</h4>
+            {currentTab.render()}
+          </div>
         </>
       )}
     </div>

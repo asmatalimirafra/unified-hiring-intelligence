@@ -545,3 +545,84 @@
 .ats-mid  { background: #fef3c7; color: #92400e; }   /* yellow — 30–59% */
 .ats-low  { background: #fee2e2; color: #991b1b; }   /* red    — <30%  */
 .ats-na   { background: #f3f4f6; color: #9ca3af; }   /* grey   — no score */
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Schedule page tab strip
+   Append this block to the END of your existing ScheduleInterview.css.
+   Doesn't touch any existing rules — purely additive.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.schedule-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 1rem 0 1.25rem;
+  border-bottom: 2px solid #e2e8f0;
+  flex-wrap: wrap;
+}
+
+.schedule-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #64748b;
+  transition: all 0.2s ease;
+  margin-bottom: -2px; /* overlap the container's bottom border */
+  font-family: inherit;
+}
+
+.schedule-tab:hover {
+  color: #3b82f6;
+  background: rgba(59, 130, 246, 0.05);
+}
+
+.schedule-tab.active {
+  color: #3b82f6;
+  border-bottom-color: #3b82f6;
+  font-weight: 600;
+}
+
+.schedule-tab-icon {
+  font-size: 1rem;
+}
+
+.schedule-tab-label {
+  /* keeps the label flush with icon and count */
+}
+
+.schedule-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 11px;
+  background: #e2e8f0;
+  color: #475569;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.schedule-tab.active .schedule-tab-count {
+  background: #3b82f6;
+  color: #fff;
+}
+
+/* Special-case the Rejected tab so its count badge feels appropriately weighty
+   when there are rejected candidates (red instead of grey/blue). */
+.schedule-tab-count.count-danger {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.schedule-tab.active .schedule-tab-count.count-danger {
+  background: #dc2626;
+  color: #fff;
+}

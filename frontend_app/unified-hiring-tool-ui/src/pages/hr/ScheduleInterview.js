@@ -14,7 +14,7 @@ function getRoundAvg(interviews = [], round) {
   const vals = Object.values(r.ratings);
   if (!vals.length) return null;
   const raw = vals.reduce((a, b) => a + b, 0) / vals.length;
-  return Math.round(raw * 100) / 100; // round to 2dp to avoid floating point drift
+  return Math.round(raw * 100) / 100;
 }
 
 function getOverallAvg(interviews = []) {
@@ -28,7 +28,6 @@ function getOverallAvg(interviews = []) {
   return count > 0 ? total / count : null;
 }
 
-// Returns the avg of the most recently completed round only
 function getLastRoundAvg(interviews = []) {
   if (!interviews.length) return null;
   const lastRound = Math.max(...interviews.map(i => i.round));
@@ -57,18 +56,18 @@ export default function ScheduleInterview() {
   const [allCands,       setAllCands]       = useState([]);
   const [selectedRoleId, setSelectedRoleId] = useState('');
 
-  // Schedule modal (add new round)
+  // Active tab for the four-section view. Defaults to 'pending' so HR lands on
+  // the list that needs action first.
+  const [activeTab, setActiveTab] = useState('pending');
+
   const [modal,      setModal]      = useState({ open: false, candidate: null });
   const [form,       setForm]       = useState({ interviewer_email: '', scheduled_datetime: '', meeting_link: '' });
 
-  // Edit-schedule modal
   const [editModal,  setEditModal]  = useState({ open: false, candidate: null });
   const [editForm,   setEditForm]   = useState({ interviewer_email: '', scheduled_datetime: '', meeting_link: '' });
 
-  // FIX 3: Select confirmation modal
   const [selectModal, setSelectModal] = useState({ open: false, candidate: null });
 
-  // Interviewers popup — shows who conducted which round
   const [interviewersModal, setInterviewersModal] = useState({ open: false, candidate: null });
   const openInterviewersModal  = (c) => setInterviewersModal({ open: true, candidate: c });
   const closeInterviewersModal = ()  => setInterviewersModal({ open: false, candidate: null });
@@ -93,25 +92,19 @@ export default function ScheduleInterview() {
       const res = await axios.get(`${BASE_URL}/get-candidates/`, { ...axiosConfig, params });
       const cands = Array.isArray(res.data) ? res.data : [];
       setAllCands(cands);
-      // FIX 1: Auto-reject any pending candidate whose last completed round avg < 3
       autoRejectIfNeeded(cands);
     } catch (err) { console.error('Failed to fetch candidates:', err); }
   };
 
-  // ── Auto-reject candidates who scored < 3 in their latest completed round ────
-  // Skips candidates where the interview is still pending (not yet done).
-  // Uses the same isTrulyScheduled logic to avoid acting on in-progress interviews.
   const autoRejectIfNeeded = async (cands) => {
     const toReject = cands.filter(c => {
       if (c.candidate_selected || c.candidate_rejected) return false;
-      // Skip if interview is scheduled but feedback not yet submitted
       if (c.status === 'Scheduled') {
         const nextRound = getNextRound(c.interviews || []);
         const feedbackDone = (c.interviews || []).some(i => i.round === nextRound);
-        if (!feedbackDone) return false; // round truly in progress — do not reject yet
+        if (!feedbackDone) return false;
       }
       const lastAvg = getLastRoundAvg(c.interviews || []);
-      // Round to 2 decimals to avoid floating point drift (e.g. 2.9999 instead of 3.0)
       return lastAvg !== null && Math.round(lastAvg * 100) / 100 < 3;
     });
 
@@ -145,46 +138,29 @@ export default function ScheduleInterview() {
   const applyRoleFilter = (c) =>
     !selectedRoleId || String(c.applied_role_id) === String(selectedRoleId);
 
-  // A candidate is "truly scheduled" only if:
-  // - status is "Scheduled"  AND
-  // - feedback has NOT yet been submitted for the exact round that was scheduled
-  //
-  // Uses interview_details.scheduled_round (stored by backend at scheduling time)
-  // so the check is stable — it doesn't drift after feedback is added.
-  // Falls back to interviews.length + 1 for old records that pre-date this field.
   const isTrulyScheduled = (c) => {
     if (c.status !== 'Scheduled') return false;
     const scheduledRound =
-      c.interview_details?.scheduled_round   // ← exact round stored at scheduling time
-      ?? (c.interviews || []).length + 1;    // ← fallback for old records
-    // If interviews already contains an entry for that round, feedback is done
+      c.interview_details?.scheduled_round
+      ?? (c.interviews || []).length + 1;
     const feedbackDone = (c.interviews || []).some(i => i.round === scheduledRound);
     return !feedbackDone;
   };
 
-  // Pending = open role, not selected/rejected, not truly scheduled,
-  //           ATS score >= 30% (or no ATS score for old records, OR manually
-  //           overridden by HR via the View Candidates page),
-  //           AND last round avg >= 3 (or no rounds done yet)
   const pending = allCands.filter(c => {
     if (!openRoleIds.has(String(c.applied_role_id))) return false;
     if (c.candidate_selected || c.candidate_rejected) return false;
     if (isTrulyScheduled(c)) return false;
-    // Exclude ATS-failed candidates unless HR has manually overridden them.
-    // manual_override = true means HR explicitly approved this candidate
-    // despite a low ATS score (set from the View Candidates rejected list).
     if (
       c.ats_score !== null && c.ats_score !== undefined &&
       c.ats_score < 30 &&
       !c.manual_override
-    ) return false; // ATS is a coarse spam filter only — real alignment is measured by Fitment score
-    // If rounds are done, only show in pending if last round passed (>= 3)
+    ) return false;
     const lastAvg = getLastRoundAvg(c.interviews || []);
     if (lastAvg !== null && Math.round(lastAvg * 100) / 100 < 3) return false;
     return applyRoleFilter(c);
   });
 
-  // Scheduled = truly scheduled (interview not yet done)
   const scheduledRows = allCands.filter(c =>
     isTrulyScheduled(c) &&
     !c.candidate_selected &&
@@ -193,8 +169,7 @@ export default function ScheduleInterview() {
   );
 
   const selected = allCands.filter(c => c.candidate_selected && applyRoleFilter(c));
-  const rejected  = allCands.filter(c => c.candidate_rejected && applyRoleFilter(c));
-
+  const rejected = allCands.filter(c => c.candidate_rejected && applyRoleFilter(c));
 
   // ── Modals ─────────────────────────────────────────────────────────────────
   const openModal = (candidate) => {
@@ -262,7 +237,6 @@ export default function ScheduleInterview() {
     } finally { setSubmitting(false); }
   };
 
-  // FIX 4: Cancel only removes the scheduled slot — completed rounds are preserved
   const handleCancelInterview = async (candidate) => {
     const completedCount = (candidate.interviews || []).length;
     const msg = completedCount > 0
@@ -277,7 +251,6 @@ export default function ScheduleInterview() {
     }
   };
 
-  // FIX 3: Select from modal
   const handleSelectCandidate = async () => {
     const c = selectModal.candidate;
     try {
@@ -302,7 +275,301 @@ export default function ScheduleInterview() {
     return new Date(dt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  // ── Section renderers ──────────────────────────────────────────────────────
+  // Each section is a standalone render function so the tab panel can mount
+  // only the active one. Keeps tab switching snappy on large datasets.
+
+  const renderPendingSection = () => (
+    pending.length === 0 ? (
+      <p className="empty-msg">No pending candidates{selectedRoleId ? ' for this role' : ''}.</p>
+    ) : (
+      <table className="schedule-table">
+        <thead>
+          <tr>
+            <th>Candidate ID</th>
+            <th>Name</th>
+            <th>Applied Role</th>
+            <th>Rounds Done</th>
+            <th>Avg Score</th>
+            <th>Verdict</th>
+            <th title="Keyword overlap with JD — use Fitment score for deep alignment">ATS %</th>
+            <th>Resume</th>
+            <th>Add Interview</th>
+            <th>Select</th>
+          </tr>
+        </thead>
+        <tbody>
+          {pending.map(c => {
+            const interviews     = c.interviews || [];
+            const avg            = getOverallAvg(interviews);
+            const verdict        = getVerdictLabel(avg);
+            const nextRound      = getNextRound(interviews);
+            const completedCount = interviews.length;
+            const lastRound      = completedCount > 0 ? Math.max(...interviews.map(i => i.round)) : null;
+            const lastRoundAvg   = getLastRoundAvg(interviews);
+            const lastRoundFailed = lastRoundAvg !== null && lastRoundAvg < 3;
+            const canSelect      = completedCount >= 2 && avg !== null && avg >= 3;
+
+            return (
+              <tr key={c.candidate_id}>
+                <td>{c.candidate_id}</td>
+                <td>
+                  {c.name}
+                  {c.manual_override && (
+                    <>
+                      {' '}
+                      <span
+                        className="ats-badge ats-mid"
+                        style={{ fontSize: '0.7rem', marginLeft: '0.25rem' }}
+                        title={`Manually approved by HR despite ATS score of ${c.ats_score?.toFixed(1) ?? '?'}%`}
+                      >
+                        ⚠️ Manual
+                      </span>
+                    </>
+                  )}
+                </td>
+                <td>{getRoleName(c.applied_role_id) || c.applied_role}</td>
+                <td>
+                  {lastRound !== null
+                    ? <span
+                        className="round-pill round-pill-clickable"
+                        onClick={() => openInterviewersModal(c)}
+                        title="Click to see interviewers per round"
+                      >
+                        L{lastRound} done 👥
+                      </span>
+                    : <span className="no-rounds">None yet</span>}
+                </td>
+                <td>
+                  {avg !== null
+                    ? <strong>{avg.toFixed(2)} / 5</strong>
+                    : <span className="no-score">—</span>}
+                </td>
+                <td>
+                  {verdict
+                    ? <span className={`verdict-tag ${verdict.cls}`}>{verdict.label}</span>
+                    : '—'}
+                </td>
+                <td>
+                  {c.ats_score !== null && c.ats_score !== undefined
+                    ? <span className={`ats-badge ${c.ats_score >= 60 ? 'ats-high' : c.ats_score >= 30 ? 'ats-mid' : 'ats-low'}`}>
+                        {c.ats_score.toFixed(1)}%
+                      </span>
+                    : <span className="ats-badge ats-na">—</span>}
+                </td>
+                <td>
+                  <a href={`${BASE_URL}/get-resume/${c.candidate_id}?ngrok-skip-browser-warning=true`}
+                    target="_blank" rel="noopener noreferrer" className="resume-link">
+                    View PDF
+                  </a>
+                </td>
+                <td>
+                  <button
+                    className={`btn-schedule ${lastRoundFailed ? 'btn-schedule-disabled' : ''}`}
+                    onClick={() => !lastRoundFailed && openModal(c)}
+                    disabled={lastRoundFailed}
+                    title={lastRoundFailed
+                      ? `L${lastRound} avg ${lastRoundAvg.toFixed(2)}/5 — below 3. Candidate will be auto-rejected.`
+                      : `Schedule L${nextRound}`}
+                  >
+                    ➕ L{nextRound}
+                  </button>
+                </td>
+                <td>
+                  <button
+                    className={`btn-verdict ${canSelect ? 'btn-verdict-active' : 'btn-verdict-disabled'}`}
+                    onClick={() => canSelect && openSelectModal(c)}
+                    disabled={!canSelect}
+                    title={
+                      completedCount < 2 ? `Need at least 2 completed rounds (${completedCount} done)`
+                      : avg !== null && avg < 3 ? `Overall avg ${avg.toFixed(2)}/5 is below 3 — cannot select`
+                      : 'Review interviews and select candidate'
+                    }
+                  >
+                    ✅ Select
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    )
+  );
+
+  const renderScheduledSection = () => (
+    scheduledRows.length === 0 ? (
+      <p className="empty-msg">No scheduled interviews{selectedRoleId ? ' for this role' : ''}.</p>
+    ) : (
+      <table className="schedule-table">
+        <thead>
+          <tr>
+            <th>Candidate ID</th><th>Name</th><th>Applied Role</th>
+            <th>Round Scheduled</th><th>Rounds Completed</th>
+            <th>Interviewer</th><th>Date & Time</th><th>Meeting Link</th>
+            <th>Edit</th><th>Cancel</th>
+          </tr>
+        </thead>
+        <tbody>
+          {scheduledRows.map(c => {
+            const nextRound       = getNextRound(c.interviews || []);
+            const completedRounds = (c.interviews || []).length;
+            return (
+              <tr key={c.candidate_id}>
+                <td>{c.candidate_id}</td>
+                <td>{c.name}</td>
+                <td>{getRoleName(c.applied_role_id) || c.applied_role}</td>
+                <td><span className="round-pill">L{nextRound}</span></td>
+                <td>
+                  {completedRounds > 0
+                    ? <span
+                        className="round-pill completed round-pill-clickable"
+                        onClick={() => openInterviewersModal(c)}
+                        title="Click to see interviewers per round"
+                      >
+                        L{completedRounds} done 👥
+                      </span>
+                    : <span className="no-rounds">None yet</span>}
+                </td>
+                <td>{c.interview_details?.interviewer_email || '—'}</td>
+                <td>{formatDateTime(c.interview_details?.scheduled_datetime)}</td>
+                <td>
+                  {c.interview_details?.meeting_link
+                    ? <a href={c.interview_details.meeting_link} target="_blank" rel="noopener noreferrer" className="meeting-link">Join 🔗</a>
+                    : '—'}
+                </td>
+                <td>
+                  <button className="btn-edit" onClick={() => openEditModal(c)}>✏️ Edit</button>
+                </td>
+                <td>
+                  <button
+                    className="btn-cancel-interview"
+                    onClick={() => handleCancelInterview(c)}
+                    title={completedRounds > 0
+                      ? `Cancel L${nextRound} only — L1–L${completedRounds} records are preserved`
+                      : 'Cancel and move back to Pending'}
+                  >
+                    🚫 Cancel L{nextRound}
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    )
+  );
+
+  const renderSelectedSection = () => (
+    selected.length === 0 ? (
+      <p className="empty-msg">No candidates selected yet{selectedRoleId ? ' for this role' : ''}.</p>
+    ) : (
+      <table className="schedule-table">
+        <thead>
+          <tr>
+            <th>Candidate ID</th><th>Name</th><th>Applied Role</th>
+            <th>Rounds Completed</th><th>Avg Score</th><th>Verdict</th>
+            <th>Resume</th><th>Undo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {selected.map(c => {
+            const avg = getOverallAvg(c.interviews || []);
+            const verdict = getVerdictLabel(avg);
+            return (
+              <tr key={c.candidate_id} className="selected-row">
+                <td>{c.candidate_id}</td>
+                <td><strong>{c.name}</strong> 🏆</td>
+                <td>{getRoleName(c.applied_role_id) || c.applied_role}</td>
+                <td>
+                  {(c.interviews || []).length > 0
+                    ? <span
+                        className="round-pill round-pill-clickable"
+                        onClick={() => openInterviewersModal(c)}
+                        title="Click to see interviewers per round"
+                      >
+                        {(c.interviews || []).length} round(s) 👥
+                      </span>
+                    : <span className="no-rounds">None yet</span>}
+                </td>
+                <td>{avg !== null ? <strong>{avg.toFixed(2)} / 5</strong> : '—'}</td>
+                <td>{verdict ? <span className={`verdict-tag ${verdict.cls}`}>{verdict.label}</span> : '—'}</td>
+                <td>
+                  <a href={`${BASE_URL}/get-resume/${c.candidate_id}?ngrok-skip-browser-warning=true`}
+                    target="_blank" rel="noopener noreferrer" className="resume-link">View PDF</a>
+                </td>
+                <td>
+                  <button className="btn-undo" onClick={() => handleUndo(c, 'selected')} title="Move back to Pending">↩️ Undo</button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    )
+  );
+
+  const renderRejectedSection = () => (
+    rejected.length === 0 ? (
+      <p className="empty-msg">No rejected candidates{selectedRoleId ? ' for this role' : ''}.</p>
+    ) : (
+      <table className="schedule-table">
+        <thead>
+          <tr>
+            <th>Candidate ID</th><th>Name</th><th>Applied Role</th>
+            <th>Rounds Completed</th><th>Avg Score</th><th>Verdict</th>
+            <th>Resume</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rejected.map(c => {
+            const avg = getOverallAvg(c.interviews || []);
+            const verdict = getVerdictLabel(avg);
+            return (
+              <tr key={c.candidate_id} className="rejected-row">
+                <td>{c.candidate_id}</td>
+                <td>{c.name}</td>
+                <td>{getRoleName(c.applied_role_id) || c.applied_role}</td>
+                <td>
+                  {(c.interviews || []).length > 0
+                    ? <span
+                        className="round-pill round-pill-clickable"
+                        onClick={() => openInterviewersModal(c)}
+                        title="Click to see interviewers per round"
+                      >
+                        {(c.interviews || []).length} round(s) 👥
+                      </span>
+                    : <span className="no-rounds">None yet</span>}
+                </td>
+                <td>{avg !== null ? <strong>{avg.toFixed(2)} / 5</strong> : '—'}</td>
+                <td>{verdict ? <span className={`verdict-tag ${verdict.cls}`}>{verdict.label}</span> : '—'}</td>
+                <td>
+                  <a href={`${BASE_URL}/get-resume/${c.candidate_id}?ngrok-skip-browser-warning=true`}
+                    target="_blank" rel="noopener noreferrer" className="resume-link">View PDF</a>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    )
+  );
+
+  // ── Tab config ─────────────────────────────────────────────────────────────
+  // Single source of truth for the four tabs. Each entry knows its icon,
+  // label, live count, and how to render its panel content.
+  const TABS = [
+    { key: 'pending',   icon: '📋', label: 'Pending',   count: pending.length,       render: renderPendingSection   },
+    { key: 'scheduled', icon: '📅', label: 'Scheduled', count: scheduledRows.length, render: renderScheduledSection },
+    { key: 'selected',  icon: '🏆', label: 'Selected',  count: selected.length,      render: renderSelectedSection  },
+    { key: 'rejected',  icon: '❌', label: 'Rejected',  count: rejected.length,      render: renderRejectedSection  },
+  ];
+
+  const currentTab = TABS.find(t => t.key === activeTab) || TABS[0];
+
+  // Sub-label for the panel header (e.g. "Pending Candidates", "Scheduled Interviews")
+  const sectionSuffix = currentTab.key === 'scheduled' ? 'Interviews' : 'Candidates';
+
   return (
     <div className="schedule-page">
 
@@ -313,7 +580,15 @@ export default function ScheduleInterview() {
 
       <div className="filter-bar">
         <label>Filter by Role:</label>
-        <select className="role-select" value={selectedRoleId} onChange={e => setSelectedRoleId(e.target.value)}>
+        <select
+          className="role-select"
+          value={selectedRoleId}
+          onChange={e => {
+            setSelectedRoleId(e.target.value);
+            // Reset to first tab so HR isn't stuck on a tab that may now be empty
+            setActiveTab('pending');
+          }}
+        >
           <option value="">— All Roles —</option>
           {openRoles.map(r => (
             <option key={r.role_id} value={r.role_id}>{r.role} ({r.role_id})</option>
@@ -321,315 +596,35 @@ export default function ScheduleInterview() {
         </select>
       </div>
 
-      {/* ── SECTION 1: Pending ─────────────────────────────────────────────── */}
-      <section className="section-card">
+      {/* ── Tab strip ───────────────────────────────────────────────────────
+          Custom-styled to match the existing schedule-page aesthetic.
+          No Bootstrap dependency — styles live in ScheduleInterview.css. */}
+      <div className="schedule-tabs">
+        {TABS.map(t => (
+          <button
+            key={t.key}
+            className={`schedule-tab ${activeTab === t.key ? 'active' : ''}`}
+            onClick={() => setActiveTab(t.key)}
+          >
+            <span className="schedule-tab-icon">{t.icon}</span>
+            <span className="schedule-tab-label">{t.label}</span>
+            <span className={`schedule-tab-count ${t.key === 'rejected' ? 'count-danger' : ''}`}>
+              {t.count}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {/* ── Active tab panel ─────────────────────────────────────────────── */}
+      <section className={`section-card ${currentTab.key === 'selected' ? 'selected-section' : currentTab.key === 'rejected' ? 'rejected-section' : ''}`}>
         <div className="section-header">
-          <span className="section-icon">📋</span>
-          <h3>Pending Candidates</h3>
-          <span className="count-badge">{pending.length}</span>
+          <span className="section-icon">{currentTab.icon}</span>
+          <h3>{currentTab.label} {sectionSuffix}</h3>
+          <span className={`count-badge ${currentTab.key === 'rejected' ? 'rejected-badge' : ''}`}>
+            {currentTab.count}
+          </span>
         </div>
-        {pending.length === 0 ? (
-          <p className="empty-msg">No pending candidates{selectedRoleId ? ' for this role' : ''}.</p>
-        ) : (
-          <table className="schedule-table">
-            <thead>
-              <tr>
-                <th>Candidate ID</th>
-                <th>Name</th>
-                <th>Applied Role</th>
-                <th>Rounds Done</th>
-                <th>Avg Score</th>
-                <th>Verdict</th>
-                <th title="Keyword overlap with JD — use Fitment score for deep alignment">ATS %</th>
-                <th>Resume</th>
-                <th>Add Interview</th>
-                <th>Select</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pending.map(c => {
-                const interviews     = c.interviews || [];
-                const avg            = getOverallAvg(interviews);
-                const verdict        = getVerdictLabel(avg);
-                const nextRound      = getNextRound(interviews);
-                const completedCount = interviews.length;
-                const lastRound      = completedCount > 0 ? Math.max(...interviews.map(i => i.round)) : null;
-                const lastRoundAvg   = getLastRoundAvg(interviews);
-
-                // FIX 2: Block next round if last round avg < 3
-                const lastRoundFailed = lastRoundAvg !== null && lastRoundAvg < 3;
-
-                // Select enabled only if ≥2 rounds done AND overall avg ≥ 3
-                const canSelect = completedCount >= 2 && avg !== null && avg >= 3;
-
-                return (
-                  <tr key={c.candidate_id}>
-                    <td>{c.candidate_id}</td>
-                    {/* Show a small "Manually approved" badge next to the name
-                        so HR knows this candidate bypassed the ATS threshold. */}
-                    <td>
-                      {c.name}
-                      {c.manual_override && (
-                        <>
-                          {' '}
-                          <span
-                            className="ats-badge ats-mid"
-                            style={{ fontSize: '0.7rem', marginLeft: '0.25rem' }}
-                            title={`Manually approved by HR despite ATS score of ${c.ats_score?.toFixed(1) ?? '?'}%`}
-                          >
-                            ⚠️ Manual
-                          </span>
-                        </>
-                      )}
-                    </td>
-                    <td>{getRoleName(c.applied_role_id) || c.applied_role}</td>
-                    <td>
-                      {lastRound !== null
-                        ? <span
-                            className="round-pill round-pill-clickable"
-                            onClick={() => openInterviewersModal(c)}
-                            title="Click to see interviewers per round"
-                          >
-                            L{lastRound} done 👥
-                          </span>
-                        : <span className="no-rounds">None yet</span>}
-                    </td>
-                    <td>
-                      {avg !== null
-                        ? <strong>{avg.toFixed(2)} / 5</strong>
-                        : <span className="no-score">—</span>}
-                    </td>
-                    <td>
-                      {verdict
-                        ? <span className={`verdict-tag ${verdict.cls}`}>{verdict.label}</span>
-                        : '—'}
-                    </td>
-                    <td>
-                      {c.ats_score !== null && c.ats_score !== undefined
-                        ? <span className={`ats-badge ${c.ats_score >= 60 ? 'ats-high' : c.ats_score >= 30 ? 'ats-mid' : 'ats-low'}`}>
-                            {c.ats_score.toFixed(1)}%
-                          </span>
-                        : <span className="ats-badge ats-na">—</span>}
-                    </td>
-                    <td>
-                      <a href={`${BASE_URL}/get-resume/${c.candidate_id}?ngrok-skip-browser-warning=true`}
-                        target="_blank" rel="noopener noreferrer" className="resume-link">
-                        View PDF
-                      </a>
-                    </td>
-
-                    {/* FIX 2: Disabled if last round scored < 3 */}
-                    <td>
-                      <button
-                        className={`btn-schedule ${lastRoundFailed ? 'btn-schedule-disabled' : ''}`}
-                        onClick={() => !lastRoundFailed && openModal(c)}
-                        disabled={lastRoundFailed}
-                        title={lastRoundFailed
-                          ? `L${lastRound} avg ${lastRoundAvg.toFixed(2)}/5 — below 3. Candidate will be auto-rejected.`
-                          : `Schedule L${nextRound}`}
-                      >
-                        ➕ L{nextRound}
-                      </button>
-                    </td>
-
-                    {/* FIX 3: "Select" replaces "Check Verdict" */}
-                    <td>
-                      <button
-                        className={`btn-verdict ${canSelect ? 'btn-verdict-active' : 'btn-verdict-disabled'}`}
-                        onClick={() => canSelect && openSelectModal(c)}
-                        disabled={!canSelect}
-                        title={
-                          completedCount < 2 ? `Need at least 2 completed rounds (${completedCount} done)`
-                          : avg !== null && avg < 3 ? `Overall avg ${avg.toFixed(2)}/5 is below 3 — cannot select`
-                          : 'Review interviews and select candidate'
-                        }
-                      >
-                        ✅ Select
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </section>
-
-      {/* ── SECTION 2: Scheduled ───────────────────────────────────────────── */}
-      <section className="section-card" style={{ marginTop: '2rem' }}>
-        <div className="section-header">
-          <span className="section-icon">📅</span>
-          <h3>Scheduled Interviews</h3>
-          <span className="count-badge">{scheduledRows.length}</span>
-        </div>
-        {scheduledRows.length === 0 ? (
-          <p className="empty-msg">No scheduled interviews{selectedRoleId ? ' for this role' : ''}.</p>
-        ) : (
-          <table className="schedule-table">
-            <thead>
-              <tr>
-                <th>Candidate ID</th><th>Name</th><th>Applied Role</th>
-                <th>Round Scheduled</th><th>Rounds Completed</th>
-                <th>Interviewer</th><th>Date & Time</th><th>Meeting Link</th>
-                <th>Edit</th><th>Cancel</th>
-              </tr>
-            </thead>
-            <tbody>
-              {scheduledRows.map(c => {
-                const nextRound       = getNextRound(c.interviews || []);
-                const completedRounds = (c.interviews || []).length;
-                return (
-                  <tr key={c.candidate_id}>
-                    <td>{c.candidate_id}</td>
-                    <td>{c.name}</td>
-                    <td>{getRoleName(c.applied_role_id) || c.applied_role}</td>
-                    <td><span className="round-pill">L{nextRound}</span></td>
-                    <td>
-                      {completedRounds > 0
-                        ? <span
-                            className="round-pill completed round-pill-clickable"
-                            onClick={() => openInterviewersModal(c)}
-                            title="Click to see interviewers per round"
-                          >
-                            L{completedRounds} done 👥
-                          </span>
-                        : <span className="no-rounds">None yet</span>}
-                    </td>
-                    <td>{c.interview_details?.interviewer_email || '—'}</td>
-                    <td>{formatDateTime(c.interview_details?.scheduled_datetime)}</td>
-                    <td>
-                      {c.interview_details?.meeting_link
-                        ? <a href={c.interview_details.meeting_link} target="_blank" rel="noopener noreferrer" className="meeting-link">Join 🔗</a>
-                        : '—'}
-                    </td>
-                    <td>
-                      <button className="btn-edit" onClick={() => openEditModal(c)}>✏️ Edit</button>
-                    </td>
-                    {/* FIX 4: Cancel label makes clear only the upcoming slot is cancelled */}
-                    <td>
-                      <button
-                        className="btn-cancel-interview"
-                        onClick={() => handleCancelInterview(c)}
-                        title={completedRounds > 0
-                          ? `Cancel L${nextRound} only — L1–L${completedRounds} records are preserved`
-                          : 'Cancel and move back to Pending'}
-                      >
-                        🚫 Cancel L{nextRound}
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </section>
-
-      {/* ── SECTION 3: Selected ────────────────────────────────────────────── */}
-      <section className="section-card selected-section" style={{ marginTop: '2rem' }}>
-        <div className="section-header">
-          <span className="section-icon">🏆</span>
-          <h3>Selected Candidates</h3>
-          <span className="count-badge">{selected.length}</span>
-        </div>
-        {selected.length === 0 ? (
-          <p className="empty-msg">No candidates selected yet{selectedRoleId ? ' for this role' : ''}.</p>
-        ) : (
-          <table className="schedule-table">
-            <thead>
-              <tr>
-                <th>Candidate ID</th><th>Name</th><th>Applied Role</th>
-                <th>Rounds Completed</th><th>Avg Score</th><th>Verdict</th>
-                <th>Resume</th><th>Undo</th>
-              </tr>
-            </thead>
-            <tbody>
-              {selected.map(c => {
-                const avg = getOverallAvg(c.interviews || []);
-                const verdict = getVerdictLabel(avg);
-                return (
-                  <tr key={c.candidate_id} className="selected-row">
-                    <td>{c.candidate_id}</td>
-                    <td><strong>{c.name}</strong> 🏆</td>
-                    <td>{getRoleName(c.applied_role_id) || c.applied_role}</td>
-                    <td>
-                      {(c.interviews || []).length > 0
-                        ? <span
-                            className="round-pill round-pill-clickable"
-                            onClick={() => openInterviewersModal(c)}
-                            title="Click to see interviewers per round"
-                          >
-                            {(c.interviews || []).length} round(s) 👥
-                          </span>
-                        : <span className="no-rounds">None yet</span>}
-                    </td>
-                    <td>{avg !== null ? <strong>{avg.toFixed(2)} / 5</strong> : '—'}</td>
-                    <td>{verdict ? <span className={`verdict-tag ${verdict.cls}`}>{verdict.label}</span> : '—'}</td>
-                    <td>
-                      <a href={`${BASE_URL}/get-resume/${c.candidate_id}?ngrok-skip-browser-warning=true`}
-                        target="_blank" rel="noopener noreferrer" className="resume-link">View PDF</a>
-                    </td>
-                    <td>
-                      <button className="btn-undo" onClick={() => handleUndo(c, 'selected')} title="Move back to Pending">↩️ Undo</button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </section>
-
-      {/* ── SECTION 4: Rejected ────────────────────────────────────────────── */}
-      <section className="section-card rejected-section" style={{ marginTop: '2rem' }}>
-        <div className="section-header">
-          <span className="section-icon">❌</span>
-          <h3>Rejected Candidates</h3>
-          <span className="count-badge rejected-badge">{rejected.length}</span>
-        </div>
-        {rejected.length === 0 ? (
-          <p className="empty-msg">No rejected candidates{selectedRoleId ? ' for this role' : ''}.</p>
-        ) : (
-          <table className="schedule-table">
-            <thead>
-              <tr>
-                <th>Candidate ID</th><th>Name</th><th>Applied Role</th>
-                <th>Rounds Completed</th><th>Avg Score</th><th>Verdict</th>
-                <th>Resume</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rejected.map(c => {
-                const avg = getOverallAvg(c.interviews || []);
-                const verdict = getVerdictLabel(avg);
-                return (
-                  <tr key={c.candidate_id} className="rejected-row">
-                    <td>{c.candidate_id}</td>
-                    <td>{c.name}</td>
-                    <td>{getRoleName(c.applied_role_id) || c.applied_role}</td>
-                    <td>
-                      {(c.interviews || []).length > 0
-                        ? <span
-                            className="round-pill round-pill-clickable"
-                            onClick={() => openInterviewersModal(c)}
-                            title="Click to see interviewers per round"
-                          >
-                            {(c.interviews || []).length} round(s) 👥
-                          </span>
-                        : <span className="no-rounds">None yet</span>}
-                    </td>
-                    <td>{avg !== null ? <strong>{avg.toFixed(2)} / 5</strong> : '—'}</td>
-                    <td>{verdict ? <span className={`verdict-tag ${verdict.cls}`}>{verdict.label}</span> : '—'}</td>
-                    <td>
-                      <a href={`${BASE_URL}/get-resume/${c.candidate_id}?ngrok-skip-browser-warning=true`}
-                        target="_blank" rel="noopener noreferrer" className="resume-link">View PDF</a>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
+        {currentTab.render()}
       </section>
 
       {/* ── Modal: Schedule Next Round ─────────────────────────────────────── */}
@@ -724,7 +719,7 @@ export default function ScheduleInterview() {
         </div>
       )}
 
-      {/* ── FIX 3: Modal: Select Candidate ─────────────────────────────────── */}
+      {/* ── Modal: Select Candidate ──────────────────────────────────────── */}
       {selectModal.open && selectModal.candidate && (() => {
         const c          = selectModal.candidate;
         const interviews = [...(c.interviews || [])].sort((a, b) => a.round - b.round);

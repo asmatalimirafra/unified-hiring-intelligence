@@ -474,3 +474,36 @@
   .rounds-table th,
   .rounds-table td { font-size: 0.82rem; padding: 0.6rem; }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Feedback page tab count badge fix
+   Append this block to the END of your existing FeedbackPage.css.
+   Purely additive — doesn't touch any existing rules.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* The Bootstrap tab title contains a .badge.bg-secondary showing the count.
+   On hover and on the active tab, the badge background gets close to the tab
+   background colour, making the number nearly invisible. We force a stable
+   high-contrast look in all states: dark grey pill, white number. */
+
+.feedback-tabs .nav-link .badge {
+  background-color: #475569 !important; /* slate-600 — readable on white AND blue */
+  color: #ffffff !important;
+  font-weight: 600;
+  padding: 0.25em 0.55em;
+  border-radius: 10px;
+  font-size: 0.75rem;
+}
+
+/* On the ACTIVE tab, flip to white pill with dark number so it pops against
+   the blue active state without relying on the (now-overridden) bg-secondary. */
+.feedback-tabs .nav-link.active .badge {
+  background-color: #ffffff !important;
+  color: #1e40af !important; /* deep blue to match the active tab text */
+}
+
+/* Hover state — keep the same dark pill so the badge never blends in */
+.feedback-tabs .nav-link:hover .badge {
+  background-color: #334155 !important; /* slightly darker on hover */
+  color: #ffffff !important;
+}

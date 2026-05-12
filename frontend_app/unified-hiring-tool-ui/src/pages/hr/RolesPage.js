@@ -51,7 +51,6 @@ const formatTimestamp = (ts) => {
 };
 
 function RolesPage() {
-  // ── Get logged-in HR's user_id from localStorage ──────────────────────────
   const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
   const hrId = storedUser.user_id || null;
 
@@ -61,6 +60,10 @@ function RolesPage() {
   const [showModal, setShowModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
 
+  // Active tab for Open vs Closed positions. Defaults to 'open' since that's
+  // where HR spends most of their time managing active hiring.
+  const [activeTab, setActiveTab] = useState('open');
+
   const [editVacancyData, setEditVacancyData] = useState({
     role_id: '',
     role: '',
@@ -69,8 +72,6 @@ function RolesPage() {
   });
 
   const [showAddModal, setShowAddModal] = useState(false);
-  // role_id is no longer a user-entered field — backend auto-generates it
-  // (max(existing role_ids) + 1) on /add-role/.
   const [newRoleData, setNewRoleData] = useState({
     role: '',
     positions: 1,
@@ -86,7 +87,6 @@ function RolesPage() {
 
   const fetchRoles = async () => {
     try {
-      // ── Pass hr_id so we only fetch THIS HR's roles ──────────────────────
       const params = hrId ? { 'hr_id': hrId } : {};
       const response = await axios.get(`${BASE_URL}/get-roles/`, {
         headers: { "ngrok-skip-browser-warning": "true" },
@@ -128,7 +128,6 @@ function RolesPage() {
         alert('Role deleted successfully.');
       } catch (err) {
         console.error('Error deleting role:', err);
-        // ✅ Show the exact backend error (e.g. "cannot delete — interviews scheduled")
         const msg = err.response?.data?.detail || 'Failed to delete role. Please try again.';
         alert(`❌ ${msg}`);
       }
@@ -176,7 +175,6 @@ function RolesPage() {
     setSubmitting(true);
 
     const formData = new FormData();
-    // role_id is intentionally NOT sent — the backend generates it.
     formData.append('role', newRoleData.role);
     formData.append('positions', newRoleData.positions);
     formData.append('jd_text', newRoleData.jd_text);
@@ -186,11 +184,12 @@ function RolesPage() {
       const res = await axios.post(`${BASE_URL}/add-role/`, formData, {
         headers: { "ngrok-skip-browser-warning": "true" }
       });
-      // Backend returns the auto-generated role_id — surface it so HR knows
       const newId = res.data?.role_id;
       alert(`Role added successfully! Role ID: ${newId}`);
       setShowAddModal(false);
       setNewRoleData({ role: '', positions: 1, jd_text: '' });
+      // After adding a new role, jump to Open tab so HR sees it immediately
+      setActiveTab('open');
       fetchRoles();
     } catch (err) {
       console.error('Error adding role:', err);
@@ -202,12 +201,8 @@ function RolesPage() {
   };
 
   // ── Vacancy cell ──────────────────────────────────────────────────────────
-  // Renders "left / total" for open roles. If all positions are filled
-  // (left === 0) we highlight the cell so it's visually obvious.
   const renderVacancies = (role) => {
     const total = role.positions ?? 0;
-    // vacancies_left is provided by the backend; fall back to total if the
-    // backend hasn't been updated yet (graceful degradation).
     const left  = role.vacancies_left !== undefined ? role.vacancies_left : total;
     const allFilled = left === 0 && total > 0;
     return (
@@ -222,8 +217,6 @@ function RolesPage() {
   };
 
   // ── Created / Last edited cell ────────────────────────────────────────────
-  // Shows two stacked timestamps. If the role was never edited (last_edited_at
-  // equals created_at), we still show both lines for visual consistency.
   const renderCreatedAndEdited = (role) => (
     <div style={{ fontSize: '0.8rem', lineHeight: '1.35' }}>
       <div>
@@ -238,81 +231,94 @@ function RolesPage() {
   );
 
   const renderTable = (roles, isClosed = false) => (
-    <table className="table table-bordered mt-4">
-      <thead className="table-light">
-        <tr>
-          <th>Role ID</th>
-          <th>Position</th>
-          <th>Job Description</th>
-          <th>{isClosed ? 'Vacancies' : 'Vacancies (left / total)'}</th>
-          <th>{isClosed ? 'Closed On' : 'Created / Last edited'}</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {roles.map((role) => (
-          <tr key={`${role.role_id}_${role.jd_filename}`}>
-            <td>{role.role_id}</td>
-            <td>{role.role}</td>
-
-            <td className="jd-preview-cell">
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
-                <strong style={{ fontSize: '0.85rem' }}>{role.role}</strong>
-                <p style={{ fontSize: '0.78rem', color: '#555', margin: 0, textAlign: 'center' }}>
-                  {stripHtml(role.job_description).slice(0, 80)}...
-                </p>
-                <button
-                  className="btn btn-outline-secondary btn-sm"
-                  onClick={() => handleViewJD(role.job_description)}
-                >
-                  <FaEye /> View Full JD
-                </button>
-              </div>
-            </td>
-
-            {/* Vacancies column:
-                - Open roles  → "left / total" with red highlight when all filled
-                - Closed roles → just the original total positions
-                  (closed roles aren't actively hiring, so "left" is moot) */}
-            <td style={{ textAlign: 'center' }}>
-              {isClosed ? role.positions : renderVacancies(role)}
-            </td>
-
-            <td>
-              {isClosed
-                ? formatTimestamp(role.closed_on)
-                : renderCreatedAndEdited(role)}
-            </td>
-
-            <td>
-              {!isClosed ? (
-                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  <button className="btn btn-outline-primary btn-sm" onClick={() => handleEdit(role)}>
-                    <FaEdit /> Edit
-                  </button>
-                  <button className="btn btn-outline-warning btn-sm" onClick={() => handleClose(role.role_id)}>
-                    <FaTimesCircle /> Close
-                  </button>
-                  <button className="btn btn-outline-danger btn-sm" onClick={() => handleDelete(role.role_id)}>
-                    <FaTrashAlt /> Delete
-                  </button>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  <button className="btn btn-outline-success btn-sm" onClick={() => handleReopenRole(role.role_id)}>
-                    <FaUndo /> Reopen
-                  </button>
-                  <button className="btn btn-outline-danger btn-sm" onClick={() => handleDelete(role.role_id)}>
-                    <FaTrashAlt /> Delete
-                  </button>
-                </div>
-              )}
-            </td>
+    roles.length === 0 ? (
+      <p className="empty-message text-muted" style={{ padding: '1rem 0' }}>
+        {isClosed
+          ? 'No closed positions yet.'
+          : 'No open positions. Click "+ Add New Role" to create one.'}
+      </p>
+    ) : (
+      <table className="table table-bordered mt-3">
+        <thead className="table-light">
+          <tr>
+            <th>Role ID</th>
+            <th>Position</th>
+            <th>Job Description</th>
+            <th>Vacancies (left / total)</th>
+            <th>{isClosed ? 'Closed On' : 'Created / Last edited'}</th>
+            <th>Actions</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {roles.map((role) => (
+            <tr key={`${role.role_id}_${role.jd_filename}`}>
+              <td>{role.role_id}</td>
+              <td>{role.role}</td>
+
+              <td className="jd-preview-cell">
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
+                  <strong style={{ fontSize: '0.85rem' }}>{role.role}</strong>
+                  <p style={{ fontSize: '0.78rem', color: '#555', margin: 0, textAlign: 'center' }}>
+                    {stripHtml(role.job_description).slice(0, 80)}...
+                  </p>
+                  <button
+                    className="btn btn-outline-secondary btn-sm"
+                    onClick={() => handleViewJD(role.job_description)}
+                  >
+                    <FaEye /> View Full JD
+                  </button>
+                </div>
+              </td>
+
+              <td style={{ textAlign: 'center' }}>
+                {renderVacancies(role)}
+              </td>
+
+              <td>
+                {isClosed
+                  ? formatTimestamp(role.closed_on)
+                  : renderCreatedAndEdited(role)}
+              </td>
+
+              <td>
+                {!isClosed ? (
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    <button className="btn btn-outline-primary btn-sm" onClick={() => handleEdit(role)}>
+                      <FaEdit /> Edit
+                    </button>
+                    <button className="btn btn-outline-warning btn-sm" onClick={() => handleClose(role.role_id)}>
+                      <FaTimesCircle /> Close
+                    </button>
+                    <button className="btn btn-outline-danger btn-sm" onClick={() => handleDelete(role.role_id)}>
+                      <FaTrashAlt /> Delete
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    <button className="btn btn-outline-success btn-sm" onClick={() => handleReopenRole(role.role_id)}>
+                      <FaUndo /> Reopen
+                    </button>
+                    <button className="btn btn-outline-danger btn-sm" onClick={() => handleDelete(role.role_id)}>
+                      <FaTrashAlt /> Delete
+                    </button>
+                  </div>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )
   );
+
+  // ── Tab config ─────────────────────────────────────────────────────────────
+  // Two tabs only: Open and Closed positions. Each tab has its own renderer.
+  const TABS = [
+    { key: 'open',   icon: '📂', label: 'Open Positions',   count: openRoles.length,   render: () => renderTable(openRoles, false) },
+    { key: 'closed', icon: '📁', label: 'Closed Positions', count: closedRoles.length, render: () => renderTable(closedRoles, true) },
+  ];
+
+  const currentTab = TABS.find(t => t.key === activeTab) || TABS[0];
 
   return (
     <div className="page-wrapper">
@@ -323,11 +329,28 @@ function RolesPage() {
         </button>
       </div>
 
-      <h2>Open Positions</h2>
-      {renderTable(openRoles, false)}
+      {/* ── Tab strip ───────────────────────────────────────────────────────
+          Same styling pattern as Schedule / ViewCandidates / Feedback pages
+          for visual consistency across the HR portal. */}
+      <div className="roles-tabs">
+        {TABS.map(t => (
+          <button
+            key={t.key}
+            className={`roles-tab ${activeTab === t.key ? 'active' : ''}`}
+            onClick={() => setActiveTab(t.key)}
+          >
+            <span className="roles-tab-icon">{t.icon}</span>
+            <span className="roles-tab-label">{t.label}</span>
+            <span className="roles-tab-count">{t.count}</span>
+          </button>
+        ))}
+      </div>
 
-      <h2 className="mt-5">Closed Positions</h2>
-      {renderTable(closedRoles, true)}
+      {/* ── Active tab panel ─────────────────────────────────────────────── */}
+      <div className="roles-section">
+        <h4>{currentTab.icon} {currentTab.label}</h4>
+        {currentTab.render()}
+      </div>
 
       {/* View JD Modal */}
       {showModal && (
@@ -433,9 +456,6 @@ function RolesPage() {
               </div>
               <form onSubmit={handleAddRole}>
                 <div className="modal-body">
-                  {/* Role ID input removed — backend auto-generates the next ID.
-                      A small note tells HR what's happening so the missing field
-                      doesn't feel like a UI gap. */}
                   <div
                     className="mb-3 p-2"
                     style={{
