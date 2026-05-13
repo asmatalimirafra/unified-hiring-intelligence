@@ -6,55 +6,81 @@ from services.mongo_service import candidates_collection
 from services.qdrant_service import qdrant_client as client
 import torch
 
-# Initialize embedding model
 device = "cuda" if torch.cuda.is_available() else "cpu"
 embedder = SentenceTransformer("BAAI/bge-large-en-v1.5", device=device)
 embedder.max_seq_length = 512
 
+# Projection used for ALL candidate fetches in this service.
+# Excludes resume_file (binary PDF blob) — pulling it into RAM on every
+# RAG call wastes memory and can silently corrupt the LLM prompt.
+# resume_text (the extracted plain-text version) is all the LLM needs.
+_CANDIDATE_PROJECTION = {"_id": 0, "resume_file": 0}
+
+
+def _normalise_mongo_id(raw_id) -> str:
+    """
+    Safely convert any form of candidate ID coming from Qdrant payload
+    into the canonical MongoDB format 'CND-XXXX'.
+
+    Qdrant stores the numeric part as both the point ID and payload value
+    (e.g. 4907). MongoDB stores 'CND-4907'. This function bridges the gap
+    regardless of whether raw_id arrives as int, float, or string.
+    """
+    s = str(raw_id).strip()
+    if s.upper().startswith("CND-"):
+        return s  # already canonical
+    # Strip any non-digit prefix/suffix just in case
+    digits = re.sub(r"[^\d]", "", s)
+    if digits:
+        return f"CND-{digits}"
+    return s  # fallback — let MongoDB miss gracefully
+
 
 def get_hr_chat_response(user_query: str, chat_history: list = None, stream: bool = False):
     """
-    user_query   : the latest message from the user
-    chat_history : list of {"sender": "user"|"bot", "text": "..."} dicts
-                   representing the conversation so far (oldest first)
+    Global RAG assistant — searches ALL candidates in the database.
+    No hr_id filter: intentionally company-wide for scalability.
+
+    user_query   : latest message from the user
+    chat_history : list of {"sender": "user"|"bot", "text": "..."} dicts (oldest first)
     stream       : whether to stream tokens back
     """
     try:
         chat_history = chat_history or []
 
-        # ── 1. Resolve candidate from context ────────────────────────────────
-
+        # ── 1. Name-based candidate resolution ───────────────────────────────
         def safe_name_search(text: str):
             """
-            Extract candidate-name-like tokens from text and search MongoDB safely.
-            Uses $text search or plain string comparison to avoid regex injection.
+            Extract proper-noun tokens from text and match against ALL candidate
+            names in MongoDB (no hr_id filter — global visibility).
+            Returns the full candidate doc (minus binary blob) or None.
             """
-            # Extract only capitalized words (proper nouns), min 3 chars to avoid
-            # short words like 'Hi', 'He', 'His', 'Tell' hitting MongoDB
             tokens = [w for w in re.findall(r'[A-Z][a-z]{2,}', text)]
             if not tokens:
                 return None
 
-            # Fetch all candidates and do safe Python-side name matching
-            # This avoids MongoDB regex errors entirely for short/special strings
-            all_candidates = list(candidates_collection.find({}, {"name": 1, "candidate_id": 1}))
+            # Lightweight index scan — only name + id, no resume data
+            all_candidates = list(candidates_collection.find(
+                {},
+                {"name": 1, "candidate_id": 1, "_id": 0}
+            ))
+
             for token in tokens:
                 token_lower = token.lower()
                 for c in all_candidates:
                     if token_lower in c.get("name", "").lower():
-                        # Fetch full candidate document
-                        return candidates_collection.find_one({"candidate_id": c["candidate_id"]})
+                        # Fetch full doc but exclude binary resume_file
+                        return candidates_collection.find_one(
+                            {"candidate_id": c["candidate_id"]},
+                            _CANDIDATE_PROJECTION
+                        )
             return None
 
-        # First try to find a name in the CURRENT query
+        # Try current query first, then walk back through history
         candidate = safe_name_search(user_query)
-
-        # If no name in current query, scan recent history for a name mention
-        # (this is what fixes "tell me about HIS projects")
         if not candidate and chat_history:
             for past_msg in reversed(chat_history):
-                past_text = past_msg.get("text", "")
-                candidate = safe_name_search(past_text)
+                candidate = safe_name_search(past_msg.get("text", ""))
                 if candidate:
                     break
 
@@ -64,50 +90,60 @@ def get_hr_chat_response(user_query: str, chat_history: list = None, stream: boo
             context_blocks.append(
                 f"CANDIDATE: {candidate.get('name')}\n"
                 f"ROLE: {candidate.get('applied_role')}\n"
-                f"RESUME: {candidate.get('resume_text')}"
+                f"RESUME: {candidate.get('resume_text', '')}"
             )
         else:
-            # ── 2. Semantic search fallback ───────────────────────────────────
-            # Enrich the query with recent chat context so the vector search
-            # understands pronouns like "his", "her", "their"
+            # ── 2. Semantic vector search fallback ────────────────────────────
+            # Enrich with recent history so the vector captures pronouns
             enriched_query = user_query
             if chat_history:
-                recent = " ".join(
-                    m.get("text", "") for m in chat_history[-4:]  # last 4 messages
-                )
+                recent = " ".join(m.get("text", "") for m in chat_history[-4:])
                 enriched_query = f"{recent} {user_query}"
 
             query_vector = embedder.encode(enriched_query).tolist()
-            response = client.query_points(
+            qdrant_response = client.query_points(
                 collection_name="resumes",
                 query=query_vector,
-                limit=8,  # increased to surface more candidates
+                limit=8,
                 with_payload=True
             )
 
-            for hit in response.points:
-                c_id = hit.payload.get("candidate_id")
-                mongo_id = f"CND-{c_id}" if not str(c_id).startswith("CND-") else c_id
-                candidate = candidates_collection.find_one({"candidate_id": mongo_id})
-                if candidate:
+            for hit in qdrant_response.points:
+                # Payload stores the numeric candidate_id (e.g. 4907)
+                # Point ID is also numeric. Normalise both to "CND-XXXX".
+                raw_payload_id = hit.payload.get("candidate_id")
+                mongo_id = _normalise_mongo_id(
+                    raw_payload_id if raw_payload_id is not None else hit.id
+                )
+
+                doc = candidates_collection.find_one(
+                    {"candidate_id": mongo_id},
+                    _CANDIDATE_PROJECTION
+                )
+                if doc:
                     context_blocks.append(
-                        f"CANDIDATE: {candidate.get('name')}\n"
-                        f"RESUME: {candidate.get('resume_text')}"
+                        f"CANDIDATE: {doc.get('name')}\n"
+                        f"ROLE: {doc.get('applied_role')}\n"
+                        f"RESUME: {doc.get('resume_text', '')}"
                     )
 
-        final_context = "\n---\n".join(context_blocks) if context_blocks else "No matching candidates found."
+        final_context = (
+            "\n---\n".join(context_blocks)
+            if context_blocks
+            else "No matching candidates found."
+        )
 
-        # ── 3. Build conversation history string for the prompt ───────────────
+        # ── 3. Conversation history for prompt ───────────────────────────────
         history_text = ""
         if chat_history:
             history_lines = []
-            for msg in chat_history[-10:]:  # keep last 10 messages to avoid token overflow
+            for msg in chat_history[-10:]:
                 role = "HR" if msg.get("sender") == "user" else "Assistant"
                 history_lines.append(f"{role}: {msg.get('text', '')}")
             history_text = "\n".join(history_lines)
 
-        # ── 4. Build prompt with context + history ────────────────────────────
-        prompt = f"""You are an HR assistant with access to candidate resumes. 
+        # ── 4. Prompt ─────────────────────────────────────────────────────────
+        prompt = f"""You are an HR assistant with access to candidate resumes across the entire company database.
 Use the resume context and conversation history below to answer accurately.
 Always refer to the same candidate that was discussed in recent messages unless the HR explicitly asks about someone new.
 When listing items, use properly incrementing numbers: 1. first item 2. second item 3. third item and so on.
@@ -122,14 +158,10 @@ CONVERSATION HISTORY:
 HR: {user_query}
 Assistant:"""
 
-        # ── 5. Call Ollama ────────────────────────────────────────────────────
+        # ── 5. Ollama call ────────────────────────────────────────────────────
         response = requests.post(
             "http://localhost:11434/api/generate",
-            json={
-                "model": "llama3.1:8b",
-                "prompt": prompt,
-                "stream": stream
-            },
+            json={"model": "llama3.1:8b", "prompt": prompt, "stream": stream},
             stream=stream,
             timeout=300
         )
@@ -139,8 +171,7 @@ Assistant:"""
                 for line in response.iter_lines():
                     if line:
                         data = json.loads(line.decode())
-                        token = data.get("response", "")
-                        yield token
+                        yield data.get("response", "")
                         if data.get("done"):
                             break
             return generator()

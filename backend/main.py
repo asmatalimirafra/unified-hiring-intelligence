@@ -1309,3 +1309,166 @@ async def interviewer_chat(request: dict):
         media_type="text/plain",
         headers={"X-Thread-Id": thread_id}
     )
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TALENT POOL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/talent-pool/search", status_code=200)
+async def talent_pool_search(payload: dict = Body(...)):
+    """
+    Search the entire candidate database for best matches against a given JD.
+
+    Accepts:
+      - role_id   : existing role's ID → fetches that role's JD from MongoDB
+      - jd_text   : free-form JD/skills text typed by HR
+      (at least one must be provided; if both given, jd_text takes precedence)
+
+    Excludes:
+      - Candidates who have already joined the company (candidate_joined == True)
+
+    Returns candidates ranked by re-computed ATS score (descending) against the
+    provided JD — regardless of which role they originally applied for.
+    Each candidate includes their current pipeline status so the frontend can
+    decide whether to show the "Send to Pending" button.
+    """
+    role_id  = payload.get("role_id")
+    jd_text  = payload.get("jd_text", "").strip()
+
+    # ── Resolve JD text ──────────────────────────────────────────────────────
+    if not jd_text and role_id:
+        role_doc = (
+            db["roles"].find_one({"role_id": str(role_id)}) or
+            db["roles"].find_one({"role_id": int(role_id)})
+        ) if role_id else None
+        if not role_doc:
+            raise HTTPException(status_code=404, detail=f"Role '{role_id}' not found.")
+        jd_text = role_doc.get("job_description", "")
+
+    if not jd_text:
+        raise HTTPException(
+            status_code=422,
+            detail="Please provide either a role_id or jd_text to search."
+        )
+
+    # ── Fetch all non-joined candidates ──────────────────────────────────────
+    # Exclude anyone who has already joined the company.
+    all_candidates = list(
+        candidates_collection.find(
+            {"candidate_joined": {"$ne": True}},
+            {"_id": 0, "resume_file": 0}   # exclude binary blob
+        )
+    )
+
+    # ── Re-score each candidate against the provided JD ──────────────────────
+    results = []
+    for c in all_candidates:
+        resume_text = c.get("resume_text", "")
+        if not resume_text:
+            continue
+
+        talent_score = calculate_ats_score(resume_text, jd_text)
+
+        # ── Derive a human-readable pipeline status ───────────────────────────
+        if c.get("candidate_joined"):
+            pipeline_status = "Joined"                       # excluded above, safety net
+        elif c.get("candidate_not_joined"):
+            pipeline_status = "Not Joined"
+        elif c.get("candidate_selected"):
+            pipeline_status = "Selected"
+        elif c.get("candidate_rejected"):
+            pipeline_status = "Interview Rejected"
+        elif c.get("status") == "Scheduled":
+            pipeline_status = "Scheduled"
+        elif c.get("ats_score", 100) < 30 and not c.get("manual_override"):
+            pipeline_status = "ATS Rejected"
+        else:
+            pipeline_status = "Pending"
+
+        # ── Can this candidate be sent to Pending? ────────────────────────────
+        # Eligible if NOT already Pending / Scheduled / Selected / Joined
+        not_sendable = pipeline_status in ("Pending", "Scheduled", "Selected", "Joined")
+        can_send_to_pending = not not_sendable
+
+        results.append({
+            "candidate_id":    c.get("candidate_id"),
+            "name":            c.get("name"),
+            "email":           c.get("email", ""),
+            "phone":           c.get("phone", ""),
+            "location":        c.get("location", ""),
+            "applied_role":    c.get("applied_role"),
+            "applied_role_id": c.get("applied_role_id"),
+            "original_ats_score": c.get("ats_score", 0),
+            "talent_score":    talent_score,          # re-scored against search JD
+            "pipeline_status": pipeline_status,
+            "can_send_to_pending": can_send_to_pending,
+            "interviews_count": len(c.get("interviews", [])),
+            "hr_id":           c.get("hr_id", ""),
+        })
+
+    # Sort descending by talent_score
+    results.sort(key=lambda x: x["talent_score"], reverse=True)
+
+    return {
+        "total": len(results),
+        "results": results
+    }
+
+
+@app.post("/talent-pool/send-to-pending/{candidate_id}", status_code=200)
+async def talent_pool_send_to_pending(candidate_id: str):
+    """
+    Move any eligible candidate back to the Pending state so HR can schedule
+    them for an interview, regardless of why they were not in Pending before:
+
+    - ATS Rejected       → sets manual_override = True  (existing mechanism)
+    - Interview Rejected → clears candidate_rejected flag
+    - Not Joined         → clears candidate_not_joined flag
+
+    candidate_selected and candidate_joined are never touched here — a selected
+    or joined candidate cannot be sent back to Pending via Talent Pool.
+    """
+    candidate = candidates_collection.find_one({"candidate_id": candidate_id})
+    if not candidate:
+        raise HTTPException(status_code=404, detail=f"Candidate '{candidate_id}' not found.")
+
+    # Guard: do not move Selected or Joined candidates
+    if candidate.get("candidate_selected"):
+        raise HTTPException(status_code=400, detail="Candidate is already Selected.")
+    if candidate.get("candidate_joined"):
+        raise HTTPException(status_code=400, detail="Candidate has already joined the company.")
+
+    update_set   = {}
+    update_unset = {}
+
+    # Case 1: ATS-rejected (low score, no override)
+    ats_score = candidate.get("ats_score", 100)
+    if ats_score < 30 and not candidate.get("manual_override"):
+        update_set["manual_override"] = True
+
+    # Case 2: Interview-rejected
+    if candidate.get("candidate_rejected"):
+        update_set["candidate_rejected"] = False
+
+    # Case 3: Not joined after offer
+    if candidate.get("candidate_not_joined"):
+        update_set["candidate_not_joined"] = False
+
+    # Case 4: Clear any stale scheduled status (safety)
+    if candidate.get("status") == "Scheduled":
+        update_unset["status"] = ""
+        update_unset["interview_details"] = ""
+
+    update_op = {}
+    if update_set:
+        update_op["$set"] = update_set
+    if update_unset:
+        update_op["$unset"] = update_unset
+
+    if update_op:
+        candidates_collection.update_one({"candidate_id": candidate_id}, update_op)
+
+    return {
+        "message": f"Candidate {candidate_id} moved to Pending successfully.",
+        "candidate_id": candidate_id
+    }

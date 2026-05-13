@@ -75,6 +75,15 @@ function HrNavbar() {
           <span className="link-text">Feedback</span>
         </NavLink>
 
+        <NavLink
+          to="/hr/talent-pool"
+          className={({ isActive }) => `nav-link ${isActive ? 'active-link' : ''}`}
+        >
+          <span className="link-text" style={{ color: '#0ea5e9', fontWeight: 'bold' }}>
+            🎯 Talent Pool
+          </span>
+        </NavLink>
+
         <button
           onClick={handleLogout}
           className={`logout-button ${isLoading ? 'loading' : ''}`}
