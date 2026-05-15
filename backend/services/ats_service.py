@@ -83,6 +83,15 @@ FILLER = {
     "around", "along", "both", "based", "driven", "focused", "ready",
     "native", "enabled", "existing", "internal", "external", "global",
     "current", "future", "general", "specific",
+    # JD connective words — generic verbs/nouns that surround skills but
+    # aren't themselves skills. Including these in the JD denominator
+    # punishes candidates whose resumes don't echo the exact JD phrasing.
+    "programming", "development", "deployment", "design", "build",
+    "maintain", "develop", "deliver", "create", "manage", "build",
+    "implement", "integrate", "deploy", "write", "communicate",
+    "exposure", "streaming", "message", "messages", "salary",
+    "competitive", "hybrid", "offer", "offers", "version",
+    "control", "cloud", "database", "databases", "service", "services",
     # Time / quantity
     "day", "days", "week", "weeks", "month", "months", "fast", "real",
     "high", "low", "complex", "simple", "multiple", "large", "scale",
@@ -228,10 +237,79 @@ DEFAULT_WEIGHT  = 1.0
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _strip_html(text: str) -> str:
+    """
+    Convert HTML to plaintext while preserving block structure as newlines.
+
+    WHY THIS MATTERS
+        JDs created in rich-text editors (TinyMCE, CKEditor, etc) come back as
+        one giant HTML blob with NO real newlines — every line break is a
+        `<p>` or `<br>` tag, and every space is `&nbsp;`. If we just regex
+        out the tags, the entire JD collapses to one long line, which breaks
+        the section parser (it can't see "Required Skills:" on its own line)
+        AND breaks bigram detection at line boundaries.
+
+    APPROACH
+        1. Convert block-level tags (`<p>`, `<br>`, `<div>`, `<li>`, `<h1>`–
+           `<h6>`, `<tr>`, `<table>`, `<ul>`, `<ol>`) to newlines BEFORE
+           stripping tags. The closing tag is what we substitute, so the
+           content stays intact.
+        2. Then strip remaining inline tags (`<span>`, `<strong>`, etc).
+        3. Decode HTML entities (`&nbsp;` → space, `&amp;` → `&`, …).
+        4. Collapse multiple consecutive newlines/spaces.
+    """
+    if not text:
+        return text
+
+    # Step 1: convert block-level tags to newlines.
+    # Pattern: opening tag, closing tag, OR self-closing (like <br/>).
+    BLOCK_TAGS = (
+        r"p|div|br|li|ul|ol|tr|table|thead|tbody|tfoot|"
+        r"h[1-6]|section|article|header|footer|nav|aside|"
+        r"blockquote|pre|hr"
+    )
+    # Closing tags → newline
+    text = _re.sub(
+        rf"</\s*(?:{BLOCK_TAGS})\s*>", "\n", text, flags=_re.IGNORECASE
+    )
+    # Self-closing or void tags (<br>, <br/>, <hr>, <hr/>) → newline
+    text = _re.sub(
+        rf"<\s*(?:{BLOCK_TAGS})(?:\s[^>]*)?/?\s*>",
+        "\n", text, flags=_re.IGNORECASE,
+    )
+
+    # Step 2: strip remaining inline tags (and any block tags we missed).
     text = _re.sub(r"<[^>]+>", " ", text)
-    return (text.replace("&nbsp;", " ").replace("&amp;", "&")
-                .replace("&lt;", "<").replace("&gt;", ">")
-                .replace("&quot;", '"').replace("&#39;", "'"))
+
+    # Step 3: decode HTML entities.
+    text = (text.replace("&nbsp;", " ")
+                .replace("&amp;", "&")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&quot;", '"')
+                .replace("&#39;", "'")
+                .replace("&apos;", "'")
+                .replace("&rsquo;", "'")
+                .replace("&lsquo;", "'")
+                .replace("&rdquo;", '"')
+                .replace("&ldquo;", '"')
+                .replace("&mdash;", "—")
+                .replace("&ndash;", "–")
+                .replace("&hellip;", "…"))
+    # Numeric entities like &#xNN; or &#NN;
+    text = _re.sub(r"&#x([0-9a-fA-F]+);",
+                   lambda m: chr(int(m.group(1), 16)), text)
+    text = _re.sub(r"&#(\d+);",
+                   lambda m: chr(int(m.group(1))), text)
+
+    # Step 4: tidy whitespace.
+    # Collapse runs of spaces/tabs (but keep newlines).
+    text = _re.sub(r"[ \t]+", " ", text)
+    # Collapse 3+ newlines down to 2 (preserve paragraph breaks).
+    text = _re.sub(r"\n{3,}", "\n\n", text)
+    # Strip trailing whitespace on each line.
+    text = _re.sub(r"[ \t]+\n", "\n", text)
+
+    return text
 
 
 # Brand-name tech words whose internal casing shouldn't trigger camelCase split.
@@ -414,8 +492,18 @@ def _extract_jd_tokens(jd_text: str) -> tuple:
     Returns (counts, or_groups) where or_groups is a list of
     (frozenset_of_tokens, weight) tuples. Matching ANY token in a group
     satisfies the whole group.
+
+    IMPORTANT: HTML stripping happens HERE, before section parsing. JDs from
+    rich-text editors arrive as one long HTML blob with no real newlines —
+    parsing sections on raw HTML treats the entire JD as one undifferentiated
+    block, losing all required/nice weighting and bloating the denominator
+    with company-description tokens. Running _strip_html first converts
+    `<p>...</p>` boundaries into real newlines so the section parser works.
     """
-    sections = _parse_jd_sections(jd_text)
+    # Convert HTML→plaintext FIRST so section headers appear on their own lines.
+    jd_plain = _strip_html(jd_text)
+
+    sections = _parse_jd_sections(jd_plain)
 
     has_structured = any(
         s_type in ("required", "skill", "nice") for s_type, _ in sections
@@ -437,6 +525,8 @@ def _extract_jd_tokens(jd_text: str) -> tuple:
         else:
             weight = DEFAULT_WEIGHT
 
+        # Section text is already plaintext (HTML stripped above), but
+        # _normalize still does camelCase splitting and lowercasing.
         normalized = _normalize(s_text)
 
         section_alternatives = _extract_or_alternatives(normalized)
@@ -462,23 +552,48 @@ def _extract_jd_tokens(jd_text: str) -> tuple:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _build_match_index(jd_tokens: set) -> dict:
-    """Map every alias form → the JD's canonical token, so resume can match in any form."""
+    """
+    Map every alias form → the JD's canonical token, so resume can match in
+    any form.
+
+    IMPORTANT: A JD token mapping to itself is *protected* — alias rules can
+    add new entries (for forms NOT in the JD) but cannot overwrite a token
+    that the JD itself uses. Without this protection, if the JD contained
+    both `rest_api` and `rest_apis` (because they're listed as aliases of
+    each other in ALIASES), the index would end up swapping them: resume's
+    `rest_api` would translate to `rest_apis` and vice versa, breaking
+    exact matches.
+    """
     index = {tok: tok for tok in jd_tokens}
 
+    def _maybe_register(alias: str, canonical: str) -> None:
+        # Never overwrite a token that is itself in the JD.
+        if alias in jd_tokens:
+            return
+        # First write wins (deterministic). If the alias has already been
+        # mapped to a different canonical, keep the first mapping.
+        if alias in index:
+            return
+        index[alias] = canonical
+
     for jd_tok in jd_tokens:
-        # JD token is a canonical key → register variants
+        # If this JD token is a canonical alias key, register its variants
+        # so the resume can express the skill in any equivalent form.
         if jd_tok in ALIASES:
             for variant in ALIASES[jd_tok]:
-                index[variant] = jd_tok
-        # JD token is itself a variant → register canonical + siblings
+                _maybe_register(variant, jd_tok)
+
+        # If this JD token is itself a variant of some canonical form,
+        # register the canonical AND all sibling variants pointing to
+        # this JD token.
         for canonical, variants in ALIASES.items():
             if jd_tok == canonical:
                 continue
             if jd_tok in variants:
-                index[canonical] = jd_tok
+                _maybe_register(canonical, jd_tok)
                 for sibling in variants:
                     if sibling != jd_tok:
-                        index[sibling] = jd_tok
+                        _maybe_register(sibling, jd_tok)
 
     return index
 
