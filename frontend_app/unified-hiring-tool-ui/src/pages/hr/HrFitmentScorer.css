@@ -1,0 +1,233 @@
+/* src/pages/hr/HrFitmentScorer.css */
+
+.hrf-page {
+  padding: 2rem 2.5rem;
+  font-family: 'Segoe UI', sans-serif;
+  background: #f8f9fc;
+  min-height: 100vh;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+.hrf-header {
+  margin-bottom: 1.75rem;
+}
+.hrf-title {
+  font-size: 1.65rem;
+  font-weight: 700;
+  color: #111827;
+  margin: 0 0 0.25rem;
+}
+.hrf-subtitle {
+  font-size: 0.875rem;
+  color: #6b7280;
+  margin: 0;
+}
+
+/* ── Controls ───────────────────────────────────────────────────────────── */
+.hrf-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.75rem;
+}
+.hrf-selector-wrap,
+.hrf-search-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.hrf-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #374151;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.hrf-dropdown {
+  padding: 0.55rem 1rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  background: #fff;
+  color: #111827;
+  min-width: 240px;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.hrf-dropdown:focus { border-color: #6366f1; }
+
+.hrf-search {
+  padding: 0.55rem 1rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  min-width: 240px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.hrf-search:focus { border-color: #6366f1; }
+
+/* ── Table section ──────────────────────────────────────────────────────── */
+.hrf-table-section {
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+.hrf-table-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.1rem 1.5rem;
+  border-bottom: 1px solid #f3f4f6;
+}
+.hrf-section-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #111827;
+  margin: 0;
+}
+.hrf-role-hl { color: #6366f1; }
+.hrf-count {
+  font-size: 0.8rem;
+  color: #9ca3af;
+  background: #f3f4f6;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+}
+
+/* ── Table ──────────────────────────────────────────────────────────────── */
+.hrf-table-wrap { overflow-x: auto; }
+.hrf-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.hrf-table thead tr {
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+.hrf-table th {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.hrf-table td {
+  padding: 0.85rem 1rem;
+  color: #374151;
+  border-bottom: 1px solid #f3f4f6;
+  vertical-align: middle;
+}
+.hrf-table tbody tr:last-child td { border-bottom: none; }
+.hrf-table tbody tr:hover { background: #fafbff; }
+
+.hrf-id-cell   { font-family: 'Courier New', monospace; font-size: 0.8rem; color: #6366f1; }
+.hrf-name-cell { font-weight: 600; color: #111827; }
+
+/* ── Pipeline status badges ─────────────────────────────────────────────── */
+.hrf-status-badge {
+  display: inline-block;
+  padding: 0.22rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.status-pending      { background: #eff6ff; color: #2563eb; }
+.status-scheduled    { background: #fefce8; color: #92400e; }
+.status-selected     { background: #f0fdf4; color: #166534; }
+.status-rejected     { background: #fef2f2; color: #991b1b; }
+.status-ats          { background: #fff7ed; color: #9a3412; }
+.status-not-joined   { background: #f3f4f6; color: #6b7280; }
+.status-joined       { background: #ecfdf5; color: #065f46; }
+
+/* ── ATS pill ───────────────────────────────────────────────────────────── */
+.hrf-ats-pill {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.ats-ok  { background: #f0fdf4; color: #166534; }
+.ats-low { background: #fef2f2; color: #991b1b; }
+
+/* ── Fitment score badges ───────────────────────────────────────────────── */
+.hrf-badge {
+  display: inline-block;
+  padding: 0.22rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.hrf-badge-high    { background: #f0fdf4; color: #15803d; }
+.hrf-badge-mid     { background: #fefce8; color: #a16207; }
+.hrf-badge-low     { background: #fef2f2; color: #b91c1c; }
+.hrf-badge-unscored{ background: #f3f4f6; color: #9ca3af; }
+
+/* ── Action buttons ─────────────────────────────────────────────────────── */
+.hrf-actions-cell { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+.hrf-btn-fitment,
+.hrf-btn-rescore,
+.hrf-btn-resume {
+  padding: 0.38rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.hrf-btn-fitment {
+  background: #6366f1;
+  color: #fff;
+  border-color: #6366f1;
+}
+.hrf-btn-fitment:hover:not(:disabled) { background: #4f46e5; }
+
+.hrf-btn-rescore {
+  background: #fff;
+  color: #6366f1;
+  border-color: #6366f1;
+}
+.hrf-btn-rescore:hover:not(:disabled) { background: #eef2ff; }
+
+.hrf-btn-resume {
+  background: #fff;
+  color: #374151;
+  border-color: #d1d5db;
+}
+.hrf-btn-resume:hover { background: #f9fafb; }
+
+.hrf-btn-fitment:disabled,
+.hrf-btn-rescore:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Loading / empty ────────────────────────────────────────────────────── */
+.hrf-loading-state,
+.hrf-empty-state {
+  padding: 3rem;
+  text-align: center;
+  color: #9ca3af;
+}
+.hrf-empty-icon { font-size: 2rem; display: block; margin-bottom: 0.5rem; }
+
+.hrf-spinner {
+  display: inline-block;
+  width: 18px; height: 18px;
+  border: 2px solid #e5e7eb;
+  border-top-color: #6366f1;
+  border-radius: 50%;
+  animation: hrf-spin 0.7s linear infinite;
+}
+.hrf-spinner-lg { width: 32px; height: 32px; border-width: 3px; }
+@keyframes hrf-spin { to { transform: rotate(360deg); } }

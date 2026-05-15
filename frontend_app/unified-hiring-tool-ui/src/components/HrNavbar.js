@@ -69,6 +69,20 @@ function HrNavbar() {
         </NavLink>
 
         <NavLink
+          to="/hr/fitment"
+          className={({ isActive }) => `nav-link ${isActive ? 'active-link' : ''}`}
+        >
+          <span className="link-text">Fitment</span>
+        </NavLink>
+
+        <NavLink
+          to="/hr/compare"
+          className={({ isActive }) => `nav-link ${isActive ? 'active-link' : ''}`}
+        >
+          <span className="link-text">Compare</span>
+        </NavLink>
+
+        <NavLink
           to="/hr/feedback"
           className={({ isActive }) => `nav-link ${isActive ? 'active-link' : ''}`}
         >

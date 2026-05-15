@@ -10,17 +10,21 @@ import InterviewerLayout from './layouts/InterviewerLayout';
 import HrLayout from './layouts/HrLayout';
 import ScheduleInterview from './pages/hr/ScheduleInterview';
 
-// Feature Pages
+// Feature Pages — Interviewer
 import FitmentScorer from './pages/interviewer/FitmentScorer';
 import CompareCandidates from './pages/interviewer/CompareCandidates';
 import InterviewPage from './pages/interviewer/InterviewPage';
+
+// Feature Pages — HR
 import RolesPage from './pages/hr/RolesPage';
 import ViewCandidates from './pages/hr/ViewCandidates';
 import AddCandidate from './pages/hr/AddCandidate';
 import FeedbackPage from './pages/hr/FeedbackPage';
 import TalentPool from './pages/hr/TalentPool';
+import HrFitmentScorer from './pages/hr/HrFitmentScorer';
+import HrCompareCandidates from './pages/hr/HrCompareCandidates';
 
-// --- RAG COMPONENTS ---
+// RAG / Chat
 import RagChat from './pages/hr/Rag';
 import InterviewerRag from './pages/interviewer/Interviewer_Rag';
 
@@ -30,7 +34,7 @@ function App() {
       <Routes>
         <Route path="/" element={<Login />} />
 
-        {/* ✅ HR ROUTES */}
+        {/* ── HR ROUTES ─────────────────────────────────────────────────── */}
         <Route
           path="/hr"
           element={
@@ -47,9 +51,11 @@ function App() {
           <Route path="chat"           element={<RagChat />} />
           <Route path="feedback"       element={<FeedbackPage />} />
           <Route path="talent-pool"    element={<TalentPool />} />
+          <Route path="fitment"        element={<HrFitmentScorer />} />
+          <Route path="compare"        element={<HrCompareCandidates />} />
         </Route>
 
-        {/* ✅ INTERVIEWER ROUTES */}
+        {/* ── INTERVIEWER ROUTES ────────────────────────────────────────── */}
         <Route
           path="/interviewer/:userId"
           element={
