@@ -30,6 +30,37 @@ function ScoreBar({ score }) {
   );
 }
 
+// Fitment score is cached from a prior fitment run against the candidate's
+// originally applied role's JD. It is NOT recomputed on talent-pool search
+// because each fitment run takes 30–60s on the LLM. When a candidate has
+// never had fitment scored, the value is null and we render a dash with a
+// helpful tooltip so HR understands why.
+function FitmentCell({ score }) {
+  if (score === null || score === undefined) {
+    return (
+      <span
+        className="tp-fitment-none"
+        title="Fitment has not been computed for this candidate yet. Open their Fitment page to generate a score."
+      >
+        —
+      </span>
+    );
+  }
+  const color =
+    score >= 70 ? "#10b981" :
+    score >= 50 ? "#3b82f6" :
+    score >= 30 ? "#f97316" : "#ef4444";
+  return (
+    <span
+      className="tp-fitment-score"
+      style={{ color }}
+      title="Fitment score against the candidate's originally applied role (cached from a previous run)."
+    >
+      {score}%
+    </span>
+  );
+}
+
 function StatusBadge({ status }) {
   const meta = STATUS_META[status] || { color: "#6b7280", bg: "#f3f4f6", label: status };
   return (
@@ -263,6 +294,11 @@ export default function TalentPool() {
                     <th>Applied For</th>
                     <th>Current Status</th>
                     <th>Match Score</th>
+                    <th
+                      title="Cached fitment score against the candidate's originally applied role. Shown only when fitment has been computed previously."
+                    >
+                      Fitment Score
+                    </th>
                     <th>Original ATS</th>
                     <th>Interviews</th>
                     <th>Action</th>
@@ -296,6 +332,9 @@ export default function TalentPool() {
                         </td>
                         <td className="tp-cell-score">
                           <ScoreBar score={c.talent_score} />
+                        </td>
+                        <td className="tp-cell-fitment">
+                          <FitmentCell score={c.fitment_score} />
                         </td>
                         <td className="tp-cell-original">
                           <span className="tp-original-score">{c.original_ats_score ?? "—"}%</span>

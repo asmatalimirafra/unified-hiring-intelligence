@@ -306,7 +306,7 @@ export default function AddCandidate() {
           {atsScore !== null && (
             <div className={`ats-score-badge ${atsScore >= 30 ? 'ats-pass' : 'ats-fail'}`}>
               📊 ATS Score: <strong>{atsScore.toFixed(1)}%</strong>
-              {atsScore < 50
+              {atsScore < 30
                 ? ' — Below 30%: this candidate will not appear in the interview schedule.'
                 : ' — Above 30%: eligible for interview scheduling.'}
             </div>

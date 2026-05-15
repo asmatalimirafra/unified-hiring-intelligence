@@ -1151,6 +1151,22 @@ async def talent_pool_search(payload: dict = Body(...)):
 
         talent_score = calculate_ats_score(resume_text, jd_text)
 
+        # ── Cached fitment lookup ────────────────────────────────────────────
+        # fitment is computed against the candidate's ORIGINALLY APPLIED role's
+        # JD (not the search JD), and is stored under c["results"] by
+        # score_fitment_logic the first time it runs for that candidate.
+        # We never recompute here — the LLM call is too slow for a list view.
+        # Candidates whose fitment has never been computed return None, which
+        # the frontend renders as "—".
+        cached_results = c.get("results") or {}
+        cached_fitment = cached_results.get("fitment_score")
+        # Round to keep the wire format consistent with talent_score.
+        if cached_fitment is not None:
+            try:
+                cached_fitment = round(float(cached_fitment), 2)
+            except (TypeError, ValueError):
+                cached_fitment = None
+
         # ── Derive a human-readable pipeline status ───────────────────────────
         if c.get("candidate_joined"):
             pipeline_status = "Joined"                       # excluded above, safety net
@@ -1182,6 +1198,7 @@ async def talent_pool_search(payload: dict = Body(...)):
             "applied_role_id": c.get("applied_role_id"),
             "original_ats_score": c.get("ats_score", 0),
             "talent_score":    talent_score,          # re-scored against search JD
+            "fitment_score":   cached_fitment,        # cached, vs originally applied role's JD
             "pipeline_status": pipeline_status,
             "can_send_to_pending": can_send_to_pending,
             "interviews_count": len(c.get("interviews", [])),

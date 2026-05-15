@@ -427,3 +427,24 @@
   .tp-filters { flex-direction: column; gap: 12px; }
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Fitment Score column — append to your existing TalentPool.css
+   ───────────────────────────────────────────────────────────────────────── */
+
+.tp-cell-fitment {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.tp-fitment-score {
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+  cursor: help;
+}
+
+.tp-fitment-none {
+  color: #9ca3af;
+  font-size: 1rem;
+  cursor: help;
+}
