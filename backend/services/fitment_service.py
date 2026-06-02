@@ -24,7 +24,9 @@ import re
 #   2. LLM Skill Signal  (60% weight)
 #      Derived from Mistral's actual skill-gap analysis:
 #        matched skill  → 1.0 pt  (full credit)
-#        minor gap      → 0.4 pt  (partial knowledge)
+#        minor gap      → 0.2 pt  (partial knowledge, reduced from 0.4 to
+#                                   avoid over-rewarding candidates with zero
+#                                   matched skills but many minor gaps)
 #        major gap      → 0.0 pt  (missing entirely)
 #      score = weighted_sum / total_skills × 100
 #
@@ -33,6 +35,11 @@ import re
 # WHY BETTER THAN THE OLD FORMULA:
 #   Old: (sim*1.3 + 0.15)*100  → almost always ≥100%, meaningless.
 #   New: actual skill coverage drives the score; cosine is supporting signal.
+#
+# LLM FALLBACK:
+#   If LLM returns no skills at all, llm_score defaults to 0.0 (not 50.0).
+#   This lets the cosine signal carry the score alone rather than injecting
+#   30 artificial points from a failed LLM call.
 # ─────────────────────────────────────────────────────────────────────────────
 
 COSINE_FLOOR   = 0.50
@@ -41,6 +48,12 @@ HARD_CAP       = 94.0   # perfect score is never auto-awarded
 
 WEIGHT_COSINE  = 0.40
 WEIGHT_LLM     = 0.60
+
+# FIX: reduced from 0.4 → 0.2.
+# At 0.4, a candidate with 0 matched skills but 10 minor gaps scored
+# (10×0.4)/10×100 = 40 LLM pts → ~24 blended pts from zero real matches.
+# At 0.2, minor gaps are genuinely partial credit, not near-matches.
+MINOR_GAP_WEIGHT = 0.2
 
 
 def _normalise_cosine(raw: float) -> float:
@@ -55,8 +68,12 @@ def _normalise_cosine(raw: float) -> float:
 def _llm_skill_score(matched: list, minor: list, major: list) -> float:
     """
     Compute a 0–100 score from LLM-extracted skill lists.
-      matched → 1.0 pt,  minor gap → 0.4 pt,  major gap → 0.0 pt
-    Returns 50.0 if LLM returned no skills at all (neutral fallback).
+      matched → 1.0 pt,  minor gap → 0.2 pt,  major gap → 0.0 pt
+
+    FIX: Returns 0.0 (not 50.0) if LLM returned no skills at all.
+    Reason: injecting 50 pts when the LLM fails pollutes the blend with
+    30 artificial points (50 × 0.60 = 30). Returning 0.0 lets the cosine
+    signal carry the score alone, which is more honest.
     """
     n_matched = len(matched)
     n_minor   = len(minor)
@@ -64,9 +81,9 @@ def _llm_skill_score(matched: list, minor: list, major: list) -> float:
     total     = n_matched + n_minor + n_major
 
     if total == 0:
-        return 50.0  # neutral — LLM returned nothing useful
+        return 0.0  # LLM returned nothing — don't inject artificial score
 
-    weighted_sum = (n_matched * 1.0) + (n_minor * 0.4) + (n_major * 0.0)
+    weighted_sum = (n_matched * 1.0) + (n_minor * MINOR_GAP_WEIGHT) + (n_major * 0.0)
     return round((weighted_sum / total) * 100, 2)
 
 
@@ -110,7 +127,14 @@ def score_fitment_logic(candidate_id: str, force_rescore: bool = False):
     resume_vector = get_vector_by_id(RESUME_COLLECTION, resume_id)
     jd_vector     = get_vector_by_id(JD_COLLECTION, int(role_id))
 
+    # FIX: log the specific reason for vector miss instead of silently returning None.
     if resume_vector is None or jd_vector is None:
+        missing = []
+        if resume_vector is None:
+            missing.append(f"resume vector (id={resume_id})")
+        if jd_vector is None:
+            missing.append(f"JD vector (role_id={role_id})")
+        print(f"⚠️  score_fitment_logic: missing {' and '.join(missing)} for {candidate_id}")
         return None
 
     raw_cosine   = compute_cosine_similarity(resume_vector, jd_vector)
@@ -118,12 +142,13 @@ def score_fitment_logic(candidate_id: str, force_rescore: bool = False):
 
     jd_doc = roles_collection.find_one({"role_id": role_id})
     if not jd_doc:
+        print(f"⚠️  score_fitment_logic: role {role_id} not found in roles_collection")
         return None
 
     jd_text     = jd_doc["job_description"]
     resume_text = candidate["resume_text"]
 
-    llm_analysis   = get_cleaned_fitment_analysis(jd_text, resume_text)
+    llm_analysis = get_cleaned_fitment_analysis(jd_text, resume_text)
 
     # Derive LLM score from actual skill lists Mistral returned
     matched = llm_analysis.get("matched_skills", [])
@@ -133,6 +158,12 @@ def score_fitment_logic(candidate_id: str, force_rescore: bool = False):
     llm_score     = _llm_skill_score(matched, minor, major)
     fitment_score = _blend(cosine_score, llm_score)
     semantic_disp = _display_semantic(raw_cosine)
+
+    print(
+        f"📊 Fitment [{candidate_id}] → "
+        f"raw_cos={raw_cosine:.4f}  cos_norm={cosine_score:.1f}  "
+        f"llm={llm_score:.1f}  blend={fitment_score:.1f}"
+    )
 
     result = {
         "candidate_id":        candidate_id,
@@ -283,8 +314,8 @@ def clean_llm_gap_output(raw_output):
     gap_analysis   = raw_output.get("gap_analysis", {})
     suggestions    = raw_output.get("suggestions", {})
 
-    minor_raw     = dedup_skills(normalize_list(gap_analysis.get("minor", [])))
-    major_raw     = dedup_skills(normalize_list(gap_analysis.get("major", [])))
+    minor_raw = dedup_skills(normalize_list(gap_analysis.get("minor", [])))
+    major_raw = dedup_skills(normalize_list(gap_analysis.get("major", [])))
 
     # ── ENFORCE MUTUAL EXCLUSIVITY ────────────────────────────────────────────
     # Even if the LLM violates the prompt rules and puts a skill in both
@@ -305,7 +336,6 @@ def clean_llm_gap_output(raw_output):
     final_resources = []
 
     if not isinstance(learning_resources_raw, list) or not learning_resources_raw:
-        # Only generate fallback resources if there are actual gaps
         if gap_canons:
             final_resources = [{
                 "skill":    "Core Technical Skills",
@@ -316,7 +346,6 @@ def clean_llm_gap_output(raw_output):
             skill_name    = res.get("skill", "")
             if not skill_name:
                 continue
-            # Skip resources for skills the candidate already has
             if canonicalize(skill_name) in matched_canons:
                 continue
             original_link = str(res.get("resource", res.get("url", "")))
@@ -331,7 +360,6 @@ def clean_llm_gap_output(raw_output):
     if isinstance(resume_improvements, list):
         resume_improvements = " ".join(resume_improvements)
 
-    # Log for debugging — visible in backend terminal
     print(f"✅ LLM output cleaned — matched: {len(matched_skills)}, "
           f"minor gaps: {len(minor_raw)}, major gaps: {len(major_raw)}")
 
