@@ -6,8 +6,46 @@ import './ScheduleInterview.css';
 const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 const axiosConfig = { headers: { 'ngrok-skip-browser-warning': 'true' } };
 
-// ── Score helpers ──────────────────────────────────────────────────────────────
+// ── Toast Component ───────────────────────────────────────────────────────────
+function Toast({ toasts }) {
+  return (
+    <div className="si-toast-container">
+      {toasts.map(t => (
+        <div key={t.id} className={`si-toast si-toast--${t.type}`}>
+          <span className="si-toast-icon">{t.type === 'success' ? '✓' : '✕'}</span>
+          <span className="si-toast-msg">{t.msg}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
+// ── Confirmation Dialog ───────────────────────────────────────────────────────
+function ConfirmDialog({ config, onConfirm, onCancel }) {
+  if (!config) return null;
+  return (
+    <div className="si-confirm-overlay" onClick={onCancel}>
+      <div className="si-confirm-box" onClick={e => e.stopPropagation()}>
+        <div className="si-confirm-icon">{config.icon || '❓'}</div>
+        <h4 className="si-confirm-title">{config.title}</h4>
+        <p className="si-confirm-msg">{config.message}</p>
+        <div className="si-confirm-actions">
+          <button className="si-confirm-btn si-confirm-btn--cancel" onClick={onCancel}>
+            Cancel
+          </button>
+          <button
+            className={`si-confirm-btn si-confirm-btn--ok si-confirm-btn--${config.variant || 'danger'}`}
+            onClick={onConfirm}
+          >
+            {config.confirmLabel || 'Yes'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Score helpers ─────────────────────────────────────────────────────────────
 function getRoundAvg(interviews = [], round) {
   const r = interviews.find(i => i.round === round);
   if (!r?.ratings) return null;
@@ -55,26 +93,54 @@ export default function ScheduleInterview() {
   const [roles,          setRoles]          = useState([]);
   const [allCands,       setAllCands]       = useState([]);
   const [selectedRoleId, setSelectedRoleId] = useState('');
+  const [activeTab,      setActiveTab]      = useState('pending');
 
-  // Active tab for the four-section view. Defaults to 'pending' so HR lands on
-  // the list that needs action first.
-  const [activeTab, setActiveTab] = useState('pending');
+  const [modal,     setModal]     = useState({ open: false, candidate: null });
+  const [form,      setForm]      = useState({ interviewer_email: '', scheduled_datetime: '', meeting_link: '' });
 
-  const [modal,      setModal]      = useState({ open: false, candidate: null });
-  const [form,       setForm]       = useState({ interviewer_email: '', scheduled_datetime: '', meeting_link: '' });
+  const [editModal, setEditModal] = useState({ open: false, candidate: null });
+  const [editForm,  setEditForm]  = useState({ interviewer_email: '', scheduled_datetime: '', meeting_link: '' });
 
-  const [editModal,  setEditModal]  = useState({ open: false, candidate: null });
-  const [editForm,   setEditForm]   = useState({ interviewer_email: '', scheduled_datetime: '', meeting_link: '' });
-
-  const [selectModal, setSelectModal] = useState({ open: false, candidate: null });
-
+  const [selectModal,       setSelectModal]       = useState({ open: false, candidate: null });
   const [interviewersModal, setInterviewersModal] = useState({ open: false, candidate: null });
+
   const openInterviewersModal  = (c) => setInterviewersModal({ open: true, candidate: c });
   const closeInterviewersModal = ()  => setInterviewersModal({ open: false, candidate: null });
 
   const [submitting, setSubmitting] = useState(false);
   const [statusMsg,  setStatusMsg]  = useState('');
   const [statusType, setStatusType] = useState('');
+
+  // ── Toast state ──────────────────────────────────────────────────────────────
+  const [toasts, setToasts] = useState([]);
+
+  const showToast = (msg, type = 'success') => {
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, msg, type }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500);
+  };
+
+  // ── Confirm dialog state ─────────────────────────────────────────────────────
+  const [confirmConfig,   setConfirmConfig]   = useState(null);
+  const [confirmCallback, setConfirmCallback] = useState(null);
+
+  const askConfirm = (config) =>
+    new Promise((resolve) => {
+      setConfirmConfig(config);
+      setConfirmCallback(() => resolve);
+    });
+
+  const handleConfirmYes = () => {
+    setConfirmConfig(null);
+    confirmCallback && confirmCallback(true);
+    setConfirmCallback(null);
+  };
+
+  const handleConfirmNo = () => {
+    setConfirmConfig(null);
+    confirmCallback && confirmCallback(false);
+    setConfirmCallback(null);
+  };
 
   useEffect(() => { fetchRoles(); fetchCandidates(); }, []); // eslint-disable-line
 
@@ -83,7 +149,10 @@ export default function ScheduleInterview() {
       const params = hrId ? { hr_id: hrId } : {};
       const res = await axios.get(`${BASE_URL}/get-roles/`, { ...axiosConfig, params });
       setRoles(Array.isArray(res.data) ? res.data : []);
-    } catch (err) { console.error('Failed to fetch roles:', err); }
+    } catch (err) {
+      console.error('Failed to fetch roles:', err);
+      showToast('Failed to fetch roles.', 'error');
+    }
   };
 
   const fetchCandidates = async () => {
@@ -93,7 +162,10 @@ export default function ScheduleInterview() {
       const cands = Array.isArray(res.data) ? res.data : [];
       setAllCands(cands);
       autoRejectIfNeeded(cands);
-    } catch (err) { console.error('Failed to fetch candidates:', err); }
+    } catch (err) {
+      console.error('Failed to fetch candidates:', err);
+      showToast('Failed to fetch candidates.', 'error');
+    }
   };
 
   const autoRejectIfNeeded = async (cands) => {
@@ -141,8 +213,7 @@ export default function ScheduleInterview() {
   const isTrulyScheduled = (c) => {
     if (c.status !== 'Scheduled') return false;
     const scheduledRound =
-      c.interview_details?.scheduled_round
-      ?? (c.interviews || []).length + 1;
+      c.interview_details?.scheduled_round ?? (c.interviews || []).length + 1;
     const feedbackDone = (c.interviews || []).some(i => i.round === scheduledRound);
     return !feedbackDone;
   };
@@ -151,28 +222,21 @@ export default function ScheduleInterview() {
     if (!openRoleIds.has(String(c.applied_role_id))) return false;
     if (c.candidate_selected || c.candidate_rejected) return false;
     if (isTrulyScheduled(c)) return false;
-    if (
-      c.ats_score !== null && c.ats_score !== undefined &&
-      c.ats_score < 30 &&
-      !c.manual_override
-    ) return false;
+    if (c.ats_score !== null && c.ats_score !== undefined && c.ats_score < 30 && !c.manual_override) return false;
     const lastAvg = getLastRoundAvg(c.interviews || []);
     if (lastAvg !== null && Math.round(lastAvg * 100) / 100 < 3) return false;
     return applyRoleFilter(c);
   });
 
   const scheduledRows = allCands.filter(c =>
-    isTrulyScheduled(c) &&
-    !c.candidate_selected &&
-    !c.candidate_rejected &&
-    applyRoleFilter(c)
+    isTrulyScheduled(c) && !c.candidate_selected && !c.candidate_rejected && applyRoleFilter(c)
   );
 
   const selected = allCands.filter(c => c.candidate_selected && applyRoleFilter(c));
   const rejected = allCands.filter(c => c.candidate_rejected && applyRoleFilter(c));
 
-  // ── Modals ─────────────────────────────────────────────────────────────────
-  const openModal = (candidate) => {
+  // ── Modals ────────────────────────────────────────────────────────────────────
+  const openModal  = (candidate) => {
     setModal({ open: true, candidate });
     setForm({ interviewer_email: '', scheduled_datetime: '', meeting_link: '' });
     setStatusMsg(''); setStatusType('');
@@ -194,7 +258,7 @@ export default function ScheduleInterview() {
   const openSelectModal  = (c) => setSelectModal({ open: true, candidate: c });
   const closeSelectModal = ()  => setSelectModal({ open: false, candidate: null });
 
-  // ── Handlers ───────────────────────────────────────────────────────────────
+  // ── Handlers ──────────────────────────────────────────────────────────────────
   const handleSchedule = async () => {
     if (!form.interviewer_email.trim()) { setStatusMsg('Please enter the interviewer email.'); setStatusType('error'); return; }
     if (!form.scheduled_datetime)       { setStatusMsg('Please select a date and time.');       setStatusType('error'); return; }
@@ -209,7 +273,11 @@ export default function ScheduleInterview() {
         hr_id: hrId, hr_name: hrName,
       }, axiosConfig);
       setStatusMsg('✅ Scheduled!'); setStatusType('success');
-      setTimeout(() => { closeModal(); fetchCandidates(); }, 1200);
+      setTimeout(() => {
+        closeModal();
+        fetchCandidates();
+        showToast(`${modal.candidate.name} scheduled successfully.`);
+      }, 1200);
     } catch (err) {
       setStatusMsg(`❌ ${err.response?.data?.detail || 'Failed. Check the interviewer email.'}`);
       setStatusType('error');
@@ -230,7 +298,11 @@ export default function ScheduleInterview() {
         hr_id: hrId, hr_name: hrName,
       }, axiosConfig);
       setStatusMsg('✅ Updated!'); setStatusType('success');
-      setTimeout(() => { closeEditModal(); fetchCandidates(); }, 1200);
+      setTimeout(() => {
+        closeEditModal();
+        fetchCandidates();
+        showToast(`Schedule updated for ${editModal.candidate.name}.`);
+      }, 1200);
     } catch (err) {
       setStatusMsg(`❌ ${err.response?.data?.detail || 'Failed. Check the interviewer email.'}`);
       setStatusType('error');
@@ -239,15 +311,24 @@ export default function ScheduleInterview() {
 
   const handleCancelInterview = async (candidate) => {
     const completedCount = (candidate.interviews || []).length;
-    const msg = completedCount > 0
-      ? `Cancel the scheduled L${completedCount + 1} interview for "${candidate.name}"?\n\n✅ Completed rounds (L1–L${completedCount}) will remain on record.\nOnly the upcoming scheduled slot will be removed.`
-      : `Cancel the scheduled interview for "${candidate.name}"?\nThey will move back to Pending (unscheduled).`;
-    if (!window.confirm(msg)) return;
+    const nextRound = completedCount + 1;
+    const yes = await askConfirm({
+      icon: '🚫',
+      title: `Cancel scheduled interview for "${candidate.name}"?`,
+      message: completedCount > 0
+        ? `Only the upcoming L${nextRound} slot will be removed. Completed rounds (L1–L${completedCount}) remain on record.`
+        : 'The candidate will move back to Pending (unscheduled).',
+      confirmLabel: `Yes, Cancel L${nextRound}`,
+      variant: 'danger'
+    });
+    if (!yes) return;
     try {
       await axios.post(`${BASE_URL}/unschedule-interview/`, { candidate_id: candidate.candidate_id }, axiosConfig);
       fetchCandidates();
+      showToast(`Interview cancelled for ${candidate.name}. Moved back to Pending.`);
     } catch (err) {
-      alert(`❌ ${err.response?.data?.detail || 'Failed to cancel interview. Please try again.'}`);
+      const msg = err.response?.data?.detail || 'Failed to cancel interview. Please try again.';
+      showToast(msg, 'error');
     }
   };
 
@@ -257,28 +338,42 @@ export default function ScheduleInterview() {
       await axios.post(`${BASE_URL}/select-candidate/${c.candidate_id}`, {}, axiosConfig);
       closeSelectModal();
       fetchCandidates();
-    } catch {
-      alert('Failed to select candidate. Please try again.');
+      showToast(`🏆 ${c.name} selected successfully!`);
+    } catch (err) {
+      const msg = err.response?.data?.detail || 'Failed to select candidate. Please try again.';
+      showToast(msg, 'error');
     }
   };
 
   const handleUndo = async (candidate, from) => {
-    if (!window.confirm(`Move "${candidate.name}" back to Pending from ${from === 'selected' ? 'Selected' : 'Rejected'}?`)) return;
+    const fromLabel = from === 'selected' ? 'Selected' : 'Rejected';
+    const yes = await askConfirm({
+      icon: '↩️',
+      title: `Move "${candidate.name}" back to Pending?`,
+      message: `This will undo the ${fromLabel} verdict and return the candidate to the Pending Interviews list.`,
+      confirmLabel: 'Yes, Undo',
+      variant: 'warning'
+    });
+    if (!yes) return;
     try {
       await axios.post(`${BASE_URL}/undo-candidate-verdict/${candidate.candidate_id}`, {}, axiosConfig);
       fetchCandidates();
-    } catch { alert('Failed to undo. Please try again.'); }
+      showToast(`${candidate.name} moved back to Pending.`);
+    } catch (err) {
+      const msg = err.response?.data?.detail || 'Failed to undo. Please try again.';
+      showToast(msg, 'error');
+    }
   };
 
   const formatDateTime = (dt) => {
     if (!dt) return '—';
-    return new Date(dt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    return new Date(dt).toLocaleString('en-IN', {
+      day: '2-digit', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit'
+    });
   };
 
-  // ── Section renderers ──────────────────────────────────────────────────────
-  // Each section is a standalone render function so the tab panel can mount
-  // only the active one. Keeps tab switching snappy on large datasets.
-
+  // ── Section renderers ─────────────────────────────────────────────────────────
   const renderPendingSection = () => (
     pending.length === 0 ? (
       <p className="empty-msg">No pending candidates{selectedRoleId ? ' for this role' : ''}.</p>
@@ -406,7 +501,7 @@ export default function ScheduleInterview() {
           <tr>
             <th>Candidate ID</th><th>Name</th><th>Applied Role</th>
             <th>Round Scheduled</th><th>Rounds Completed</th>
-            <th>Interviewer</th><th>Date & Time</th><th>Meeting Link</th>
+            <th>Interviewer</th><th>Date &amp; Time</th><th>Meeting Link</th>
             <th>Edit</th><th>Cancel</th>
           </tr>
         </thead>
@@ -499,7 +594,9 @@ export default function ScheduleInterview() {
                     target="_blank" rel="noopener noreferrer" className="resume-link">View PDF</a>
                 </td>
                 <td>
-                  <button className="btn-undo" onClick={() => handleUndo(c, 'selected')} title="Move back to Pending">↩️ Undo</button>
+                  <button className="btn-undo" onClick={() => handleUndo(c, 'selected')} title="Move back to Pending">
+                    ↩️ Undo
+                  </button>
                 </td>
               </tr>
             );
@@ -555,9 +652,7 @@ export default function ScheduleInterview() {
     )
   );
 
-  // ── Tab config ─────────────────────────────────────────────────────────────
-  // Single source of truth for the four tabs. Each entry knows its icon,
-  // label, live count, and how to render its panel content.
+  // ── Tab config ────────────────────────────────────────────────────────────────
   const TABS = [
     { key: 'pending',   icon: '📋', label: 'Pending',   count: pending.length,       render: renderPendingSection   },
     { key: 'scheduled', icon: '📅', label: 'Scheduled', count: scheduledRows.length, render: renderScheduledSection },
@@ -566,12 +661,20 @@ export default function ScheduleInterview() {
   ];
 
   const currentTab = TABS.find(t => t.key === activeTab) || TABS[0];
-
-  // Sub-label for the panel header (e.g. "Pending Candidates", "Scheduled Interviews")
   const sectionSuffix = currentTab.key === 'scheduled' ? 'Interviews' : 'Candidates';
 
   return (
     <div className="schedule-page">
+
+      {/* ── Toast notifications (top-right) ──────────────────────────────── */}
+      <Toast toasts={toasts} />
+
+      {/* ── Confirmation dialog ───────────────────────────────────────────── */}
+      <ConfirmDialog
+        config={confirmConfig}
+        onConfirm={handleConfirmYes}
+        onCancel={handleConfirmNo}
+      />
 
       <div className="schedule-header">
         <h2>Schedule Interviews</h2>
@@ -583,11 +686,7 @@ export default function ScheduleInterview() {
         <select
           className="role-select"
           value={selectedRoleId}
-          onChange={e => {
-            setSelectedRoleId(e.target.value);
-            // Reset to first tab so HR isn't stuck on a tab that may now be empty
-            setActiveTab('pending');
-          }}
+          onChange={e => { setSelectedRoleId(e.target.value); setActiveTab('pending'); }}
         >
           <option value="">— All Roles —</option>
           {openRoles.map(r => (
@@ -596,9 +695,6 @@ export default function ScheduleInterview() {
         </select>
       </div>
 
-      {/* ── Tab strip ───────────────────────────────────────────────────────
-          Custom-styled to match the existing schedule-page aesthetic.
-          No Bootstrap dependency — styles live in ScheduleInterview.css. */}
       <div className="schedule-tabs">
         {TABS.map(t => (
           <button
@@ -615,7 +711,6 @@ export default function ScheduleInterview() {
         ))}
       </div>
 
-      {/* ── Active tab panel ─────────────────────────────────────────────── */}
       <section className={`section-card ${currentTab.key === 'selected' ? 'selected-section' : currentTab.key === 'rejected' ? 'rejected-section' : ''}`}>
         <div className="section-header">
           <span className="section-icon">{currentTab.icon}</span>
@@ -627,7 +722,7 @@ export default function ScheduleInterview() {
         {currentTab.render()}
       </section>
 
-      {/* ── Modal: Schedule Next Round ─────────────────────────────────────── */}
+      {/* ── Modal: Schedule Next Round ────────────────────────────────────── */}
       {modal.open && modal.candidate && (
         <div className="modal-backdrop" onClick={closeModal}>
           <div className="modal-box" onClick={e => e.stopPropagation()}>
@@ -650,7 +745,7 @@ export default function ScheduleInterview() {
                 <small className="field-hint">Must match an existing Interviewer account email</small>
               </div>
               <div className="field-group">
-                <label>Date & Time *</label>
+                <label>Date &amp; Time *</label>
                 <input type="datetime-local" value={form.scheduled_datetime}
                   min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
                   onChange={e => setForm({ ...form, scheduled_datetime: e.target.value })} />
@@ -673,7 +768,7 @@ export default function ScheduleInterview() {
         </div>
       )}
 
-      {/* ── Modal: Edit Schedule ────────────────────────────────────────────── */}
+      {/* ── Modal: Edit Schedule ──────────────────────────────────────────── */}
       {editModal.open && editModal.candidate && (
         <div className="modal-backdrop" onClick={closeEditModal}>
           <div className="modal-box" onClick={e => e.stopPropagation()}>
@@ -696,7 +791,7 @@ export default function ScheduleInterview() {
                 <small className="field-hint">Must match an existing Interviewer account email</small>
               </div>
               <div className="field-group">
-                <label>Date & Time *</label>
+                <label>Date &amp; Time *</label>
                 <input type="datetime-local" value={editForm.scheduled_datetime}
                   min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
                   onChange={e => setEditForm({ ...editForm, scheduled_datetime: e.target.value })} />
@@ -719,7 +814,7 @@ export default function ScheduleInterview() {
         </div>
       )}
 
-      {/* ── Modal: Select Candidate ──────────────────────────────────────── */}
+      {/* ── Modal: Select Candidate ───────────────────────────────────────── */}
       {selectModal.open && selectModal.candidate && (() => {
         const c          = selectModal.candidate;
         const interviews = [...(c.interviews || [])].sort((a, b) => a.round - b.round);
@@ -739,7 +834,6 @@ export default function ScheduleInterview() {
                 </div>
                 <button className="modal-close" onClick={closeSelectModal}>✕</button>
               </div>
-
               <div className="modal-body">
                 <table className="select-rounds-table">
                   <thead>
@@ -774,7 +868,6 @@ export default function ScheduleInterview() {
                     })}
                   </tbody>
                 </table>
-
                 <div className="select-summary">
                   <div className="select-overall">
                     <span className="select-overall-label">Overall Average:</span>
@@ -785,7 +878,6 @@ export default function ScheduleInterview() {
                   {verdict && <span className={`verdict-tag ${verdict.cls}`}>{verdict.label}</span>}
                 </div>
               </div>
-
               <div className="modal-footer">
                 <button className="btn-cancel" onClick={closeSelectModal}>Cancel</button>
                 <button className="btn-confirm btn-select-confirm" onClick={handleSelectCandidate}>
@@ -797,7 +889,7 @@ export default function ScheduleInterview() {
         );
       })()}
 
-      {/* ── Modal: Interviewers per Round ──────────────────────────────────── */}
+      {/* ── Modal: Interviewers per Round ─────────────────────────────────── */}
       {interviewersModal.open && interviewersModal.candidate && (() => {
         const c = interviewersModal.candidate;
         const interviews = [...(c.interviews || [])].sort((a, b) => a.round - b.round);
@@ -832,7 +924,9 @@ export default function ScheduleInterview() {
                       {interviews.map((iv, idx) => {
                         const roundAvg = getRoundAvg(c.interviews, iv.round);
                         const dt = iv.datetime
-                          ? new Date(iv.datetime).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                          ? new Date(iv.datetime).toLocaleDateString('en-IN', {
+                              day: '2-digit', month: 'short', year: 'numeric'
+                            })
                           : '—';
                         return (
                           <tr key={idx}>
