@@ -8,7 +8,6 @@ const NGROK_HEADERS = {
 };
 
 // ─── Rich Text Renderer ───────────────────────────────────────────────────────
-// Converts markdown-style text into formatted JSX without any external library
 const RichText = ({ text }) => {
     if (!text) return null;
 
@@ -19,14 +18,12 @@ const RichText = ({ text }) => {
     while (i < lines.length) {
         const line = lines[i];
 
-        // Empty line → spacer
         if (line.trim() === '') {
             elements.push(<div key={i} className="rt-spacer" />);
             i++;
             continue;
         }
 
-        // Headings
         if (line.startsWith('### ')) {
             elements.push(<h4 key={i} className="rt-h3">{parseInline(line.slice(4))}</h4>);
             i++;
@@ -43,7 +40,6 @@ const RichText = ({ text }) => {
             continue;
         }
 
-        // Bullet list: * or -
         if (line.match(/^[*-] /)) {
             const listItems = [];
             while (i < lines.length && lines[i].match(/^[*-] /)) {
@@ -54,8 +50,6 @@ const RichText = ({ text }) => {
             continue;
         }
 
-        // Numbered list — use explicit counter so display is always correct
-        // even if the LLM repeats "1." multiple times
         if (line.match(/^\d+\. /)) {
             const listItems = [];
             let counter = 1;
@@ -69,7 +63,6 @@ const RichText = ({ text }) => {
             continue;
         }
 
-        // Normal paragraph
         elements.push(<p key={i} className="rt-p">{parseInline(line)}</p>);
         i++;
     }
@@ -77,10 +70,8 @@ const RichText = ({ text }) => {
     return <div className="rich-text">{elements}</div>;
 };
 
-// Parses inline markdown: **bold**, `code`, *italic*
 const parseInline = (text) => {
     const parts = [];
-    // Order matters: links first, then bold, code, italic, bare URLs
     const regex = /(\[(.+?)\]\((https?:\/\/[^\s)]+)\)|\*\*(.+?)\*\*|`(.+?)`|\*(.+?)\*|(https?:\/\/[^\s<>"')\]]+))/g;
     let last = 0;
     let match;
@@ -91,7 +82,6 @@ const parseInline = (text) => {
         }
 
         if (match[0].startsWith('[')) {
-            // Markdown link: [label](url)
             parts.push(
                 <a key={match.index} href={match[3]} target="_blank" rel="noopener noreferrer" className="rt-link">
                     {match[2]}
@@ -104,7 +94,6 @@ const parseInline = (text) => {
         } else if (match[0].startsWith('*')) {
             parts.push(<em key={match.index}>{match[6]}</em>);
         } else if (match[7]) {
-            // Bare URL: https://github.com/...
             parts.push(
                 <a key={match.index} href={match[7]} target="_blank" rel="noopener noreferrer" className="rt-link">
                     {match[7]}
@@ -123,38 +112,102 @@ const parseInline = (text) => {
 };
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── Toast Component ───────────────────────────────────────────────────────────
+// Positioned inside chat-main (right side) so it doesn't overlap the dark sidebar
+function Toast({ toasts }) {
+    return (
+        <div className="rag-toast-container">
+            {toasts.map(t => (
+                <div key={t.id} className={`rag-toast rag-toast--${t.type}`}>
+                    <span className="rag-toast-icon">{t.type === 'success' ? '✓' : '✕'}</span>
+                    <span className="rag-toast-msg">{t.msg}</span>
+                </div>
+            ))}
+        </div>
+    );
+}
+
+// ── Confirmation Dialog ───────────────────────────────────────────────────────
+function ConfirmDialog({ config, onConfirm, onCancel }) {
+    if (!config) return null;
+    return (
+        <div className="rag-confirm-overlay" onClick={onCancel}>
+            <div className="rag-confirm-box" onClick={e => e.stopPropagation()}>
+                <div className="rag-confirm-icon">{config.icon || '❓'}</div>
+                <h4 className="rag-confirm-title">{config.title}</h4>
+                <p className="rag-confirm-msg">{config.message}</p>
+                <div className="rag-confirm-actions">
+                    <button className="rag-confirm-btn rag-confirm-btn--cancel" onClick={onCancel}>
+                        Cancel
+                    </button>
+                    <button
+                        className={`rag-confirm-btn rag-confirm-btn--ok rag-confirm-btn--${config.variant || 'danger'}`}
+                        onClick={onConfirm}
+                    >
+                        {config.confirmLabel || 'Yes'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 const RagChat = () => {
-    const [threads, setThreads] = useState([]);
+    const [threads, setThreads]               = useState([]);
     const [activeThreadId, setActiveThreadId] = useState(null);
-    const [messages, setMessages] = useState([]);
-    const [input, setInput] = useState('');
-    const [loading, setLoading] = useState(false);
+    const [messages, setMessages]             = useState([]);
+    const [input, setInput]                   = useState('');
+    const [loading, setLoading]               = useState(false);
 
-    // Rename state
     const [renamingThreadId, setRenamingThreadId] = useState(null);
-    const [renameValue, setRenameValue] = useState('');
+    const [renameValue, setRenameValue]           = useState('');
     const renameInputRef = useRef(null);
-    const chatEndRef = useRef(null);
+    const chatEndRef     = useRef(null);
 
-
-    // Edit message state
     const [editingIndex, setEditingIndex] = useState(null);
-    const [editValue, setEditValue] = useState('');
+    const [editValue, setEditValue]       = useState('');
+    const [copiedIndex, setCopiedIndex]   = useState(null);
 
-    // Copy feedback state
-    const [copiedIndex, setCopiedIndex] = useState(null);
-    const user = JSON.parse(localStorage.getItem('user')) || {};
+    const user      = JSON.parse(localStorage.getItem('user')) || {};
     const userEmail = user.email || user.user_email || "admin@company.com";
+
+    // ── Toast state ──────────────────────────────────────────────────────────
+    const [toasts, setToasts] = useState([]);
+
+    const showToast = (msg, type = 'success') => {
+        const id = Date.now();
+        setToasts(prev => [...prev, { id, msg, type }]);
+        setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500);
+    };
+
+    // ── Confirm dialog state ─────────────────────────────────────────────────
+    const [confirmConfig,   setConfirmConfig]   = useState(null);
+    const [confirmCallback, setConfirmCallback] = useState(null);
+
+    const askConfirm = (config) =>
+        new Promise((resolve) => {
+            setConfirmConfig(config);
+            setConfirmCallback(() => resolve);
+        });
+
+    const handleConfirmYes = () => {
+        setConfirmConfig(null);
+        confirmCallback && confirmCallback(true);
+        setConfirmCallback(null);
+    };
+
+    const handleConfirmNo = () => {
+        setConfirmConfig(null);
+        confirmCallback && confirmCallback(false);
+        setConfirmCallback(null);
+    };
 
     const scrollToBottom = () => {
         chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     };
 
-    useEffect(() => {
-        scrollToBottom();
-    }, [messages]);
+    useEffect(() => { scrollToBottom(); }, [messages]);
 
-    // Focus rename input when it appears
     useEffect(() => {
         if (renamingThreadId && renameInputRef.current) {
             renameInputRef.current.focus();
@@ -162,7 +215,7 @@ const RagChat = () => {
         }
     }, [renamingThreadId]);
 
-    // ── Fetch sidebar threads ──────────────────────────────────────────────
+    // ── Fetch sidebar threads ─────────────────────────────────────────────────
     const fetchThreads = useCallback(async () => {
         if (!userEmail) return;
         try {
@@ -170,19 +223,15 @@ const RagChat = () => {
                 headers: { ...NGROK_HEADERS }
             });
             const data = await res.json();
-            if (Array.isArray(data)) {
-                setThreads(data);
-            }
+            if (Array.isArray(data)) setThreads(data);
         } catch (err) {
             console.error("❌ Failed to fetch threads:", err);
         }
     }, [userEmail]);
 
-    useEffect(() => {
-        fetchThreads();
-    }, [fetchThreads]);
+    useEffect(() => { fetchThreads(); }, [fetchThreads]);
 
-    // ── Load selected thread history ───────────────────────────────────────
+    // ── Load selected thread history ──────────────────────────────────────────
     useEffect(() => {
         const loadHistory = async () => {
             if (activeThreadId && !activeThreadId.toString().startsWith('temp_')) {
@@ -194,13 +243,14 @@ const RagChat = () => {
                     setMessages(data);
                 } catch (err) {
                     console.error("❌ Failed to load history:", err);
+                    showToast('Failed to load chat history.', 'error');
                 }
             }
         };
         loadHistory();
-    }, [activeThreadId]);
+    }, [activeThreadId]); // eslint-disable-line
 
-    // ── Streaming chat handler ─────────────────────────────────────────────
+    // ── Streaming chat handler ────────────────────────────────────────────────
     const handleSend = async () => {
         if (!input.trim() || loading) return;
 
@@ -260,12 +310,13 @@ const RagChat = () => {
                 ...prev.slice(0, -1),
                 { sender: 'bot', text: "Connection lost. Please check if Google Colab is running." }
             ]);
+            showToast('Connection lost. Check if Colab is running.', 'error');
         } finally {
             setLoading(false);
         }
     };
 
-    // ── Rename handlers ────────────────────────────────────────────────────
+    // ── Rename handlers ───────────────────────────────────────────────────────
     const startRename = (e, thread) => {
         e.stopPropagation();
         setRenamingThreadId(thread.id);
@@ -274,10 +325,7 @@ const RagChat = () => {
 
     const submitRename = async (threadId) => {
         const trimmed = renameValue.trim();
-        if (!trimmed) {
-            setRenamingThreadId(null);
-            return;
-        }
+        if (!trimmed) { setRenamingThreadId(null); return; }
 
         // Optimistically update sidebar
         setThreads(prev =>
@@ -285,18 +333,16 @@ const RagChat = () => {
         );
         setRenamingThreadId(null);
 
-        // Persist to backend
         try {
             await fetch(`${BASE_URL}/hr/threads/${threadId}/rename`, {
                 method: 'PATCH',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...NGROK_HEADERS
-                },
+                headers: { 'Content-Type': 'application/json', ...NGROK_HEADERS },
                 body: JSON.stringify({ title: trimmed })
             });
+            showToast('Chat renamed successfully.');
         } catch (err) {
             console.error("❌ Failed to rename thread:", err);
+            showToast('Failed to rename chat.', 'error');
             fetchThreads(); // revert on failure
         }
     };
@@ -306,10 +352,19 @@ const RagChat = () => {
         if (e.key === 'Escape') setRenamingThreadId(null);
     };
 
-    // ── Delete handler ─────────────────────────────────────────────────────
+    // ── Delete handler ────────────────────────────────────────────────────────
     const handleDeleteThread = async (e, threadId) => {
         e.stopPropagation();
-        if (!window.confirm('Delete this conversation? This cannot be undone.')) return;
+
+        const threadTitle = threads.find(t => t.id === threadId)?.title || 'this conversation';
+        const yes = await askConfirm({
+            icon: '🗑️',
+            title: 'Delete this conversation?',
+            message: `"${threadTitle}" will be permanently removed. This cannot be undone.`,
+            confirmLabel: 'Yes, Delete',
+            variant: 'danger'
+        });
+        if (!yes) return;
 
         // Optimistically remove from sidebar
         setThreads(prev => prev.filter(t => t.id !== threadId));
@@ -320,20 +375,20 @@ const RagChat = () => {
             setMessages([]);
         }
 
-        // Persist to backend
         try {
             await fetch(`${BASE_URL}/hr/threads/${threadId}`, {
                 method: 'DELETE',
                 headers: { ...NGROK_HEADERS }
             });
+            showToast('Conversation deleted.');
         } catch (err) {
             console.error("❌ Failed to delete thread:", err);
+            showToast('Failed to delete conversation.', 'error');
             fetchThreads(); // revert on failure
         }
     };
 
-
-    // ── Edit handlers ─────────────────────────────────────────────────────
+    // ── Edit handlers ─────────────────────────────────────────────────────────
     const startEdit = (index, text) => {
         setEditingIndex(index);
         setEditValue(text);
@@ -341,8 +396,6 @@ const RagChat = () => {
 
     const submitEdit = async () => {
         if (!editValue.trim() || editingIndex === null) return;
-
-        // Replace the user message and remove all subsequent messages
         const updatedMessages = messages.slice(0, editingIndex);
         setMessages(updatedMessages);
         setEditingIndex(null);
@@ -350,7 +403,7 @@ const RagChat = () => {
         setEditValue('');
     };
 
-    // ── Copy handler ───────────────────────────────────────────────────────
+    // ── Copy handler ──────────────────────────────────────────────────────────
     const handleCopy = async (index, text) => {
         try {
             await navigator.clipboard.writeText(text);
@@ -358,8 +411,10 @@ const RagChat = () => {
             setTimeout(() => setCopiedIndex(null), 2000);
         } catch (err) {
             console.error('❌ Copy failed:', err);
+            showToast('Failed to copy text.', 'error');
         }
     };
+
     const startNewChat = () => {
         setActiveThreadId(`temp_${Date.now()}`);
         setMessages([]);
@@ -367,6 +422,14 @@ const RagChat = () => {
 
     return (
         <div className="rag-layout">
+
+            {/* ── Confirmation dialog (full-screen overlay) ─────────────────── */}
+            <ConfirmDialog
+                config={confirmConfig}
+                onConfirm={handleConfirmYes}
+                onCancel={handleConfirmNo}
+            />
+
             {/* SIDEBAR */}
             <div className="chat-sidebar">
                 <button className="new-chat-btn" onClick={startNewChat}>
@@ -425,6 +488,10 @@ const RagChat = () => {
 
             {/* MAIN CHAT AREA */}
             <div className="chat-main">
+
+                {/* ── Toast notifications (top-right of chat area) ─────────── */}
+                <Toast toasts={toasts} />
+
                 <div className="chat-window">
                     {messages.length === 0 && !loading ? (
                         <div className="welcome-screen">
@@ -438,7 +505,6 @@ const RagChat = () => {
                                 <div key={index} className={`message-bubble ${msg.sender}`}>
                                     <div className="avatar">{msg.sender === 'user' ? 'HR' : ' '}</div>
                                     <div className="message-content">
-                                        {/* Message text or edit input */}
                                         {msg.sender === 'user' && editingIndex === index ? (
                                             <div className="edit-area">
                                                 <textarea
@@ -464,7 +530,6 @@ const RagChat = () => {
                                                 }
                                             </div>
                                         )}
-                                        {/* Action buttons — shown on hover */}
                                         {editingIndex !== index && (
                                             <div className="msg-actions">
                                                 {msg.sender === 'user' && (
