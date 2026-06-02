@@ -331,3 +331,165 @@ body { font-family: 'DM Sans', sans-serif; }
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* ═════════════════════════════════════════════════════════════════════════
+   APPEND THESE RULES TO THE END OF YOUR EXISTING FitmentScorer.css
+   (new classes only — nothing here overrides your current styles)
+   ═════════════════════════════════════════════════════════════════════════ */
+
+/* ── Tabs ──────────────────────────────────────────────────────────────── */
+.fs-tabs {
+  display: flex;
+  gap: 6px;
+  margin: 0.4rem 0 1rem;
+  border-bottom: 2px solid #eef2f7;
+}
+.fs-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  color: #5b6577;
+  font-size: 0.92rem;
+  font-weight: 600;
+  padding: 0.6rem 1rem;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color .15s ease, border-color .15s ease;
+}
+.fs-tab:hover { color: #0055ff; }
+.fs-tab.active {
+  color: #0055ff;
+  border-bottom-color: #0055ff;
+}
+.fs-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  background: #eef2f7;
+  color: #5b6577;
+}
+.fs-tab.active .fs-tab-count {
+  background: #0055ff;
+  color: #fff;
+}
+
+/* ── Toolbar (search + count) ──────────────────────────────────────────── */
+.fs-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.9rem;
+  flex-wrap: wrap;
+}
+.fs-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  max-width: 360px;
+  background: #f7f9fc;
+  border: 1px solid #e3e9f4;
+  border-radius: 10px;
+  padding: 0 0.6rem;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.fs-search-wrap:focus-within {
+  border-color: #0055ff;
+  box-shadow: 0 0 0 3px rgba(0,85,255,.12);
+}
+.fs-search-icon { font-size: 0.9rem; opacity: .7; }
+.fs-search-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 0.55rem 0.5rem;
+  font-size: 0.9rem;
+  color: #1f2937;
+}
+.fs-search-clear {
+  border: none;
+  background: transparent;
+  color: #9aa3b2;
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 2px 4px;
+  border-radius: 6px;
+  transition: color .15s ease, background .15s ease;
+}
+.fs-search-clear:hover { color: #ef4444; background: #fef2f2; }
+
+/* ── Interview status pill ─────────────────────────────────────────────── */
+.fs-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.fs-status--pending {
+  color: #92400e;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+}
+.fs-status--done {
+  color: #065f46;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+}
+
+/* ── Toast — top-right notification (matches the HR portal pattern) ────── */
+.fs-toast-container {
+  position: fixed;
+  top: 1.25rem;
+  right: 1.25rem;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+.fs-toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 260px;
+  max-width: 400px;
+  padding: 0.75rem 1.1rem;
+  border-radius: 10px;
+  font-size: 0.92rem;
+  font-weight: 500;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.13);
+  animation: fs-toast-in 0.28s ease;
+  pointer-events: auto;
+}
+.fs-toast--success {
+  background: #ecfdf5;
+  color: #065f46;
+  border-left: 4px solid #10b981;
+}
+.fs-toast--error {
+  background: #fef2f2;
+  color: #991b1b;
+  border-left: 4px solid #ef4444;
+}
+.fs-toast-icon { font-size: 1.1rem; flex-shrink: 0; }
+.fs-toast-msg { line-height: 1.4; }
+
+@keyframes fs-toast-in {
+  from { opacity: 0; transform: translateX(40px); }
+  to   { opacity: 1; transform: translateX(0);    }
+}
