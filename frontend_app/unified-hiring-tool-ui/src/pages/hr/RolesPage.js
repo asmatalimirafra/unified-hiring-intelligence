@@ -50,40 +50,102 @@ const formatTimestamp = (ts) => {
   });
 };
 
+// ── Toast Component ───────────────────────────────────────────────────────────
+// Appears top-right, auto-dismisses after 3.5s.
+// type: 'success' | 'error'
+function Toast({ toasts }) {
+  return (
+    <div className="rp-toast-container">
+      {toasts.map(t => (
+        <div key={t.id} className={`rp-toast rp-toast--${t.type}`}>
+          <span className="rp-toast-icon">{t.type === 'success' ? '✓' : '✕'}</span>
+          <span className="rp-toast-msg">{t.msg}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Confirmation Dialog ───────────────────────────────────────────────────────
+// Replaces window.confirm — shows a centered modal with Yes/Cancel buttons.
+function ConfirmDialog({ config, onConfirm, onCancel }) {
+  if (!config) return null;
+  return (
+    <div className="rp-confirm-overlay" onClick={onCancel}>
+      <div className="rp-confirm-box" onClick={e => e.stopPropagation()}>
+        <div className="rp-confirm-icon">{config.icon || '❓'}</div>
+        <h4 className="rp-confirm-title">{config.title}</h4>
+        <p className="rp-confirm-msg">{config.message}</p>
+        <div className="rp-confirm-actions">
+          <button className="rp-confirm-btn rp-confirm-btn--cancel" onClick={onCancel}>
+            Cancel
+          </button>
+          <button
+            className={`rp-confirm-btn rp-confirm-btn--ok rp-confirm-btn--${config.variant || 'danger'}`}
+            onClick={onConfirm}
+          >
+            {config.confirmLabel || 'Yes'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RolesPage() {
   const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
   const hrId = storedUser.user_id || null;
 
-  const [openRoles, setOpenRoles] = useState([]);
+  const [openRoles, setOpenRoles]     = useState([]);
   const [closedRoles, setClosedRoles] = useState([]);
-  const [selectedJD, setSelectedJD] = useState('');
-  const [showModal, setShowModal] = useState(false);
+  const [selectedJD, setSelectedJD]   = useState('');
+  const [showModal, setShowModal]     = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-
-  // Active tab for Open vs Closed positions. Defaults to 'open' since that's
-  // where HR spends most of their time managing active hiring.
-  const [activeTab, setActiveTab] = useState('open');
+  const [activeTab, setActiveTab]     = useState('open');
 
   const [editVacancyData, setEditVacancyData] = useState({
-    role_id: '',
-    role: '',
-    positions: 0,
-    jd_text: ''
+    role_id: '', role: '', positions: 0, jd_text: ''
   });
 
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newRoleData, setNewRoleData] = useState({
-    role: '',
-    positions: 1,
-    jd_text: ''
-  });
-  const [submitting, setSubmitting] = useState(false);
+  const [newRoleData, setNewRoleData]   = useState({ role: '', positions: 1, jd_text: '' });
+  const [submitting, setSubmitting]     = useState(false);
+
+  // ── Toast state ─────────────────────────────────────────────────────────────
+  const [toasts, setToasts] = useState([]);
+
+  const showToast = (msg, type = 'success') => {
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, msg, type }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500);
+  };
+
+  // ── Confirm dialog state ─────────────────────────────────────────────────────
+  const [confirmConfig, setConfirmConfig]   = useState(null);
+  const [confirmCallback, setConfirmCallback] = useState(null);
+
+  // Ask a yes/no question — returns a promise that resolves true/false
+  const askConfirm = (config) =>
+    new Promise((resolve) => {
+      setConfirmConfig(config);
+      setConfirmCallback(() => resolve);
+    });
+
+  const handleConfirmYes = () => {
+    setConfirmConfig(null);
+    confirmCallback && confirmCallback(true);
+    setConfirmCallback(null);
+  };
+
+  const handleConfirmNo = () => {
+    setConfirmConfig(null);
+    confirmCallback && confirmCallback(false);
+    setConfirmCallback(null);
+  };
 
   const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 
-  useEffect(() => {
-    fetchRoles();
-  }, []); // eslint-disable-line
+  useEffect(() => { fetchRoles(); }, []); // eslint-disable-line
 
   const fetchRoles = async () => {
     try {
@@ -97,6 +159,7 @@ function RolesPage() {
       setClosedRoles(roles.filter(role => role.status === "closed"));
     } catch (err) {
       console.error('Failed to fetch roles:', err);
+      showToast('Failed to fetch roles. Check your connection.', 'error');
     }
   };
 
@@ -106,31 +169,46 @@ function RolesPage() {
   };
 
   const handleClose = async (role_id) => {
-    if (window.confirm('Are you sure you want to close this position?')) {
-      try {
-        await axios.post(`${BASE_URL}/close-role/${role_id}`);
-        fetchRoles();
-        alert("Role closed successfully.");
-      } catch (err) {
-        console.error('Error closing role:', err);
-        alert("Failed to close role. Please check the backend connection.");
-      }
+    const yes = await askConfirm({
+      icon: '📁',
+      title: 'Close this position?',
+      message: 'This role will be moved to Closed Positions. Candidates already in the pipeline will not be affected.',
+      confirmLabel: 'Yes, Close',
+      variant: 'warning'
+    });
+    if (!yes) return;
+    try {
+      await axios.post(`${BASE_URL}/close-role/${role_id}`, {}, {
+        headers: { "ngrok-skip-browser-warning": "true" }
+      });
+      fetchRoles();
+      showToast('Role closed successfully.');
+    } catch (err) {
+      console.error('Error closing role:', err);
+      const msg = err.response?.data?.detail || 'Failed to close role. Please check the backend connection.';
+      showToast(msg, 'error');
     }
   };
 
   const handleDelete = async (role_id) => {
-    if (window.confirm('Are you sure you want to delete this role?')) {
-      try {
-        await axios.delete(`${BASE_URL}/delete-role/${role_id}`, {
-          headers: { "ngrok-skip-browser-warning": "true" }
-        });
-        fetchRoles();
-        alert('Role deleted successfully.');
-      } catch (err) {
-        console.error('Error deleting role:', err);
-        const msg = err.response?.data?.detail || 'Failed to delete role. Please try again.';
-        alert(`❌ ${msg}`);
-      }
+    const yes = await askConfirm({
+      icon: '🗑️',
+      title: 'Delete this role?',
+      message: 'This action is permanent and cannot be undone. The role and its JD will be removed.',
+      confirmLabel: 'Yes, Delete',
+      variant: 'danger'
+    });
+    if (!yes) return;
+    try {
+      await axios.delete(`${BASE_URL}/delete-role/${role_id}`, {
+        headers: { "ngrok-skip-browser-warning": "true" }
+      });
+      fetchRoles();
+      showToast('Role deleted successfully.');
+    } catch (err) {
+      console.error('Error deleting role:', err);
+      const msg = err.response?.data?.detail || 'Failed to delete role. Please try again.';
+      showToast(msg, 'error');
     }
   };
 
@@ -150,23 +228,38 @@ function RolesPage() {
         role: editVacancyData.role,
         positions: Number(editVacancyData.positions),
         job_description: editVacancyData.jd_text
+      }, {
+        headers: { "ngrok-skip-browser-warning": "true" }
       });
       setShowEditModal(false);
       fetchRoles();
-      alert("Role updated successfully.");
+      showToast('Role updated successfully.');
     } catch (err) {
       console.error('Failed to update role:', err);
-      alert("Failed to update role. Please check the backend connection.");
+      const msg = err.response?.data?.detail || 'Failed to update role. Please check the backend connection.';
+      showToast(msg, 'error');
     }
   };
 
   const handleReopenRole = async (roleId) => {
+    const yes = await askConfirm({
+      icon: '📂',
+      title: 'Reopen this position?',
+      message: 'This role will be moved back to Open Positions and become available for new candidates.',
+      confirmLabel: 'Yes, Reopen',
+      variant: 'success'
+    });
+    if (!yes) return;
     try {
-      await axios.put(`${BASE_URL}/update-role/${roleId}`, { status: 'open' });
+      await axios.put(`${BASE_URL}/update-role/${roleId}`, { status: 'open' }, {
+        headers: { "ngrok-skip-browser-warning": "true" }
+      });
       fetchRoles();
-      alert("Role reopened successfully.");
+      showToast('Role reopened successfully.');
     } catch (err) {
       console.error('Failed to reopen role:', err);
+      const msg = err.response?.data?.detail || 'Failed to reopen role.';
+      showToast(msg, 'error');
     }
   };
 
@@ -185,25 +278,24 @@ function RolesPage() {
         headers: { "ngrok-skip-browser-warning": "true" }
       });
       const newId = res.data?.role_id;
-      alert(`Role added successfully! Role ID: ${newId}`);
       setShowAddModal(false);
       setNewRoleData({ role: '', positions: 1, jd_text: '' });
-      // After adding a new role, jump to Open tab so HR sees it immediately
       setActiveTab('open');
       fetchRoles();
+      showToast(`Role added successfully! Role ID: ${newId}`);
     } catch (err) {
       console.error('Error adding role:', err);
       const msg = err.response?.data?.detail || 'Failed to add role. Check console for details.';
-      alert(`❌ ${msg}`);
+      showToast(msg, 'error');
     } finally {
       setSubmitting(false);
     }
   };
 
-  // ── Vacancy cell ──────────────────────────────────────────────────────────
+  // ── Vacancy cell ─────────────────────────────────────────────────────────────
   const renderVacancies = (role) => {
-    const total = role.positions ?? 0;
-    const left  = role.vacancies_left !== undefined ? role.vacancies_left : total;
+    const total    = role.positions ?? 0;
+    const left     = role.vacancies_left !== undefined ? role.vacancies_left : total;
     const allFilled = left === 0 && total > 0;
     return (
       <span
@@ -311,8 +403,6 @@ function RolesPage() {
     )
   );
 
-  // ── Tab config ─────────────────────────────────────────────────────────────
-  // Two tabs only: Open and Closed positions. Each tab has its own renderer.
   const TABS = [
     { key: 'open',   icon: '📂', label: 'Open Positions',   count: openRoles.length,   render: () => renderTable(openRoles, false) },
     { key: 'closed', icon: '📁', label: 'Closed Positions', count: closedRoles.length, render: () => renderTable(closedRoles, true) },
@@ -322,6 +412,17 @@ function RolesPage() {
 
   return (
     <div className="page-wrapper">
+
+      {/* ── Toast notifications (top-right) ──────────────────────────────── */}
+      <Toast toasts={toasts} />
+
+      {/* ── Confirmation dialog ───────────────────────────────────────────── */}
+      <ConfirmDialog
+        config={confirmConfig}
+        onConfirm={handleConfirmYes}
+        onCancel={handleConfirmNo}
+      />
+
       <div className="d-flex justify-content-between align-items-center mb-4">
         <h1>Role Management</h1>
         <button className="btn btn-success" onClick={() => setShowAddModal(true)}>
@@ -329,9 +430,6 @@ function RolesPage() {
         </button>
       </div>
 
-      {/* ── Tab strip ───────────────────────────────────────────────────────
-          Same styling pattern as Schedule / ViewCandidates / Feedback pages
-          for visual consistency across the HR portal. */}
       <div className="roles-tabs">
         {TABS.map(t => (
           <button
@@ -346,7 +444,6 @@ function RolesPage() {
         ))}
       </div>
 
-      {/* ── Active tab panel ─────────────────────────────────────────────── */}
       <div className="roles-section">
         <h4>{currentTab.icon} {currentTab.label}</h4>
         {currentTab.render()}
@@ -468,7 +565,6 @@ function RolesPage() {
                   >
                     ℹ️ Role ID will be assigned automatically.
                   </div>
-
                   <div className="mb-3">
                     <label className="form-label">Role Name</label>
                     <input
