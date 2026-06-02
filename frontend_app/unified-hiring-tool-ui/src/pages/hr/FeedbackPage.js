@@ -13,7 +13,46 @@ import './FeedbackPage.css';
 const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 const axiosConfig = { headers: { 'ngrok-skip-browser-warning': 'true' } };
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// ── Toast Component ───────────────────────────────────────────────────────────
+function Toast({ toasts }) {
+  return (
+    <div className="fp-toast-container">
+      {toasts.map(t => (
+        <div key={t.id} className={`fp-toast fp-toast--${t.type}`}>
+          <span className="fp-toast-icon">{t.type === 'success' ? '✓' : '✕'}</span>
+          <span className="fp-toast-msg">{t.msg}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Confirmation Dialog ───────────────────────────────────────────────────────
+function ConfirmDialog({ config, onConfirm, onCancel }) {
+  if (!config) return null;
+  return (
+    <div className="fp-confirm-overlay" onClick={onCancel}>
+      <div className="fp-confirm-box" onClick={e => e.stopPropagation()}>
+        <div className="fp-confirm-icon">{config.icon || '❓'}</div>
+        <h4 className="fp-confirm-title">{config.title}</h4>
+        <p className="fp-confirm-msg">{config.message}</p>
+        <div className="fp-confirm-actions">
+          <button className="fp-confirm-btn fp-confirm-btn--cancel" onClick={onCancel}>
+            Cancel
+          </button>
+          <button
+            className={`fp-confirm-btn fp-confirm-btn--ok fp-confirm-btn--${config.variant || 'success'}`}
+            onClick={onConfirm}
+          >
+            {config.confirmLabel || 'Yes'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function getRoundAvg(interviews = [], round) {
   const r = interviews.find(i => i.round === round);
   if (!r?.ratings) {
@@ -37,8 +76,6 @@ function getOverallAvg(interviews = []) {
   return count > 0 ? (total / count).toFixed(2) : null;
 }
 
-// Section classification — a candidate falls into exactly ONE section.
-// Order of checks matters because flags can co-exist on legacy records.
 function getSection(c) {
   if (c.candidate_joined)     return 'joined';
   if (c.candidate_not_joined) return 'not_joined';
@@ -59,15 +96,41 @@ export default function FeedbackPage() {
   const [aggregate, setAggregate]                 = useState(null);
   const [showModal, setShowModal]                 = useState(false);
   const [fetchingAggregate, setFetchingAggregate] = useState(false);
+  const [activeTab, setActiveTab]                 = useState('selected');
+  const [offerCandidate, setOfferCandidate]       = useState(null);
 
-  // Active tab key for the four-section view. Defaults to 'selected' so HR lands
-  // on the most actionable list first; resets to 'selected' when the role changes.
-  const [activeTab, setActiveTab] = useState('selected');
+  // ── Toast state ──────────────────────────────────────────────────────────────
+  const [toasts, setToasts] = useState([]);
 
-  // ── Offer letter modal state ─────────────────────────────────────────────
-  const [offerCandidate, setOfferCandidate] = useState(null);
+  const showToast = (msg, type = 'success') => {
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, msg, type }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500);
+  };
 
-  // ── Mark offer generated in MongoDB ─────────────────────────────────────
+  // ── Confirm dialog state ─────────────────────────────────────────────────────
+  const [confirmConfig,   setConfirmConfig]   = useState(null);
+  const [confirmCallback, setConfirmCallback] = useState(null);
+
+  const askConfirm = (config) =>
+    new Promise((resolve) => {
+      setConfirmConfig(config);
+      setConfirmCallback(() => resolve);
+    });
+
+  const handleConfirmYes = () => {
+    setConfirmConfig(null);
+    confirmCallback && confirmCallback(true);
+    setConfirmCallback(null);
+  };
+
+  const handleConfirmNo = () => {
+    setConfirmConfig(null);
+    confirmCallback && confirmCallback(false);
+    setConfirmCallback(null);
+  };
+
+  // ── Mark offer generated ──────────────────────────────────────────────────────
   const markOfferGenerated = async (candidateId, offerDetails) => {
     try {
       await axios.post(
@@ -80,12 +143,14 @@ export default function FeedbackPage() {
           ? { ...c, offer_generated: true, offer_details: offerDetails }
           : c)
       );
+      showToast('Offer letter generated successfully.');
     } catch (err) {
       console.error('Failed to mark offer generated:', err);
+      showToast('Failed to save offer details.', 'error');
     }
   };
 
-  // ── Fetch only this HR's roles ───────────────────────────────────────────
+  // ── Fetch roles ───────────────────────────────────────────────────────────────
   useEffect(() => {
     const params = hrId ? { hr_id: hrId } : {};
     axios.get(`${BASE_URL}/get-roles/`, { ...axiosConfig, params })
@@ -95,7 +160,10 @@ export default function FeedbackPage() {
           : [];
         setRoles(openRoles);
       })
-      .catch(err => console.error('Failed to fetch roles:', err));
+      .catch(err => {
+        console.error('Failed to fetch roles:', err);
+        showToast('Failed to fetch roles.', 'error');
+      });
   }, []); // eslint-disable-line
 
   const fetchCandidates = async (roleId) => {
@@ -103,7 +171,6 @@ export default function FeedbackPage() {
     try {
       const params = hrId ? { hr_id: hrId } : {};
       const res = await axios.get(`${BASE_URL}/get-candidates/`, { ...axiosConfig, params });
-      // Include candidates in ANY of the four post-interview states
       const filtered = Array.isArray(res.data)
         ? res.data.filter(
             c => String(c.applied_role_id) === String(roleId) && (
@@ -117,16 +184,13 @@ export default function FeedbackPage() {
       setCandidates(filtered);
     } catch (err) {
       console.error('Failed to fetch candidates:', err);
+      showToast('Failed to fetch candidates.', 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  // Re-fetch whenever a status-changing action happens. Called by every
-  // handler below so the four sections stay in sync after every action.
-  const refresh = () => {
-    if (selectedRole) fetchCandidates(selectedRole);
-  };
+  const refresh = () => { if (selectedRole) fetchCandidates(selectedRole); };
 
   const handleViewAggregate = async (candidate) => {
     setSelectedCandidate(candidate);
@@ -141,51 +205,86 @@ export default function FeedbackPage() {
       setAggregate(res.data);
     } catch (err) {
       console.error('Failed to fetch aggregate:', err);
+      showToast('Failed to fetch interview aggregate.', 'error');
     } finally {
       setFetchingAggregate(false);
     }
   };
 
-  // ── Joined / Not Joined / Undo handlers ─────────────────────────────────
+  // ── Joined / Not Joined / Undo handlers ──────────────────────────────────────
   const handleMarkJoined = async (candidate) => {
-    if (!window.confirm(`Mark "${candidate.name}" as Joined?`)) return;
+    const yes = await askConfirm({
+      icon: '✅',
+      title: `Mark "${candidate.name}" as Joined?`,
+      message: 'This will record that the candidate accepted the offer and has joined the company.',
+      confirmLabel: 'Yes, Mark Joined',
+      variant: 'success'
+    });
+    if (!yes) return;
     try {
       await axios.post(`${BASE_URL}/mark-joined/${candidate.candidate_id}`, {}, axiosConfig);
       refresh();
+      showToast(`${candidate.name} marked as Joined.`);
     } catch (err) {
-      alert(`Failed: ${err.response?.data?.detail || 'Please try again.'}`);
+      const msg = err.response?.data?.detail || 'Please try again.';
+      showToast(`Failed: ${msg}`, 'error');
     }
   };
 
   const handleMarkNotJoined = async (candidate) => {
-    if (!window.confirm(`Mark "${candidate.name}" as Not Joined?`)) return;
+    const yes = await askConfirm({
+      icon: '🚪',
+      title: `Mark "${candidate.name}" as Not Joined?`,
+      message: 'This will record that the candidate declined or did not join after receiving the offer.',
+      confirmLabel: 'Yes, Mark Not Joined',
+      variant: 'warning'
+    });
+    if (!yes) return;
     try {
       await axios.post(`${BASE_URL}/mark-not-joined/${candidate.candidate_id}`, {}, axiosConfig);
       refresh();
+      showToast(`${candidate.name} marked as Not Joined.`);
     } catch (err) {
-      alert(`Failed: ${err.response?.data?.detail || 'Please try again.'}`);
+      const msg = err.response?.data?.detail || 'Please try again.';
+      showToast(`Failed: ${msg}`, 'error');
     }
   };
 
-  // Undo from Joined / Not Joined → back to Selected (offer stays generated)
   const handleUndoJoinedStatus = async (candidate) => {
-    if (!window.confirm(`Move "${candidate.name}" back to Selected?`)) return;
+    const yes = await askConfirm({
+      icon: '↩️',
+      title: `Move "${candidate.name}" back to Selected?`,
+      message: 'The Joined / Not Joined status will be cleared. The offer letter will remain on record.',
+      confirmLabel: 'Yes, Undo',
+      variant: 'warning'
+    });
+    if (!yes) return;
     try {
       await axios.post(`${BASE_URL}/undo-joined-status/${candidate.candidate_id}`, {}, axiosConfig);
       refresh();
+      showToast(`${candidate.name} moved back to Selected.`);
     } catch (err) {
-      alert(`Failed: ${err.response?.data?.detail || 'Please try again.'}`);
+      const msg = err.response?.data?.detail || 'Please try again.';
+      showToast(`Failed: ${msg}`, 'error');
     }
   };
 
-  // Undo from Rejected → back to Pending (uses existing endpoint)
   const handleUndoRejected = async (candidate) => {
-    if (!window.confirm(`Move "${candidate.name}" back to Pending? They will reappear on the Schedule page.`)) return;
+    const yes = await askConfirm({
+      icon: '↩️',
+      title: `Move "${candidate.name}" back to Pending?`,
+      message: 'The rejected verdict will be cleared. They will reappear on the Schedule page for further interviews.',
+      confirmLabel: 'Yes, Undo',
+      variant: 'warning'
+    });
+    if (!yes) return;
     try {
       await axios.post(`${BASE_URL}/undo-candidate-verdict/${candidate.candidate_id}`, {}, axiosConfig);
       refresh();
+      showToast(`${candidate.name} moved back to Pending.`);
     } catch (err) {
-      alert(`Failed: ${err.response?.data?.detail || 'Please try again.'}`);
+      const msg = err.response?.data?.detail || 'Please try again.';
+      showToast(`Failed: ${msg}`, 'error');
     }
   };
 
@@ -231,6 +330,7 @@ export default function FeedbackPage() {
     doc.setFontSize(10);
     doc.text(aggregate.combined_comments || '', 14, finalY + 46, { maxWidth: 180 });
     doc.save(`${selectedCandidate.name}_Feedback.pdf`);
+    showToast('PDF report downloaded.');
   };
 
   const closeModal = () => {
@@ -243,27 +343,22 @@ export default function FeedbackPage() {
     const handleEsc = (e) => { if (e.keyCode === 27) closeModal(); };
     document.addEventListener('keydown', handleEsc);
     return () => document.removeEventListener('keydown', handleEsc);
-  }, []);
+  }, []); // eslint-disable-line
 
-  // ── Partition candidates into the four sections ─────────────────────────
-  const selectedList   = candidates.filter(c => getSection(c) === 'selected');
-  const joinedList     = candidates.filter(c => getSection(c) === 'joined');
-  const notJoinedList  = candidates.filter(c => getSection(c) === 'not_joined');
-  const rejectedList   = candidates.filter(c => getSection(c) === 'rejected');
+  // ── Partition candidates ──────────────────────────────────────────────────────
+  const selectedList  = candidates.filter(c => getSection(c) === 'selected');
+  const joinedList    = candidates.filter(c => getSection(c) === 'joined');
+  const notJoinedList = candidates.filter(c => getSection(c) === 'not_joined');
+  const rejectedList  = candidates.filter(c => getSection(c) === 'rejected');
 
   const allRounds = getAllRounds(candidates);
   const selectedRoleName = roles.find(r => String(r.role_id) === String(selectedRole))?.role || '';
 
-  // ── Shared row renderer ────────────────────────────────────────────────
-  // Renders a single row with action buttons appropriate to the section.
-  // Keeping this in one place avoids divergence between the four tables.
+  // ── Shared row renderer ───────────────────────────────────────────────────────
   const renderRow = (c, sectionKey) => {
     const overall = getOverallAvg(c.interviews || []);
     const overallNum = parseFloat(overall);
     const canGenerateOffer = c.candidate_selected === true && overallNum >= 3;
-
-    // Joined / Not Joined buttons are only enabled in the Selected section,
-    // and only after an offer letter has been generated.
     const inSelected = sectionKey === 'selected';
     const offerOut   = c.offer_generated === true;
     const canMarkPostOffer = inSelected && offerOut;
@@ -302,7 +397,7 @@ export default function FeedbackPage() {
             : <span className="badge bg-secondary">No</span>}
         </td>
 
-        {/* Offer button — disabled for Rejected; enabled with rules elsewhere */}
+        {/* Offer button */}
         <td>
           {sectionKey === 'rejected' ? (
             <Button variant="secondary" size="sm" disabled title="Not available for rejected candidates">
@@ -371,10 +466,9 @@ export default function FeedbackPage() {
           </Button>
         </td>
 
-        {/* Undo — different target depending on section */}
+        {/* Undo */}
         <td>
           {sectionKey === 'selected' ? (
-            // Selected section doesn't need Undo (it's the "base" post-interview state)
             <span className="text-muted">—</span>
           ) : sectionKey === 'rejected' ? (
             <Button
@@ -385,7 +479,6 @@ export default function FeedbackPage() {
               <FaUndo /> Undo
             </Button>
           ) : (
-            // Joined or Not Joined → back to Selected
             <Button
               variant="outline-secondary" size="sm"
               title="Move back to Selected section"
@@ -399,10 +492,7 @@ export default function FeedbackPage() {
     );
   };
 
-  // ── Section table renderer ────────────────────────────────────────────
-  // The heading is intentionally omitted — the tab title already shows
-  // "🏆 Selected (3)" etc., so repeating it inside the panel feels noisy.
-  // title/icon args are kept for future flexibility (e.g. CSV export label).
+  // ── Section table renderer ────────────────────────────────────────────────────
   const renderSection = (title, icon, list, sectionKey, emptyMessage) => (
     <div className="candidate-section" style={{ marginTop: '1rem' }}>
       {list.length === 0 ? (
@@ -434,6 +524,17 @@ export default function FeedbackPage() {
 
   return (
     <div className="page-wrapper feedback-page">
+
+      {/* ── Toast notifications (top-right) ──────────────────────────────── */}
+      <Toast toasts={toasts} />
+
+      {/* ── Confirmation dialog ───────────────────────────────────────────── */}
+      <ConfirmDialog
+        config={confirmConfig}
+        onConfirm={handleConfirmYes}
+        onCancel={handleConfirmNo}
+      />
+
       <h2 className="mb-4">Interview Feedback Summary</h2>
 
       <div className="mb-4">
@@ -443,7 +544,7 @@ export default function FeedbackPage() {
           value={selectedRole}
           onChange={(e) => {
             setSelectedRole(e.target.value);
-            setActiveTab('selected'); // Reset to first tab when role changes
+            setActiveTab('selected');
             fetchCandidates(e.target.value);
           }}
         >
@@ -469,10 +570,6 @@ export default function FeedbackPage() {
               Press "Select" or "Reject" on the Schedule page first.
             </p>
           ) : (
-            // ── Tabbed view ─────────────────────────────────────────────
-            // Bootstrap's Tabs component renders one tab content panel at a time.
-            // Each tab title includes a live count badge so HR can see section
-            // sizes at a glance without switching tabs.
             <Tabs
               activeKey={activeTab}
               onSelect={(k) => setActiveTab(k || 'selected')}
@@ -484,44 +581,28 @@ export default function FeedbackPage() {
                 eventKey="selected"
                 title={<span>🏆 Selected <span className="badge bg-secondary ms-1">{selectedList.length}</span></span>}
               >
-                {renderSection(
-                  'Selected', '🏆',
-                  selectedList, 'selected',
-                  'No candidates currently in Selected.'
-                )}
+                {renderSection('Selected', '🏆', selectedList, 'selected', 'No candidates currently in Selected.')}
               </Tab>
 
               <Tab
                 eventKey="joined"
                 title={<span>✅ Joined <span className="badge bg-secondary ms-1">{joinedList.length}</span></span>}
               >
-                {renderSection(
-                  'Joined', '✅',
-                  joinedList, 'joined',
-                  'No candidates have joined yet.'
-                )}
+                {renderSection('Joined', '✅', joinedList, 'joined', 'No candidates have joined yet.')}
               </Tab>
 
               <Tab
                 eventKey="not_joined"
                 title={<span>🚪 Not Joined <span className="badge bg-secondary ms-1">{notJoinedList.length}</span></span>}
               >
-                {renderSection(
-                  'Not Joined', '🚪',
-                  notJoinedList, 'not_joined',
-                  'No candidates marked as not joined.'
-                )}
+                {renderSection('Not Joined', '🚪', notJoinedList, 'not_joined', 'No candidates marked as not joined.')}
               </Tab>
 
               <Tab
                 eventKey="rejected"
                 title={<span>❌ Rejected <span className="badge bg-secondary ms-1">{rejectedList.length}</span></span>}
               >
-                {renderSection(
-                  'Rejected', '❌',
-                  rejectedList, 'rejected',
-                  'No rejected candidates.'
-                )}
+                {renderSection('Rejected', '❌', rejectedList, 'rejected', 'No rejected candidates.')}
               </Tab>
             </Tabs>
           )}
