@@ -19,14 +19,19 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
 const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 const HEADERS  = { headers: { 'ngrok-skip-browser-warning': 'true' } };
 
-const curMonth = () => new Date().getMonth();
-const curYear  = () => new Date().getFullYear();
-const monthStartStr = () => new Date(curYear(), curMonth(), 1).toLocaleDateString('en-CA');
-const monthEndStr   = () => new Date(curYear(), curMonth() + 1, 0).toLocaleDateString('en-CA');
+const pad = n => String(n).padStart(2, '0');
+const monthStartStr = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-01`;
+};
+const monthEndStr = () => {
+  const d = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
 
 const inRange = (dateStr, from, to) => {
   if (!dateStr) return false;
-  const d = new Date(dateStr).toLocaleDateString('en-CA');
+  const d = dateStr.slice(0, 10); // safe: no timezone conversion
   return d >= from && d <= to;
 };
 
