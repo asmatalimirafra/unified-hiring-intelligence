@@ -507,3 +507,125 @@
   background-color: #334155 !important; /* slightly darker on hover */
   color: #ffffff !important;
 }
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Toast — top-right notification
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.fp-toast-container {
+  position: fixed;
+  top: 1.25rem;
+  right: 1.25rem;
+  z-index: 99999;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.fp-toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 260px;
+  max-width: 400px;
+  padding: 0.75rem 1.1rem;
+  border-radius: 10px;
+  font-size: 0.92rem;
+  font-weight: 500;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.13);
+  animation: fp-toast-in 0.28s ease;
+  pointer-events: auto;
+}
+
+.fp-toast--success {
+  background: #ecfdf5;
+  color: #065f46;
+  border-left: 4px solid #10b981;
+}
+
+.fp-toast--error {
+  background: #fef2f2;
+  color: #991b1b;
+  border-left: 4px solid #ef4444;
+}
+
+.fp-toast-icon { font-size: 1.1rem; flex-shrink: 0; }
+.fp-toast-msg  { line-height: 1.4; }
+
+@keyframes fp-toast-in {
+  from { opacity: 0; transform: translateX(40px); }
+  to   { opacity: 1; transform: translateX(0);    }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Confirmation Dialog — centered popup
+   z-index: 100000 so it renders above the aggregate modal (z-index: 9999)
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.fp-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 100000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fp-confirm-box {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 2rem 2.25rem;
+  max-width: 420px;
+  width: 90%;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+  animation: fp-confirm-in 0.22s ease;
+}
+
+@keyframes fp-confirm-in {
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1);    }
+}
+
+.fp-confirm-icon  { font-size: 2.5rem; margin-bottom: 0.75rem; }
+
+.fp-confirm-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #1e293b;
+  margin-bottom: 0.5rem;
+}
+
+.fp-confirm-msg {
+  font-size: 0.9rem;
+  color: #64748b;
+  margin-bottom: 1.5rem;
+  line-height: 1.55;
+}
+
+.fp-confirm-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.fp-confirm-btn {
+  padding: 0.55rem 1.4rem;
+  border-radius: 8px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.fp-confirm-btn:hover { opacity: 0.85; }
+
+.fp-confirm-btn--cancel  { background: #f1f5f9; color: #475569; }
+.fp-confirm-btn--ok      { color: #ffffff; }
+.fp-confirm-btn--danger  { background: #ef4444; }
+.fp-confirm-btn--warning { background: #f97316; }
+.fp-confirm-btn--success { background: #10b981; }
