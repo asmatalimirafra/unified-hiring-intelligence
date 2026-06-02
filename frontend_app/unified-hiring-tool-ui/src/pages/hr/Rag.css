@@ -451,3 +451,123 @@
     background: #f9fafb;
     color: #374151;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Toast — top-right of chat-main (not overlapping the dark sidebar)
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.rag-toast-container {
+    position: absolute;
+    top: 1.25rem;
+    right: 1.25rem;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    pointer-events: none;
+}
+
+.rag-toast {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 240px;
+    max-width: 380px;
+    padding: 0.7rem 1rem;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    animation: rag-toast-in 0.28s ease;
+    pointer-events: auto;
+}
+
+.rag-toast--success {
+    background: #ecfdf5;
+    color: #065f46;
+    border-left: 4px solid #10b981;
+}
+
+.rag-toast--error {
+    background: #fef2f2;
+    color: #991b1b;
+    border-left: 4px solid #ef4444;
+}
+
+.rag-toast-icon { font-size: 1rem; flex-shrink: 0; }
+.rag-toast-msg  { line-height: 1.4; }
+
+@keyframes rag-toast-in {
+    from { opacity: 0; transform: translateX(40px); }
+    to   { opacity: 1; transform: translateX(0);    }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Confirmation Dialog
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.rag-confirm-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 9998;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.rag-confirm-box {
+    background: #ffffff;
+    border-radius: 16px;
+    padding: 2rem 2.25rem;
+    max-width: 400px;
+    width: 90%;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+    animation: rag-confirm-in 0.22s ease;
+}
+
+@keyframes rag-confirm-in {
+    from { opacity: 0; transform: scale(0.92); }
+    to   { opacity: 1; transform: scale(1);    }
+}
+
+.rag-confirm-icon  { font-size: 2.5rem; margin-bottom: 0.75rem; }
+
+.rag-confirm-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #1e293b;
+    margin-bottom: 0.5rem;
+}
+
+.rag-confirm-msg {
+    font-size: 0.88rem;
+    color: #64748b;
+    margin-bottom: 1.5rem;
+    line-height: 1.55;
+}
+
+.rag-confirm-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+}
+
+.rag-confirm-btn {
+    padding: 0.55rem 1.4rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+}
+
+.rag-confirm-btn:hover { opacity: 0.85; }
+
+.rag-confirm-btn--cancel  { background: #f1f5f9; color: #475569; }
+.rag-confirm-btn--ok      { color: #ffffff; }
+.rag-confirm-btn--danger  { background: #ef4444; }
+.rag-confirm-btn--warning { background: #f97316; }
+.rag-confirm-btn--success { background: #10b981; }
