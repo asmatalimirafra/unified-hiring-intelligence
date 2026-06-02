@@ -182,7 +182,7 @@ function MatchedRolesModal({ candidate, roles, onClose }) {
   );
 }
 
-
+function ViewCandidates() {
   const navigate = useNavigate();
 
   const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
@@ -831,8 +831,6 @@ function MatchedRolesModal({ candidate, roles, onClose }) {
           )}
         </div>
       )}
-
-      <h3>View Candidates</h3>
 
       <div className="form-group mb-3">
         <label>Select Role:</label>
