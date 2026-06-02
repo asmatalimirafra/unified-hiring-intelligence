@@ -8,19 +8,86 @@ import { FaTrashAlt, FaEye, FaCalendarPlus } from 'react-icons/fa';
 const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 const axiosConfig = { headers: { 'ngrok-skip-browser-warning': 'true' } };
 
+// ── Toast Component ───────────────────────────────────────────────────────────
+function Toast({ toasts }) {
+  return (
+    <div className="vc-toast-container">
+      {toasts.map(t => (
+        <div key={t.id} className={`vc-toast vc-toast--${t.type}`}>
+          <span className="vc-toast-icon">{t.type === 'success' ? '✓' : '✕'}</span>
+          <span className="vc-toast-msg">{t.msg}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Confirmation Dialog ───────────────────────────────────────────────────────
+function ConfirmDialog({ config, onConfirm, onCancel }) {
+  if (!config) return null;
+  return (
+    <div className="vc-confirm-overlay" onClick={onCancel}>
+      <div className="vc-confirm-box" onClick={e => e.stopPropagation()}>
+        <div className="vc-confirm-icon">{config.icon || '❓'}</div>
+        <h4 className="vc-confirm-title">{config.title}</h4>
+        <p className="vc-confirm-msg">{config.message}</p>
+        <div className="vc-confirm-actions">
+          <button className="vc-confirm-btn vc-confirm-btn--cancel" onClick={onCancel}>
+            Cancel
+          </button>
+          <button
+            className={`vc-confirm-btn vc-confirm-btn--ok vc-confirm-btn--${config.variant || 'danger'}`}
+            onClick={onConfirm}
+          >
+            {config.confirmLabel || 'Yes'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ViewCandidates() {
   const navigate = useNavigate();
 
   const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
   const hrId = storedUser.user_id || null;
 
-  const [roles, setRoles] = useState([]);
+  const [roles, setRoles]           = useState([]);
   const [selectedRoleId, setSelectedRoleId] = useState('');
   const [candidates, setCandidates] = useState([]);
+  const [activeTab, setActiveTab]   = useState('pending');
 
-  // Active tab for the three-section view. Defaults to 'pending' so HR lands
-  // on the most actionable list first. Resets when the role changes.
-  const [activeTab, setActiveTab] = useState('pending');
+  // ── Toast state ──────────────────────────────────────────────────────────────
+  const [toasts, setToasts] = useState([]);
+
+  const showToast = (msg, type = 'success') => {
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, msg, type }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500);
+  };
+
+  // ── Confirm dialog state ─────────────────────────────────────────────────────
+  const [confirmConfig, setConfirmConfig]     = useState(null);
+  const [confirmCallback, setConfirmCallback] = useState(null);
+
+  const askConfirm = (config) =>
+    new Promise((resolve) => {
+      setConfirmConfig(config);
+      setConfirmCallback(() => resolve);
+    });
+
+  const handleConfirmYes = () => {
+    setConfirmConfig(null);
+    confirmCallback && confirmCallback(true);
+    setConfirmCallback(null);
+  };
+
+  const handleConfirmNo = () => {
+    setConfirmConfig(null);
+    confirmCallback && confirmCallback(false);
+    setConfirmCallback(null);
+  };
 
   useEffect(() => {
     fetchRoles();
@@ -31,10 +98,10 @@ function ViewCandidates() {
     try {
       const params = hrId ? { hr_id: hrId } : {};
       const res = await axios.get(`${BASE_URL}/get-roles/`, { ...axiosConfig, params });
-      const allRoles = Array.isArray(res.data) ? res.data : [];
-      setRoles(allRoles);
+      setRoles(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
       console.error('Error fetching roles:', err);
+      showToast('Failed to fetch roles.', 'error');
     }
   };
 
@@ -45,10 +112,11 @@ function ViewCandidates() {
       setCandidates(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
       console.error('Error fetching candidates:', err);
+      showToast('Failed to fetch candidates.', 'error');
     }
   };
 
-  // ── Score helpers ──────────────────────────────────────────────────────────
+  // ── Score helpers ─────────────────────────────────────────────────────────────
   const getAvgScore = (candidate, round) => {
     if (!candidate || !Array.isArray(candidate.interviews)) return '-';
     const roundData = candidate.interviews.find(i => i.round === round);
@@ -74,7 +142,7 @@ function ViewCandidates() {
       return <span className="badge bg-success" title="ATS: High match">{score.toFixed(1)}% ✓</span>;
     if (score >= 30)
       return <span className="badge bg-warning text-dark" title="ATS: Moderate match">{score.toFixed(1)}% ✓</span>;
-    return <span className="badge bg-danger" title="ATS: Below threshold — not eligible for scheduling">{score.toFixed(1)}% ✗</span>;
+    return <span className="badge bg-danger" title="ATS: Below threshold">{score.toFixed(1)}% ✗</span>;
   };
 
   const getAllRounds = (list) => {
@@ -86,28 +154,21 @@ function ViewCandidates() {
   const getStatusLabel = (c) => {
     const interviews = c.interviews || [];
     const completedRounds = interviews.length;
-
     const scheduledRound =
-      c.interview_details?.scheduled_round
-      ?? (completedRounds + 1);
+      c.interview_details?.scheduled_round ?? (completedRounds + 1);
     const feedbackAlreadyDone = interviews.some(i => i.round === scheduledRound);
     const isScheduled = c.status === 'Scheduled' && !feedbackAlreadyDone;
 
-    if (completedRounds === 0 && !isScheduled) {
+    if (completedRounds === 0 && !isScheduled)
       return <span className="badge bg-secondary">No interviews yet</span>;
-    }
 
     const parts = [];
-
     if (completedRounds > 0) {
       const maxDone = Math.max(...interviews.map(i => i.round));
       parts.push(
-        <span key="done" className="badge bg-primary me-1">
-          L{maxDone} done
-        </span>
+        <span key="done" className="badge bg-primary me-1">L{maxDone} done</span>
       );
     }
-
     if (isScheduled) {
       parts.push(
         <span key="sched" className="badge bg-warning text-dark">
@@ -116,52 +177,75 @@ function ViewCandidates() {
         </span>
       );
     }
-
     return <>{parts}</>;
   };
 
-  const handleDeleteCandidate = async (id) => {
-    if (window.confirm('Are you sure you want to delete this candidate?')) {
+  // ── Action handlers ───────────────────────────────────────────────────────────
+  const handleDeleteCandidate = async (id, name) => {
+    const yes = await askConfirm({
+      icon: '🗑️',
+      title: 'Delete this candidate?',
+      message: `"${name}" will be permanently removed from the system. This cannot be undone.`,
+      confirmLabel: 'Yes, Delete',
+      variant: 'danger'
+    });
+    if (!yes) return;
+    try {
       await axios.delete(`${BASE_URL}/delete-candidate/${id}`, axiosConfig);
       fetchCandidates();
+      showToast(`${name} deleted successfully.`);
+    } catch (err) {
+      const msg = err.response?.data?.detail || 'Failed to delete candidate.';
+      showToast(msg, 'error');
     }
   };
 
-  // ── ATS override handlers ──────────────────────────────────────────────────
   const handleSendToPending = async (candidate) => {
     const score = candidate.ats_score?.toFixed(1) ?? '?';
-    if (!window.confirm(
-      `"${candidate.name}" scored ${score}% on ATS, below the 30% threshold.\n\n` +
-      `Are you sure you want to manually move this candidate to Pending Interviews?`
-    )) return;
+    const yes = await askConfirm({
+      icon: '⚠️',
+      title: 'Manually approve this candidate?',
+      message: `"${candidate.name}" scored ${score}% on ATS (below the 30% threshold). Are you sure you want to move them to Pending Interviews?`,
+      confirmLabel: 'Yes, Send to Pending',
+      variant: 'warning'
+    });
+    if (!yes) return;
     try {
       await axios.post(
         `${BASE_URL}/override-ats-rejection/${candidate.candidate_id}`,
         {}, axiosConfig
       );
       fetchCandidates();
+      showToast(`${candidate.name} moved to Pending Interviews.`);
     } catch (err) {
-      alert(`Failed to move candidate: ${err.response?.data?.detail || 'Please try again.'}`);
+      const msg = err.response?.data?.detail || 'Failed to move candidate.';
+      showToast(msg, 'error');
     }
   };
 
   const handleRevokeOverride = async (candidate) => {
-    if (!window.confirm(
-      `Revert the manual approval for "${candidate.name}"?\n\n` +
-      `They will move back to the ATS-rejected list.`
-    )) return;
+    const yes = await askConfirm({
+      icon: '↩️',
+      title: 'Revert manual approval?',
+      message: `"${candidate.name}" will move back to the ATS-rejected list.`,
+      confirmLabel: 'Yes, Revert',
+      variant: 'danger'
+    });
+    if (!yes) return;
     try {
       await axios.post(
         `${BASE_URL}/revoke-ats-override/${candidate.candidate_id}`,
         {}, axiosConfig
       );
       fetchCandidates();
+      showToast(`Manual approval for ${candidate.name} reverted.`);
     } catch (err) {
-      alert(`Failed to revoke: ${err.response?.data?.detail || 'Please try again.'}`);
+      const msg = err.response?.data?.detail || 'Failed to revoke override.';
+      showToast(msg, 'error');
     }
   };
 
-  // ── Filtering / partitioning ──────────────────────────────────────────────
+  // ── Filtering / partitioning ──────────────────────────────────────────────────
   const filtered = Array.isArray(candidates)
     ? candidates.filter(c => String(c.applied_role_id) === String(selectedRoleId))
     : [];
@@ -185,13 +269,10 @@ function ViewCandidates() {
     )
   );
 
-  const pendingRounds    = getAllRounds(pending);
-  const completedRounds  = getAllRounds(completed);
+  const pendingRounds   = getAllRounds(pending);
+  const completedRounds = getAllRounds(completed);
 
-  // ── Section render functions ──────────────────────────────────────────────
-  // Each section renders standalone so only the active tab's content is
-  // mounted in the DOM. Keeps tab switching responsive even with lots of rows.
-
+  // ── Section renderers ─────────────────────────────────────────────────────────
   const renderPendingSection = () => (
     pending.length === 0 ? (
       <p className="empty-message">No candidates in this section.</p>
@@ -269,7 +350,7 @@ function ViewCandidates() {
               <td>
                 <button
                   className="btn btn-outline-danger btn-sm"
-                  onClick={() => handleDeleteCandidate(c.candidate_id)}
+                  onClick={() => handleDeleteCandidate(c.candidate_id, c.name)}
                   title="Delete Candidate"
                 >
                   <FaTrashAlt />
@@ -337,7 +418,7 @@ function ViewCandidates() {
                 <td>
                   <button
                     className="btn btn-outline-danger btn-sm"
-                    onClick={() => handleDeleteCandidate(c.candidate_id)}
+                    onClick={() => handleDeleteCandidate(c.candidate_id, c.name)}
                     title="Delete Candidate"
                   >
                     <FaTrashAlt />
@@ -419,7 +500,7 @@ function ViewCandidates() {
                 <td>
                   <button
                     className="btn btn-outline-danger btn-sm"
-                    onClick={() => handleDeleteCandidate(c.candidate_id)}
+                    onClick={() => handleDeleteCandidate(c.candidate_id, c.name)}
                     title="Delete Candidate"
                   >
                     <FaTrashAlt />
@@ -433,9 +514,7 @@ function ViewCandidates() {
     )
   );
 
-  // ── Tab config ─────────────────────────────────────────────────────────────
-  // Single source of truth for the three tabs. Each entry has its icon,
-  // label, live count, and the render function for its panel.
+  // ── Tab config ────────────────────────────────────────────────────────────────
   const TABS = [
     { key: 'pending',   icon: '⏳', label: 'Pending Interviews',  count: pending.length,     render: renderPendingSection   },
     { key: 'rejected',  icon: '🚫', label: 'ATS Rejected',         count: atsRejected.length, render: renderRejectedSection  },
@@ -446,7 +525,19 @@ function ViewCandidates() {
 
   return (
     <div className="page-wrapper">
+
+      {/* ── Toast notifications (top-right) ────────────────────────────────── */}
+      <Toast toasts={toasts} />
+
+      {/* ── Confirmation dialog ─────────────────────────────────────────────── */}
+      <ConfirmDialog
+        config={confirmConfig}
+        onConfirm={handleConfirmYes}
+        onCancel={handleConfirmNo}
+      />
+
       <h3>View Candidates</h3>
+
       <div className="form-group mb-3">
         <label>Select Role:</label>
         <select
@@ -454,7 +545,7 @@ function ViewCandidates() {
           value={selectedRoleId}
           onChange={e => {
             setSelectedRoleId(e.target.value);
-            setActiveTab('pending'); // reset so HR doesn't land on an empty tab
+            setActiveTab('pending');
           }}
         >
           <option value="">-- Select a Role --</option>
@@ -468,9 +559,6 @@ function ViewCandidates() {
 
       {selectedRoleId && (
         <>
-          {/* ── Tab strip ─────────────────────────────────────────────────
-              Custom-styled to match the rest of the HR portal.
-              The Rejected tab gets a red count badge as a visual cue. */}
           <div className="viewcand-tabs">
             {TABS.map(t => (
               <button
@@ -487,7 +575,6 @@ function ViewCandidates() {
             ))}
           </div>
 
-          {/* ── Active tab panel ──────────────────────────────────────── */}
           <div className="candidate-section">
             <h4>{currentTab.icon} {currentTab.label}</h4>
             {currentTab.render()}
