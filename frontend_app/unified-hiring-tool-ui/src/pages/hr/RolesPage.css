@@ -290,3 +290,137 @@ h2 {
   font-weight: 600;
   color: #1e293b;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Toast — top-right notification
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.rp-toast-container {
+  position: fixed;
+  top: 1.25rem;
+  right: 1.25rem;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.rp-toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 260px;
+  max-width: 380px;
+  padding: 0.75rem 1.1rem;
+  border-radius: 10px;
+  font-size: 0.92rem;
+  font-weight: 500;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.13);
+  animation: rp-toast-in 0.28s ease;
+  pointer-events: auto;
+}
+
+.rp-toast--success {
+  background: #ecfdf5;
+  color: #065f46;
+  border-left: 4px solid #10b981;
+}
+
+.rp-toast--error {
+  background: #fef2f2;
+  color: #991b1b;
+  border-left: 4px solid #ef4444;
+}
+
+.rp-toast-icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+.rp-toast-msg {
+  line-height: 1.4;
+}
+
+@keyframes rp-toast-in {
+  from { opacity: 0; transform: translateX(40px); }
+  to   { opacity: 1; transform: translateX(0);    }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Confirmation Dialog — centered popup
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.rp-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 9998;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rp-confirm-box {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 2rem 2.25rem;
+  max-width: 420px;
+  width: 90%;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.18);
+  animation: rp-confirm-in 0.22s ease;
+}
+
+@keyframes rp-confirm-in {
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1);    }
+}
+
+.rp-confirm-icon {
+  font-size: 2.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.rp-confirm-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #1e293b;
+  margin-bottom: 0.5rem;
+}
+
+.rp-confirm-msg {
+  font-size: 0.9rem;
+  color: #64748b;
+  margin-bottom: 1.5rem;
+  line-height: 1.55;
+}
+
+.rp-confirm-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.rp-confirm-btn {
+  padding: 0.55rem 1.4rem;
+  border-radius: 8px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.rp-confirm-btn:hover { opacity: 0.85; }
+
+.rp-confirm-btn--cancel {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.rp-confirm-btn--ok { color: #ffffff; }
+
+.rp-confirm-btn--danger  { background: #ef4444; }
+.rp-confirm-btn--warning { background: #f97316; }
+.rp-confirm-btn--success { background: #10b981; }
