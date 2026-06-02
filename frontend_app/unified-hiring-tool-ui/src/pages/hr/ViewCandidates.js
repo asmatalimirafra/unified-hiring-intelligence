@@ -1,9 +1,9 @@
 // src/pages/hr/ViewCandidates.js
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import './ViewCandidates.css';
-import { FaTrashAlt, FaEye, FaCalendarPlus } from 'react-icons/fa';
+import { FaTrashAlt, FaEye, FaCalendarPlus, FaBriefcase, FaSearch, FaTimes } from 'react-icons/fa';
 
 const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 const axiosConfig = { headers: { 'ngrok-skip-browser-warning': 'true' } };
@@ -47,7 +47,142 @@ function ConfirmDialog({ config, onConfirm, onCancel }) {
   );
 }
 
-function ViewCandidates() {
+// ── Matched Roles Modal ───────────────────────────────────────────────────────
+function MatchedRolesModal({ candidate, roles, onClose }) {
+  const [results, setResults]   = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState(null);
+
+  useEffect(() => {
+    if (!candidate || !roles.length) return;
+
+    const fetchAllRoleScores = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        // For each role, call talent-pool/search and find this candidate's score
+        const settled = await Promise.allSettled(
+          roles.map(role =>
+            axios.post(
+              `${BASE_URL}/talent-pool/search`,
+              { role_id: role.role_id, page: 1, page_size: 200 },
+              axiosConfig
+            ).then(res => {
+              const found = (res.data.results || []).find(
+                r => String(r.candidate_id) === String(candidate.candidate_id)
+              );
+              return {
+                role_id:    role.role_id,
+                role:       role.role,
+                department: role.department || '—',
+                status:     role.status,
+                score:      found ? found.talent_score : null,
+              };
+            })
+          )
+        );
+
+        const scored = settled
+          .filter(s => s.status === 'fulfilled' && s.value.score !== null)
+          .map(s => s.value)
+          .sort((a, b) => b.score - a.score);
+
+        setResults(scored);
+      } catch (e) {
+        setError('Failed to load matched roles.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAllRoleScores();
+  }, [candidate, roles]);
+
+  if (!candidate) return null;
+
+  const getScoreColor = (score) => {
+    if (score >= 70) return '#10b981';
+    if (score >= 50) return '#3b82f6';
+    if (score >= 30) return '#f97316';
+    return '#ef4444';
+  };
+
+  const getScoreLabel = (score) => {
+    if (score >= 70) return 'Strong Match';
+    if (score >= 50) return 'Good Match';
+    if (score >= 30) return 'Moderate';
+    return 'Weak Match';
+  };
+
+  return (
+    <div className="vc-modal-overlay" onClick={onClose}>
+      <div className="vc-modal-box" onClick={e => e.stopPropagation()}>
+        <div className="vc-modal-header">
+          <div className="vc-modal-title-group">
+            <span className="vc-modal-icon">🎯</span>
+            <div>
+              <h4 className="vc-modal-title">Matched Roles</h4>
+              <p className="vc-modal-subtitle">
+                Best role matches for <strong>{candidate.name}</strong>
+              </p>
+            </div>
+          </div>
+          <button className="vc-modal-close" onClick={onClose}><FaTimes /></button>
+        </div>
+
+        <div className="vc-modal-body">
+          {loading ? (
+            <div className="vc-modal-loading">
+              <div className="vc-modal-spinner" />
+              <p>Scoring against {roles.length} roles…</p>
+            </div>
+          ) : error ? (
+            <div className="vc-modal-error">{error}</div>
+          ) : results.length === 0 ? (
+            <div className="vc-modal-empty">No role matches found.</div>
+          ) : (
+            <div className="vc-matched-list">
+              {results.map((r, i) => (
+                <div key={r.role_id} className="vc-matched-row">
+                  <div className="vc-matched-rank">
+                    {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : <span className="vc-rank-num">{i + 1}</span>}
+                  </div>
+                  <div className="vc-matched-info">
+                    <div className="vc-matched-role">{r.role}</div>
+                    <div className="vc-matched-dept">
+                      {r.department}
+                      <span className={`vc-role-status-tag ${r.status === 'open' ? 'open' : 'closed'}`}>
+                        {r.status}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="vc-matched-score-wrap">
+                    <div className="vc-matched-bar-track">
+                      <div
+                        className="vc-matched-bar-fill"
+                        style={{ width: `${r.score}%`, background: getScoreColor(r.score) }}
+                      />
+                    </div>
+                    <div className="vc-matched-score-right">
+                      <span className="vc-matched-pct" style={{ color: getScoreColor(r.score) }}>
+                        {r.score}%
+                      </span>
+                      <span className="vc-matched-label" style={{ color: getScoreColor(r.score) }}>
+                        {getScoreLabel(r.score)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
   const navigate = useNavigate();
 
   const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
@@ -57,6 +192,16 @@ function ViewCandidates() {
   const [selectedRoleId, setSelectedRoleId] = useState('');
   const [candidates, setCandidates] = useState([]);
   const [activeTab, setActiveTab]   = useState('pending');
+
+  // ── Matched Roles modal state ─────────────────────────────────────────────────
+  const [matchedRolesCandidate, setMatchedRolesCandidate] = useState(null);
+
+  // ── Candidate search state ────────────────────────────────────────────────────
+  const [searchQuery, setSearchQuery]   = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchDone, setSearchDone]     = useState(false);
+  const searchInputRef = useRef(null);
 
   // ── Toast state ──────────────────────────────────────────────────────────────
   const [toasts, setToasts] = useState([]);
@@ -245,7 +390,34 @@ function ViewCandidates() {
     }
   };
 
-  // ── Filtering / partitioning ──────────────────────────────────────────────────
+  // ── Candidate search ──────────────────────────────────────────────────────────
+  const handleCandidateSearch = async () => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return;
+    setSearchLoading(true);
+    setSearchDone(false);
+    try {
+      // Search locally from already-fetched candidates (fast, no extra API call)
+      const matched = candidates.filter(c =>
+        (c.name           || '').toLowerCase().includes(q) ||
+        (c.candidate_id   || '').toString().toLowerCase().includes(q) ||
+        (c.email          || '').toLowerCase().includes(q) ||
+        (c.applied_role   || '').toLowerCase().includes(q)
+      );
+      setSearchResults(matched);
+    } finally {
+      setSearchLoading(false);
+      setSearchDone(true);
+    }
+  };
+
+  const clearSearch = () => {
+    setSearchQuery('');
+    setSearchResults([]);
+    setSearchDone(false);
+  };
+
+
   const filtered = Array.isArray(candidates)
     ? candidates.filter(c => String(c.applied_role_id) === String(selectedRoleId))
     : [];
@@ -289,6 +461,7 @@ function ViewCandidates() {
             <th>Verdict</th>
             <th>Resume</th>
             <th>Schedule</th>
+            <th>Matched Roles</th>
             <th>Delete</th>
           </tr>
         </thead>
@@ -345,6 +518,15 @@ function ViewCandidates() {
                   onClick={() => navigate('/hr/schedule')}
                 >
                   <FaCalendarPlus />
+                </button>
+              </td>
+              <td>
+                <button
+                  className="btn btn-outline-info btn-sm"
+                  title="View best matched roles for this candidate"
+                  onClick={() => setMatchedRolesCandidate(c)}
+                >
+                  <FaBriefcase />
                 </button>
               </td>
               <td>
@@ -448,6 +630,7 @@ function ViewCandidates() {
             <th>Verdict</th>
             <th>Resume</th>
             <th>Schedule</th>
+            <th>Matched Roles</th>
             <th>Delete</th>
           </tr>
         </thead>
@@ -499,6 +682,15 @@ function ViewCandidates() {
                 </td>
                 <td>
                   <button
+                    className="btn btn-outline-info btn-sm"
+                    title="View best matched roles for this candidate"
+                    onClick={() => setMatchedRolesCandidate(c)}
+                  >
+                    <FaBriefcase />
+                  </button>
+                </td>
+                <td>
+                  <button
                     className="btn btn-outline-danger btn-sm"
                     onClick={() => handleDeleteCandidate(c.candidate_id, c.name)}
                     title="Delete Candidate"
@@ -526,6 +718,13 @@ function ViewCandidates() {
   return (
     <div className="page-wrapper">
 
+      {/* ── Matched Roles Modal ─────────────────────────────────────────────── */}
+      <MatchedRolesModal
+        candidate={matchedRolesCandidate}
+        roles={roles}
+        onClose={() => setMatchedRolesCandidate(null)}
+      />
+
       {/* ── Toast notifications (top-right) ────────────────────────────────── */}
       <Toast toasts={toasts} />
 
@@ -535,6 +734,103 @@ function ViewCandidates() {
         onConfirm={handleConfirmYes}
         onCancel={handleConfirmNo}
       />
+
+      <h3>View Candidates</h3>
+
+      {/* ── Candidate Search Bar ────────────────────────────────────────────── */}
+      <div className="vc-search-bar">
+        <div className="vc-search-input-wrap">
+          <FaSearch className="vc-search-icon" />
+          <input
+            ref={searchInputRef}
+            type="text"
+            className="vc-search-input"
+            placeholder="Search by name, ID, email or applied role…"
+            value={searchQuery}
+            onChange={e => { setSearchQuery(e.target.value); if (!e.target.value) clearSearch(); }}
+            onKeyDown={e => e.key === 'Enter' && handleCandidateSearch()}
+          />
+          {searchQuery && (
+            <button className="vc-search-clear" onClick={clearSearch} title="Clear search">
+              <FaTimes />
+            </button>
+          )}
+        </div>
+        <button
+          className="btn btn-primary vc-search-btn"
+          onClick={handleCandidateSearch}
+          disabled={searchLoading || !searchQuery.trim()}
+        >
+          {searchLoading ? 'Searching…' : 'Search'}
+        </button>
+      </div>
+
+      {/* ── Search Results Panel ────────────────────────────────────────────── */}
+      {searchDone && (
+        <div className="vc-search-results-panel">
+          <div className="vc-search-results-header">
+            <span>🔍 Found <strong>{searchResults.length}</strong> candidate{searchResults.length !== 1 ? 's' : ''} matching "{searchQuery}"</span>
+            <button className="btn btn-sm btn-outline-secondary" onClick={clearSearch}>Clear</button>
+          </div>
+          {searchResults.length === 0 ? (
+            <p className="empty-message">No candidates match your search.</p>
+          ) : (
+            <table className="table table-bordered vc-search-table">
+              <thead>
+                <tr>
+                  <th>Candidate ID</th>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Applied Role</th>
+                  <th>ATS Score</th>
+                  <th>Status</th>
+                  <th>Resume</th>
+                  <th>Matched Roles</th>
+                </tr>
+              </thead>
+              <tbody>
+                {searchResults.map(c => {
+                  const status = c.candidate_selected
+                    ? <span className="badge bg-success">Selected</span>
+                    : c.candidate_rejected
+                    ? <span className="badge bg-danger">Rejected</span>
+                    : (!c.manual_override && c.ats_score !== null && c.ats_score !== undefined && c.ats_score < 30)
+                    ? <span className="badge bg-warning text-dark">ATS Rejected</span>
+                    : <span className="badge bg-primary">Pending</span>;
+                  return (
+                    <tr key={c.candidate_id}>
+                      <td>{c.candidate_id}</td>
+                      <td>{c.name}</td>
+                      <td>{c.email || '—'}</td>
+                      <td>{c.applied_role || '—'}</td>
+                      <td>{getAtsBadge(c.ats_score)}</td>
+                      <td>{status}</td>
+                      <td>
+                        <button
+                          className="btn btn-outline-primary btn-sm"
+                          title="View Resume"
+                          onClick={() => window.open(`${BASE_URL}/get-resume/${c.candidate_id}?ngrok-skip-browser-warning=true`, '_blank', 'noopener,noreferrer')}
+                        >
+                          <FaEye />
+                        </button>
+                      </td>
+                      <td>
+                        <button
+                          className="btn btn-outline-info btn-sm"
+                          title="View best matched roles"
+                          onClick={() => setMatchedRolesCandidate(c)}
+                        >
+                          <FaBriefcase />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       <h3>View Candidates</h3>
 
