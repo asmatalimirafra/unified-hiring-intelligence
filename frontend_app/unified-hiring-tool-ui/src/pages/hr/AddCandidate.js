@@ -201,7 +201,6 @@ export default function AddCandidate() {
       }
 
       setStep(2);
-      showToast(`${formData.name.trim()} added successfully! (${added.candidate_id})`);
     } catch (err) {
       if (axios.isCancel(err) || err.name === 'CanceledError' || err.code === 'ERR_CANCELED') {
         setStatusType('');
@@ -283,7 +282,10 @@ export default function AddCandidate() {
       confirmLabel: 'Yes, Save & Exit',
       variant: 'success'
     });
-    if (yes) window.location.reload();
+    if (yes) {
+      showToast(`${formData.name} saved successfully!`);
+      setTimeout(() => window.location.reload(), 1000);
+    }
   };
 
   // ── Reset Form ────────────────────────────────────────────────────────────────
