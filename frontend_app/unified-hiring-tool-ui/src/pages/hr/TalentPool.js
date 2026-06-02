@@ -30,11 +30,6 @@ function ScoreBar({ score }) {
   );
 }
 
-// Fitment score is cached from a prior fitment run against the candidate's
-// originally applied role's JD. It is NOT recomputed on talent-pool search
-// because each fitment run takes 30–60s on the LLM. When a candidate has
-// never had fitment scored, the value is null and we render a dash with a
-// helpful tooltip so HR understands why.
 function FitmentCell({ score }) {
   if (score === null || score === undefined) {
     return (
@@ -77,7 +72,6 @@ export default function TalentPool() {
   const [jdText, setJdText] = useState("");
   const [activeTab, setActiveTab] = useState("role");
 
-  // Results + pagination
   const [results, setResults] = useState([]);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
@@ -90,7 +84,6 @@ export default function TalentPool() {
   const [sentIds, setSentIds] = useState(new Set());
   const [toast, setToast] = useState(null);
 
-  // Client-side filters on current page
   const [filterStatus, setFilterStatus] = useState("All");
   const [filterRole, setFilterRole] = useState("All");
   const [minScore, setMinScore] = useState(0);
@@ -293,13 +286,12 @@ export default function TalentPool() {
                     <th>Candidate</th>
                     <th>Applied For</th>
                     <th>Current Status</th>
-                    <th>Match Score</th>
-                    <th
-                      title="Cached fitment score against the candidate's originally applied role. Shown only when fitment has been computed previously."
-                    >
+                    <th title="Re-scored against the JD or role you just searched for. Updates every search.">
+                      Match Score
+                    </th>
+                    <th title="Cached fitment score against the candidate's originally applied role. Shown only when fitment has been computed previously.">
                       Fitment Score
                     </th>
-                    <th>Original ATS</th>
                     <th>Interviews</th>
                     <th>Action</th>
                   </tr>
@@ -336,9 +328,6 @@ export default function TalentPool() {
                         <td className="tp-cell-fitment">
                           <FitmentCell score={c.fitment_score} />
                         </td>
-                        <td className="tp-cell-original">
-                          <span className="tp-original-score">{c.original_ats_score ?? "—"}%</span>
-                        </td>
                         <td className="tp-cell-rounds">
                           {c.interviews_count > 0
                             ? <span className="tp-rounds-badge">{c.interviews_count} round{c.interviews_count > 1 ? "s" : ""}</span>
@@ -369,7 +358,6 @@ export default function TalentPool() {
             </div>
           )}
 
-          {/* Pagination */}
           {totalPages > 1 && (
             <div className="tp-pagination">
               <button
