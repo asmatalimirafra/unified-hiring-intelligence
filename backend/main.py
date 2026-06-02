@@ -116,10 +116,6 @@ async def add_role(
         raise HTTPException(status_code=422, detail="Please provide either JD text or upload a JD file.")
 
     # ── Auto-generate the next role_id (atomic-ish via retry loop) ──────────
-    # We retry up to 5 times in case two HRs hit this endpoint at the exact
-    # same moment and both compute the same next id. The unique index on
-    # role_id (in mongo_service.py) will make the second insert fail,
-    # at which point we pick the next id and try again.
     for attempt in range(5):
         role_id = _next_role_id()
         try:
@@ -129,7 +125,6 @@ async def add_role(
 
         filename = f"{role.replace(' ', '_')}_{role_id}_jd"
 
-        # Resolve JD text from uploaded file if needed (do this once, not per attempt)
         if attempt == 0 and jd_file and jd_file.filename:
             file_content = await jd_file.read()
             if jd_file.filename.endswith(".pdf"):
@@ -141,17 +136,13 @@ async def add_role(
 
         mongo_status = store_job_description(role_id, role, positions, jd_text, filename, hr_id=hr_id)
         if mongo_status is not None:
-            break  # success — stop retrying
-        # Otherwise: collision (rare). Loop will pick a higher id.
+            break
     else:
-        # All retries exhausted
         raise HTTPException(
             status_code=500,
             detail="Failed to allocate a unique role_id after several attempts. Please try again."
         )
 
-    # Set last_edited_at = created_at for a fresh role. This lets the UI
-    # always display both columns without special-casing newly-created roles.
     db["roles"].update_one(
         {"role_id": role_id},
         {"$set": {"last_edited_at": datetime.now()}}
@@ -170,34 +161,21 @@ async def add_role(
 async def get_roles(hr_id: Optional[str] = Query(None)):
     """
     Returns roles filtered by hr_id when provided.
-    Called by HR portal (with hr_id) and Interviewer portal (without — sees all open roles for dropdown).
-
-    Each role is augmented with:
-      - hired_count:    number of candidates marked selected for that role
-      - vacancies_left: max(positions - hired_count, 0)
-
-    This is computed live (not stored) so it stays in sync regardless of how
-    selections/un-selections are made elsewhere in the system.
+    Each role is augmented with hired_count and vacancies_left computed live.
     """
     roles = get_all_roles(hr_id=hr_id)
     if not roles:
         return roles
 
-    # Build a single aggregate of hired counts grouped by role_id, then
-    # attach the relevant count to each role. One DB query, not N.
     role_id_strs = [str(r.get("role_id")) for r in roles if r.get("role_id") is not None]
 
     hired_by_role = {}
     if role_id_strs:
-        # Match candidates whose applied_role_id (stored as either str or int
-        # historically) corresponds to one of the roles we're returning, AND
-        # who have been selected.
         pipeline = [
             {"$match": {"candidate_selected": True}},
             {"$group": {"_id": "$applied_role_id", "count": {"$sum": 1}}},
         ]
         for row in candidates_collection.aggregate(pipeline):
-            # Normalise the key to string so int/str storage variations match
             hired_by_role[str(row["_id"])] = row["count"]
 
     for r in roles:
@@ -211,12 +189,9 @@ async def get_roles(hr_id: Optional[str] = Query(None)):
 
 @app.put("/update-role/{role_id}")
 async def update_role_api(role_id: str, update_data: dict = Body(...)):
-    # Stamp last_edited_at on every successful edit so the UI can show
-    # both "Created on" and "Last edited" timestamps side by side.
     update_data["last_edited_at"] = datetime.now()
     modified = update_role(role_id, update_data)
     if modified:
-        # ✅ If role name changed, cascade update to all candidates with this role_id
         if "role" in update_data:
             candidates_collection.update_many(
                 {"applied_role_id": role_id},
@@ -228,9 +203,6 @@ async def update_role_api(role_id: str, update_data: dict = Body(...)):
 
 @app.delete("/delete-role/{role_id}")
 async def delete_role_api(role_id: str):
-    # ── Block deletion if any candidate linked to this role has interview activity ──
-
-    # Check 1: any candidate currently scheduled
     scheduled_count = candidates_collection.count_documents({
         "applied_role_id": role_id,
         "status": "Scheduled"
@@ -242,10 +214,9 @@ async def delete_role_api(role_id: str):
                    f"Cancel those interviews first."
         )
 
-    # Check 2: any candidate has completed at least one interview round
     interviewed_count = candidates_collection.count_documents({
         "applied_role_id": role_id,
-        "interviews.0": {"$exists": True}   # interviews array is non-empty
+        "interviews.0": {"$exists": True}
     })
     if interviewed_count > 0:
         raise HTTPException(
@@ -254,7 +225,6 @@ async def delete_role_api(role_id: str):
                    f"Candidate interview history would be lost."
         )
 
-    # Check 3: any candidate has been selected or rejected
     verdict_count = candidates_collection.count_documents({
         "applied_role_id": role_id,
         "$or": [
@@ -304,7 +274,6 @@ async def add_candidate(
 
     file_bytes = await resume_file.read()
 
-    # ✅ FIX: Pass hr_id so name clash between HR accounts is avoided
     applied_role_id = get_role_id_by_name(applied_role, hr_id=hr_id)
     if applied_role_id is None:
         raise HTTPException(status_code=404, detail=f"Role '{applied_role}' not found.")
@@ -315,32 +284,25 @@ async def add_candidate(
     resume_text = extract_text_from_resume(file_bytes, resume_file.filename)
     print("🔎 Extracted resume text preview:\n", resume_text[:3000])
 
-    # ── Fast regex-based contact extraction (replaces LLM call) ──────────────
-    # extract_contact_metadata uses Ollama which takes 60-120s.
-    # Regex runs in <1ms and covers 95%+ of resume formats.
     import re as _re
 
-    # Email
     _email_match = _re.search(
         r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", resume_text
     )
     email = _email_match.group(0).lower() if _email_match else ""
 
-    # Phone — handles +91-XXXXX-XXXXX, (XXX) XXX-XXXX, 10-digit etc.
     _phone_match = _re.search(
         r"(?:\+?\d{1,3}[\s\-\.\(\)]?)?(?:\(?\d{3}\)?[\s\-\.]?){1,2}\d{4,}",
         resume_text
     )
     phone = _phone_match.group(0).strip() if _phone_match else ""
 
-    # GitHub URL
     _github_match = _re.search(
         r"github\.com/[a-zA-Z0-9_\-]+(?:/[a-zA-Z0-9_\-]+)?",
         resume_text, _re.IGNORECASE
     )
     github = ("https://" + _github_match.group(0)) if _github_match else ""
 
-    # Location — look for "City, State" or "City, Country" pattern near top of resume
     _loc_match = _re.search(
         r"([A-Z][a-zA-Z\s]+,\s*(?:[A-Z]{2}|[A-Z][a-zA-Z]+))",
         resume_text[:2000]
@@ -349,8 +311,6 @@ async def add_candidate(
 
     print(f"📬 Regex metadata — email: {email}, phone: {phone}, github: {github}, location: {location}")
 
-    # ── ATS Score: compare resume against the role's JD at upload time ───────
-    # role_id may be stored as string or int — try both to be safe
     role_doc = (
         db["roles"].find_one({"role_id": str(applied_role_id)}) or
         db["roles"].find_one({"role_id": int(applied_role_id)}) or
@@ -383,10 +343,6 @@ async def add_candidate(
     if mongo_status is None:
         raise HTTPException(status_code=409, detail=f"Candidate ID '{candidate_id_str}' already exists.")
 
-    # ── Run Qdrant embedding in a fire-and-forget thread ────────────────────
-    # SentenceTransformer model.encode() is CPU-heavy (30-60s).
-    # Running it in a daemon thread means the HTTP response returns immediately
-    # and the embedding completes in the background without blocking anything.
     import threading
     def _embed_in_background():
         try:
@@ -407,10 +363,6 @@ async def add_candidate(
 
 @app.get("/get-candidates/")
 async def get_candidates(hr_id: Optional[str] = Query(None)):
-    """
-    HR portal calls this with ?hr_id=HR-001 → sees only their own candidates.
-    No hr_id → returns all (kept for backwards compat / admin use).
-    """
     return get_all_candidates(hr_id=hr_id)
 
 @app.put("/update-candidate/{candidate_id}")
@@ -427,7 +379,7 @@ async def mark_offer_generated(candidate_id: str, body: dict = Body({})):
     offer_details = body.get("offer_details", {})
     update_payload = {"offer_generated": True}
     if offer_details:
-        update_payload["offer_details"] = offer_details   # ← save form data to MongoDB
+        update_payload["offer_details"] = offer_details
     result = candidates_collection.update_one(
         {"candidate_id": candidate_id},
         {"$set": update_payload}
@@ -438,7 +390,6 @@ async def mark_offer_generated(candidate_id: str, body: dict = Body({})):
 
 @app.post("/select-candidate/{candidate_id}", status_code=200)
 async def select_candidate(candidate_id: str):
-    """HR marks a candidate as selected after all interview rounds."""
     result = candidates_collection.update_one(
         {"candidate_id": candidate_id},
         {"$set": {"candidate_selected": True, "candidate_rejected": False}}
@@ -449,7 +400,6 @@ async def select_candidate(candidate_id: str):
 
 @app.post("/reject-candidate/{candidate_id}", status_code=200)
 async def reject_candidate(candidate_id: str):
-    """HR marks a candidate as rejected after checking verdict."""
     result = candidates_collection.update_one(
         {"candidate_id": candidate_id},
         {"$set": {"candidate_rejected": True, "candidate_selected": False}}
@@ -460,12 +410,6 @@ async def reject_candidate(candidate_id: str):
 
 @app.post("/undo-candidate-verdict/{candidate_id}", status_code=200)
 async def undo_candidate_verdict(candidate_id: str):
-    """
-    Move a selected or rejected candidate back to Pending.
-    Also clears candidate_joined / candidate_not_joined defensively in case the
-    candidate had advanced past Selected — HR shouldn't be left with stale flags
-    if they decide to unwind a verdict.
-    """
     result = candidates_collection.update_one(
         {"candidate_id": candidate_id},
         {"$set": {
@@ -480,22 +424,10 @@ async def undo_candidate_verdict(candidate_id: str):
     return {"message": f"Candidate {candidate_id} moved back to Pending."}
 
 
-# ─── Post-offer status tracking (Joined / Not Joined) ───────────────────────
-# Once HR has marked a candidate as Selected and generated an offer letter,
-# they can update the post-offer outcome:
-#   • Joined      — candidate accepted the offer and joined the company.
-#   • Not Joined  — candidate declined or ghosted after offer.
-#
-# These flags are mutually exclusive (only one can be true at a time). The
-# offer_generated flag is NEVER touched here — once an offer is out, it stays
-# generated even if HR uses Undo to move the candidate back to Selected.
-# Both flags are stored as plain booleans on the candidate document, mirroring
-# the existing candidate_selected / candidate_rejected pattern.
-# ────────────────────────────────────────────────────────────────────────────
+# ─── Post-offer status tracking ─────────────────────────────────────────────
 
 @app.post("/mark-joined/{candidate_id}", status_code=200)
 async def mark_joined(candidate_id: str):
-    """Mark a selected candidate as joined. Clears not_joined flag if set."""
     result = candidates_collection.update_one(
         {"candidate_id": candidate_id},
         {"$set": {"candidate_joined": True, "candidate_not_joined": False}}
@@ -507,7 +439,6 @@ async def mark_joined(candidate_id: str):
 
 @app.post("/mark-not-joined/{candidate_id}", status_code=200)
 async def mark_not_joined(candidate_id: str):
-    """Mark a selected candidate as not joined. Clears joined flag if set."""
     result = candidates_collection.update_one(
         {"candidate_id": candidate_id},
         {"$set": {"candidate_not_joined": True, "candidate_joined": False}}
@@ -519,11 +450,6 @@ async def mark_not_joined(candidate_id: str):
 
 @app.post("/undo-joined-status/{candidate_id}", status_code=200)
 async def undo_joined_status(candidate_id: str):
-    """
-    Move a Joined or Not-Joined candidate back to Selected.
-    Clears both flags but leaves offer_generated / offer_details intact so HR
-    doesn't have to regenerate the same offer letter.
-    """
     result = candidates_collection.update_one(
         {"candidate_id": candidate_id},
         {"$set": {"candidate_joined": False, "candidate_not_joined": False}}
@@ -533,29 +459,13 @@ async def undo_joined_status(candidate_id: str):
     return {"message": f"Candidate {candidate_id} moved back to Selected."}
 
 
-# ─── ATS Manual Override ────────────────────────────────────────────────────
-# These two endpoints let HR override the automatic ATS-rejection decision.
-# A candidate with ats_score < 30% is normally placed in the "Rejected" list
-# on the View Candidates page. HR can manually approve such a candidate (e.g.
-# when they believe the candidate has potential beyond what keywords reveal)
-# and move them to Pending, making them eligible for interview scheduling.
-# We DO NOT modify ats_score — only set a separate manual_override flag —
-# so the original ATS signal is preserved for audit and analytics.
-# ────────────────────────────────────────────────────────────────────────────
+# ─── ATS Manual Override ─────────────────────────────────────────────────────
 
 @app.post("/override-ats-rejection/{candidate_id}", status_code=200)
 async def override_ats_rejection(candidate_id: str):
-    """
-    HR manually approves a candidate whose ATS score is below the 30% threshold.
-    The candidate moves from the ATS-rejected list to the Pending list,
-    making them eligible for interview scheduling.
-    Note: ats_score itself is NOT modified — only the manual_override flag is set,
-    preserving the original ATS signal for audit purposes.
-    """
     candidate = candidates_collection.find_one({"candidate_id": candidate_id})
     if not candidate:
         raise HTTPException(status_code=404, detail=f"Candidate '{candidate_id}' not found.")
-
     result = candidates_collection.update_one(
         {"candidate_id": candidate_id},
         {"$set": {"manual_override": True}}
@@ -567,10 +477,6 @@ async def override_ats_rejection(candidate_id: str):
 
 @app.post("/revoke-ats-override/{candidate_id}", status_code=200)
 async def revoke_ats_override(candidate_id: str):
-    """
-    Revert a manual override — the candidate goes back to the ATS-rejected list
-    (assuming their ats_score is still below threshold).
-    """
     result = candidates_collection.update_one(
         {"candidate_id": candidate_id},
         {"$unset": {"manual_override": ""}}
@@ -594,9 +500,7 @@ async def get_resume(candidate_id: str):
     candidate = candidates_collection.find_one({"candidate_id": candidate_id})
     if not candidate or "resume_file" not in candidate:
         raise HTTPException(status_code=404, detail="Resume not found")
-
     file_name = candidate.get("file_name", f"{candidate_id}.pdf")
-
     return StreamingResponse(
         io.BytesIO(candidate["resume_file"]),
         media_type="application/pdf",
@@ -609,7 +513,6 @@ async def get_resume(candidate_id: str):
 
 @app.get("/get-users/")
 async def get_users():
-    """Returns all users (name, user_id, role only — no password hashes)."""
     users = list(users_collection.find({}, {"_id": 0, "password_hash": 0}))
     return users
 
@@ -634,7 +537,6 @@ async def schedule_interview(
     if not interviewer:
         raise HTTPException(status_code=404, detail=f"No interviewer account found with email '{interviewer_email}'. Please check the email and try again.")
 
-    # Calculate the round number being scheduled right now
     candidate_doc = candidates_collection.find_one({"candidate_id": candidate_id})
     completed_rounds = len(candidate_doc.get("interviews", []))
     scheduled_round = completed_rounds + 1
@@ -650,7 +552,7 @@ async def schedule_interview(
             "meeting_link": meeting_link or "",
             "scheduled_by_hr_id": hr_id or "",
             "scheduled_by_hr_name": hr_name or "",
-            "scheduled_round": scheduled_round,   # ← exact round being scheduled
+            "scheduled_round": scheduled_round,
         }
     }
 
@@ -668,16 +570,12 @@ async def schedule_interview(
 
 @app.post("/unschedule-interview/", status_code=200)
 async def unschedule_interview(payload: dict = Body(...)):
-    """Remove scheduling from a candidate — moves them back to unscheduled."""
     candidate_id = payload.get("candidate_id")
     if not candidate_id:
         raise HTTPException(status_code=422, detail="candidate_id is required.")
-
     candidate = candidates_collection.find_one({"candidate_id": candidate_id})
     if not candidate:
         raise HTTPException(status_code=404, detail=f"Candidate '{candidate_id}' not found.")
-
-    # Unset status and interview_details so candidate goes back to clean Pending state
     candidates_collection.update_one(
         {"candidate_id": candidate_id},
         {"$unset": {"status": "", "interview_details": ""}}
@@ -685,17 +583,12 @@ async def unschedule_interview(payload: dict = Body(...)):
     return {"message": f"Candidate {candidate_id} unscheduled successfully."}
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# INTERVIEWER — fetch only assigned candidates
+# INTERVIEWER
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @app.get("/get-interviewer-candidates/{email}")
 async def get_interviewer_candidates(email: str):
-    candidates = get_candidates_for_interviewer(email)
-    return candidates
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# INTERVIEWERS LIST
-# ═══════════════════════════════════════════════════════════════════════════════
+    return get_candidates_for_interviewer(email)
 
 @app.get("/get-interviewers/")
 async def list_interviewers():
@@ -755,8 +648,6 @@ async def add_interview(
     if candidate_updated == 0:
         raise HTTPException(status_code=404, detail=f"Candidate ID '{candidate_id}' not found.")
 
-    # Clear "Scheduled" status now that the round is complete — moves the candidate
-    # out of the Scheduled section on the HR portal so scores can be evaluated.
     candidates_collection.update_one(
         {"candidate_id": candidate_id},
         {"$unset": {"status": "", "interview_details": ""}}
@@ -862,9 +753,14 @@ async def aggregate_interviews(candidate_id: str, force: bool = True):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @app.get("/score-fitment/{candidate_id}")
-async def score_fitment(candidate_id: str):
+async def score_fitment(candidate_id: str, force_rescore: bool = Query(False)):
+    """
+    Score fitment for a candidate.
+    ?force_rescore=true bypasses the cached result and triggers a fresh LLM call.
+    This is what the Re-score button on the frontend uses.
+    """
     try:
-        result = score_fitment_logic(candidate_id)
+        result = score_fitment_logic(candidate_id, force_rescore=force_rescore)
         if result:
             return result
         else:
@@ -1100,24 +996,12 @@ async def interviewer_chat(request: dict):
 async def talent_pool_search(payload: dict = Body(...)):
     """
     Search the entire candidate database for best matches against a given JD.
-
-    Accepts:
-      - role_id   : existing role's ID → fetches that role's JD from MongoDB
-      - jd_text   : free-form JD/skills text typed by HR
-      (at least one must be provided; if both given, jd_text takes precedence)
-
-    Excludes:
-      - Candidates who have already joined the company (candidate_joined == True)
-
-    Returns candidates ranked by re-computed ATS score (descending) against the
-    provided JD — regardless of which role they originally applied for.
-    Each candidate includes their current pipeline status so the frontend can
-    decide whether to show the "Send to Pending" button.
+    Excludes candidates who have already joined the company.
+    Returns candidates ranked by re-computed ATS score (descending).
     """
     role_id  = payload.get("role_id")
     jd_text  = payload.get("jd_text", "").strip()
 
-    # ── Resolve JD text ──────────────────────────────────────────────────────
     if not jd_text and role_id:
         role_doc = (
             db["roles"].find_one({"role_id": str(role_id)}) or
@@ -1133,16 +1017,13 @@ async def talent_pool_search(payload: dict = Body(...)):
             detail="Please provide either a role_id or jd_text to search."
         )
 
-    # ── Fetch all non-joined candidates ──────────────────────────────────────
-    # Exclude anyone who has already joined the company.
     all_candidates = list(
         candidates_collection.find(
             {"candidate_joined": {"$ne": True}},
-            {"_id": 0, "resume_file": 0}   # exclude binary blob
+            {"_id": 0, "resume_file": 0}
         )
     )
 
-    # ── Re-score each candidate against the provided JD ──────────────────────
     results = []
     for c in all_candidates:
         resume_text = c.get("resume_text", "")
@@ -1151,25 +1032,16 @@ async def talent_pool_search(payload: dict = Body(...)):
 
         talent_score = calculate_ats_score(resume_text, jd_text)
 
-        # ── Cached fitment lookup ────────────────────────────────────────────
-        # fitment is computed against the candidate's ORIGINALLY APPLIED role's
-        # JD (not the search JD), and is stored under c["results"] by
-        # score_fitment_logic the first time it runs for that candidate.
-        # We never recompute here — the LLM call is too slow for a list view.
-        # Candidates whose fitment has never been computed return None, which
-        # the frontend renders as "—".
         cached_results = c.get("results") or {}
         cached_fitment = cached_results.get("fitment_score")
-        # Round to keep the wire format consistent with talent_score.
         if cached_fitment is not None:
             try:
                 cached_fitment = round(float(cached_fitment), 2)
             except (TypeError, ValueError):
                 cached_fitment = None
 
-        # ── Derive a human-readable pipeline status ───────────────────────────
         if c.get("candidate_joined"):
-            pipeline_status = "Joined"                       # excluded above, safety net
+            pipeline_status = "Joined"
         elif c.get("candidate_not_joined"):
             pipeline_status = "Not Joined"
         elif c.get("candidate_selected"):
@@ -1183,8 +1055,6 @@ async def talent_pool_search(payload: dict = Body(...)):
         else:
             pipeline_status = "Pending"
 
-        # ── Can this candidate be sent to Pending? ────────────────────────────
-        # Eligible if NOT already Pending / Scheduled / Selected / Joined
         not_sendable = pipeline_status in ("Pending", "Scheduled", "Selected", "Joined")
         can_send_to_pending = not not_sendable
 
@@ -1197,15 +1067,14 @@ async def talent_pool_search(payload: dict = Body(...)):
             "applied_role":    c.get("applied_role"),
             "applied_role_id": c.get("applied_role_id"),
             "original_ats_score": c.get("ats_score", 0),
-            "talent_score":    talent_score,          # re-scored against search JD
-            "fitment_score":   cached_fitment,        # cached, vs originally applied role's JD
+            "talent_score":    talent_score,
+            "fitment_score":   cached_fitment,
             "pipeline_status": pipeline_status,
             "can_send_to_pending": can_send_to_pending,
             "interviews_count": len(c.get("interviews", [])),
             "hr_id":           c.get("hr_id", ""),
         })
 
-    # Sort descending by talent_score
     results.sort(key=lambda x: x["talent_score"], reverse=True)
 
     return {
@@ -1217,21 +1086,15 @@ async def talent_pool_search(payload: dict = Body(...)):
 @app.post("/talent-pool/send-to-pending/{candidate_id}", status_code=200)
 async def talent_pool_send_to_pending(candidate_id: str):
     """
-    Move any eligible candidate back to the Pending state so HR can schedule
-    them for an interview, regardless of why they were not in Pending before:
-
-    - ATS Rejected       → sets manual_override = True  (existing mechanism)
+    Move any eligible candidate back to Pending regardless of why they weren't:
+    - ATS Rejected       → sets manual_override = True
     - Interview Rejected → clears candidate_rejected flag
     - Not Joined         → clears candidate_not_joined flag
-
-    candidate_selected and candidate_joined are never touched here — a selected
-    or joined candidate cannot be sent back to Pending via Talent Pool.
     """
     candidate = candidates_collection.find_one({"candidate_id": candidate_id})
     if not candidate:
         raise HTTPException(status_code=404, detail=f"Candidate '{candidate_id}' not found.")
 
-    # Guard: do not move Selected or Joined candidates
     if candidate.get("candidate_selected"):
         raise HTTPException(status_code=400, detail="Candidate is already Selected.")
     if candidate.get("candidate_joined"):
@@ -1240,20 +1103,16 @@ async def talent_pool_send_to_pending(candidate_id: str):
     update_set   = {}
     update_unset = {}
 
-    # Case 1: ATS-rejected (low score, no override)
     ats_score = candidate.get("ats_score", 100)
     if ats_score < 30 and not candidate.get("manual_override"):
         update_set["manual_override"] = True
 
-    # Case 2: Interview-rejected
     if candidate.get("candidate_rejected"):
         update_set["candidate_rejected"] = False
 
-    # Case 3: Not joined after offer
     if candidate.get("candidate_not_joined"):
         update_set["candidate_not_joined"] = False
 
-    # Case 4: Clear any stale scheduled status (safety)
     if candidate.get("status") == "Scheduled":
         update_unset["status"] = ""
         update_unset["interview_details"] = ""
