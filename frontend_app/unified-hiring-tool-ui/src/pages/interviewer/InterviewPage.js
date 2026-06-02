@@ -44,6 +44,12 @@ function formatDateTime(dt) {
   } catch { return "—"; }
 }
 
+function StatusPill({ completed }) {
+  return completed
+    ? <span className="ip-status ip-status--done">✓ Completed</span>
+    : <span className="ip-status ip-status--pending">● Pending</span>;
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 function InterviewPage() {
   const storedUser       = JSON.parse(localStorage.getItem("user") || "{}");
@@ -56,7 +62,15 @@ function InterviewPage() {
   const [completedCandidates, setCompletedCandidates] = useState([]);
   const [loading,             setLoading]             = useState(false);
   const [errorMsg,            setErrorMsg]            = useState("");
-  const [successMsg,          setSuccessMsg]          = useState("");
+
+  // ── Tabs, search, toast ───────────────────────────────────────────────────
+  const [activeTab,   setActiveTab]   = useState("pending"); // 'pending' | 'completed'
+  const [searchQuery, setSearchQuery] = useState("");
+  const [toast,       setToast]       = useState(null);
+
+  // ── HR name lookup map (hr_id → name) — covers all records, including
+  //    completed interviews where interview_details has been unset. ─────────
+  const [hrMap, setHrMap] = useState({});
 
   // ── Feedback modal (for + Round) ──────────────────────────────────────────
   const [modal,     setModal]     = useState({ open: false, mode: "add", candidate: null, roundNum: null });
@@ -95,6 +109,19 @@ function InterviewPage() {
       .finally(() => setLoading(false));
   }, [interviewerEmail]); // eslint-disable-line
 
+  // ── Fetch all users to build HR name map (non-critical, fail silently) ──
+  useEffect(() => {
+    axios.get(`${BASE_URL}/get-users/`, axiosConfig)
+      .then(res => {
+        const map = {};
+        (res.data || []).forEach(u => {
+          if (u.role === "HR") map[u.user_id] = u.name;
+        });
+        setHrMap(map);
+      })
+      .catch(() => {});
+  }, []);
+
   // ── Filter from cached list when role changes, and after feedback submit ──
   const fetchCandidates = (roleId) => {
     const role = allAssignedCandidates.filter(c => String(c.applied_role_id) === String(roleId));
@@ -131,7 +158,7 @@ function InterviewPage() {
     const usedRounds = (candidate.interviews || []).map(i => i.round);
     let nextRound = 1;
     while (usedRounds.includes(nextRound) && nextRound <= 10) nextRound++;
-    if (nextRound > 10) { setErrorMsg("Maximum 10 rounds reached."); return; }
+    if (nextRound > 10) { showToast("Maximum 10 rounds reached.", "error"); return; }
     setForm({
       round: nextRound,
       date: new Date().toISOString().split("T")[0],
@@ -271,18 +298,30 @@ function InterviewPage() {
 
 
 
-  const showSuccess = (msg) => {
-    setSuccessMsg(msg);
-    setTimeout(() => setSuccessMsg(""), 3000);
+  const showToast = (msg, type = "success") => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
   };
+  const showSuccess = (msg) => showToast(msg, "success");
+
+  // ── Search filter (name or candidate ID) applied to the active tab ────────
+  const filterBySearch = (list) => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter(c =>
+      (c.name || "").toLowerCase().includes(q) ||
+      String(c.candidate_id || "").toLowerCase().includes(q)
+    );
+  };
+  const pendingFiltered   = filterBySearch(pendingCandidates);
+  const completedFiltered = filterBySearch(completedCandidates);
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="interview-page">
       <h2 className="page-title">My Interviews</h2>
 
-      {errorMsg   && <div className="banner banner-error">{errorMsg}</div>}
-      {successMsg && <div className="banner banner-success">{successMsg}</div>}
+      {errorMsg && <div className="banner banner-error">{errorMsg}</div>}
 
       {/* Role selector */}
       <div className="role-selector">
@@ -303,7 +342,41 @@ function InterviewPage() {
 
       {selectedRoleId && !loading && (
         <>
+          {/* ── Tabs ──────────────────────────────────────────────────── */}
+          <div className="ip-tabs">
+            <button
+              className={`ip-tab ${activeTab === "pending" ? "active" : ""}`}
+              onClick={() => setActiveTab("pending")}
+            >
+              Pending Interview
+              <span className="ip-tab-count">{pendingCandidates.length}</span>
+            </button>
+            <button
+              className={`ip-tab ${activeTab === "completed" ? "active" : ""}`}
+              onClick={() => setActiveTab("completed")}
+            >
+              Completed Interview
+              <span className="ip-tab-count">{completedCandidates.length}</span>
+            </button>
+          </div>
+
+          {/* ── Search ────────────────────────────────────────────────── */}
+          <div className="ip-search-wrap">
+            <span className="ip-search-icon">🔍</span>
+            <input
+              type="text"
+              className="ip-search-input"
+              placeholder="Search by name or candidate ID…"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+            />
+            {searchQuery && (
+              <button className="ip-search-clear" onClick={() => setSearchQuery("")} title="Clear">✕</button>
+            )}
+          </div>
+
           {/* ── PENDING ────────────────────────────────────────────────── */}
+          {activeTab === "pending" && (
           <section className="section-card">
             <div className="section-header pending-header">
               <span className="section-icon">⏳</span>
@@ -316,6 +389,7 @@ function InterviewPage() {
                 <thead>
                   <tr>
                     <th>Candidate</th>
+                    <th>Interview Status</th>
                     <th>Round</th>
                     <th>Assigned By (HR)</th>
                     <th>Date & Time</th>
@@ -326,14 +400,16 @@ function InterviewPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {pendingCandidates.length === 0 ? (
+                  {pendingFiltered.length === 0 ? (
                     <tr>
-                      <td colSpan="8" className="empty-row">
-                        No pending candidates assigned to you.
+                      <td colSpan="9" className="empty-row">
+                        {searchQuery
+                          ? `No pending candidates match “${searchQuery}”.`
+                          : "No pending candidates assigned to you."}
                       </td>
                     </tr>
                   ) : (
-                    pendingCandidates.map(c => {
+                    pendingFiltered.map(c => {
                       const hasNotes = !!c.interviewer_notes?.trim();
                       return (
                         <tr key={c.candidate_id}>
@@ -343,6 +419,9 @@ function InterviewPage() {
                             <div className="cand-name">{c.name}</div>
                             <div className="cand-id">{c.candidate_id}</div>
                           </td>
+
+                          {/* Interview status */}
+                          <td><StatusPill completed={false} /></td>
 
                           {/* ✅ Current round being interviewed */}
                           <td>
@@ -364,13 +443,14 @@ function InterviewPage() {
                           <td>
                             {(() => {
                               // After feedback, interview_details is cleared.
-                              // Fall back to the most recent interviews[] entry
-                              // where scheduled_by_hr_name is now preserved.
+                              // Fallback order: backend-preserved field in interviews[],
+                              // then hrMap lookup by root-level hr_id (works for all records).
                               const lastRound = [...(c.interviews || [])].sort((a, b) => b.round - a.round)[0];
                               const hrName = c.interview_details?.scheduled_by_hr_name
                                 || c.last_interview_info?.scheduled_by_hr_name
                                 || lastRound?.scheduled_by_hr_name
-                                || c.interview_details?.scheduled_by_hr_id
+                                || hrMap[c.hr_id]
+                                || c.hr_id
                                 || "—";
                               return <span className="hr-tag">👤 {hrName}</span>;
                             })()}
@@ -383,7 +463,8 @@ function InterviewPage() {
                               const rawDt = c.interview_details?.scheduled_datetime
                                 || c.interview_details?.scheduled_date
                                 || c.last_interview_info?.scheduled_datetime
-                                || lastRound?.scheduled_datetime;
+                                || lastRound?.scheduled_datetime
+                                || lastRound?.datetime;
                               return formatDateTime(rawDt);
                             })()}
                           </td>
@@ -447,9 +528,11 @@ function InterviewPage() {
               </table>
             </div>
           </section>
+          )}
 
           {/* ── COMPLETED ──────────────────────────────────────────────── */}
-          <section className="section-card" style={{ marginTop: "2rem" }}>
+          {activeTab === "completed" && (
+          <section className="section-card">
             <div className="section-header completed-header">
               <span className="section-icon">✅</span>
               <h3>Interviews Completed</h3>
@@ -461,6 +544,7 @@ function InterviewPage() {
                 <thead>
                   <tr>
                     <th>Candidate</th>
+                    <th>Interview Status</th>
                     <th>Assigned By (HR)</th>
                     <th>Resume</th>
                     <th>Rounds Done</th>
@@ -470,12 +554,16 @@ function InterviewPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {completedCandidates.length === 0 ? (
+                  {completedFiltered.length === 0 ? (
                     <tr>
-                      <td colSpan="7" className="empty-row">No completed interviews yet.</td>
+                      <td colSpan="8" className="empty-row">
+                        {searchQuery
+                          ? `No completed interviews match “${searchQuery}”.`
+                          : "No completed interviews yet."}
+                      </td>
                     </tr>
                   ) : (
-                    completedCandidates.map(c => {
+                    completedFiltered.map(c => {
                       const avg       = getOverallAvg(c.interviews || []);
                       const hire      = avg !== null ? getHireLabel(avg) : null;
                       const interviews = [...(c.interviews || [])].sort((a, b) => a.round - b.round);
@@ -485,13 +573,15 @@ function InterviewPage() {
                             <div className="cand-name">{c.name}</div>
                             <div className="cand-id">{c.candidate_id}</div>
                           </td>
+                          <td><StatusPill completed={true} /></td>
                           <td>
                             {(() => {
                               const lastRound = [...(c.interviews || [])].sort((a, b) => b.round - a.round)[0];
                               const hrName = c.interview_details?.scheduled_by_hr_name
                                 || c.last_interview_info?.scheduled_by_hr_name
                                 || lastRound?.scheduled_by_hr_name
-                                || c.interview_details?.scheduled_by_hr_id
+                                || hrMap[c.hr_id]
+                                || c.hr_id
                                 || "—";
                               return <span className="hr-tag">👤 {hrName}</span>;
                             })()}
@@ -582,6 +672,7 @@ function InterviewPage() {
               </table>
             </div>
           </section>
+          )}
         </>
       )}
 
@@ -737,6 +828,16 @@ function InterviewPage() {
               </div>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* ── Toast ─────────────────────────────────────────────────── */}
+      {toast && (
+        <div className="ip-toast-container">
+          <div className={`ip-toast ip-toast--${toast.type}`}>
+            <span className="ip-toast-icon">{toast.type === "success" ? "✓" : "✕"}</span>
+            <span className="ip-toast-msg">{toast.msg}</span>
           </div>
         </div>
       )}
