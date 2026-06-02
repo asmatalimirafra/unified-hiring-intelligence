@@ -28,6 +28,8 @@ const parseDate = (dt) => {
 const todayStr   = () => new Date().toLocaleDateString('en-CA');
 const monthStart = () => new Date(new Date().getFullYear(), new Date().getMonth(), 1).toLocaleDateString('en-CA');
 const monthEnd   = () => new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toLocaleDateString('en-CA');
+const yearStart  = () => new Date(new Date().getFullYear(), 0, 1).toLocaleDateString('en-CA');
+const addDays    = (str, n) => { const d = new Date(str); d.setDate(d.getDate() + n); return d.toLocaleDateString('en-CA'); };
 
 const inRange = (dateStr, from, to) => {
   const d = parseDate(dateStr);
@@ -38,6 +40,41 @@ const inRange = (dateStr, from, to) => {
 
 const getInitials = (name = '') =>
   name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+
+/* ── one common range used by every widget ────────────────────────────── */
+const PRESETS = [
+  { key: 'today', label: 'Today',      range: () => ({ from: todayStr(),         to: todayStr() }) },
+  { key: '7d',    label: '7D',         range: () => ({ from: addDays(todayStr(), -6),  to: todayStr() }) },
+  { key: '30d',   label: '30D',        range: () => ({ from: addDays(todayStr(), -29), to: todayStr() }) },
+  { key: 'month', label: 'This Month', range: () => ({ from: monthStart(),        to: monthEnd() }) },
+  { key: 'year',  label: 'This Year',  range: () => ({ from: yearStart(),         to: todayStr() }) },
+];
+
+/* count-up animation for stat numbers (no external dependency) */
+function useCountUp(target, duration = 650) {
+  const [val, setVal] = useState(0);
+  useEffect(() => {
+    let raf;
+    const start = performance.now();
+    const to = Number(target) || 0;
+    const tick = (now) => {
+      const p = Math.min((now - start) / duration, 1);
+      const eased = 1 - Math.pow(1 - p, 3);
+      setVal(to * eased);
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, duration]);
+  return val;
+}
+
+function StatNum({ value, decimals = 0 }) {
+  const isNum = value !== null && value !== undefined && value !== '—';
+  const animated = useCountUp(isNum ? Number(value) : 0);
+  if (!isNum) return <span className="stat-num">—</span>;
+  return <span className="stat-num">{animated.toFixed(decimals)}</span>;
+}
 
 function DateRangePicker({ from, to, onChange }) {
   return (
@@ -60,22 +97,26 @@ function InterviewerDashboard() {
   const [loading,         setLoading]         = useState(true);
   const [myId,            setMyId]            = useState('');
 
-  const [rangeMonth,     setRangeMonth]     = useState({ from: monthStart(), to: monthEnd() });
-  const [rangeAvg,       setRangeAvg]       = useState({ from: monthStart(), to: monthEnd() });
-  const [rangeToday,     setRangeToday]     = useState({ from: todayStr(),   to: todayStr()  });
-  const [rangeBreakdown, setRangeBreakdown] = useState({ from: monthStart(), to: monthEnd() });
+  /* ── single shared range for the whole dashboard ── */
+  const [range, setRange] = useState({ from: monthStart(), to: monthEnd() });
+
+  const activePreset = useMemo(() => {
+    const match = PRESETS.find(p => {
+      const r = p.range();
+      return r.from === range.from && r.to === range.to;
+    });
+    return match ? match.key : null;
+  }, [range]);
 
   useEffect(() => {
     const fetchAll = async () => {
       try {
-        const localUser = JSON.parse(localStorage.getItem('user') || '{}');
+        const localUser   = JSON.parse(localStorage.getItem('user') || '{}');
         const activeId    = userId || localUser.user_id || localUser.interviewer_id || localUser.id;
-        // ── Use the interviewer's email from localStorage ─────────────────
         const activeEmail = localUser.email || '';
 
         const [interviewersRes, candidatesRes] = await Promise.all([
           axios.get(`${BASE_URL}/get-interviewers/`, HEADERS),
-          // ── Fetch only candidates assigned to this interviewer ───────────
           activeEmail
             ? axios.get(`${BASE_URL}/get-interviewer-candidates/${encodeURIComponent(activeEmail)}`, HEADERS)
             : Promise.resolve({ data: [] }),
@@ -84,7 +125,7 @@ function InterviewerDashboard() {
         const candidates = candidatesRes.data || [];
         setAllCandidates(candidates);
 
-        const dbUser   = interviewersRes.data.find(i =>
+        const dbUser = interviewersRes.data.find(i =>
           String(i.interviewer_id) === String(activeId) ||
           String(i.id)             === String(activeId)
         );
@@ -144,31 +185,32 @@ function InterviewerDashboard() {
     [pendingCandidatesList]
   );
 
+  /* ── everything below now reads the single shared `range` ── */
   const interviewsInRange = useMemo(() =>
-    myInterviews.filter(iv => inRange(iv.datetime, rangeMonth.from, rangeMonth.to)).length,
-    [myInterviews, rangeMonth]
+    myInterviews.filter(iv => inRange(iv.datetime, range.from, range.to)).length,
+    [myInterviews, range]
   );
 
   const avgScoreInRange = useMemo(() => {
     const filtered = myInterviews.filter(iv =>
-      iv.ratings && inRange(iv.datetime, rangeAvg.from, rangeAvg.to)
+      iv.ratings && inRange(iv.datetime, range.from, range.to)
     );
     if (!filtered.length) return null;
     let sum = 0, cnt = 0;
     filtered.forEach(iv => { Object.values(iv.ratings).forEach(v => { sum += v; cnt++; }); });
     return cnt > 0 ? parseFloat((sum / cnt).toFixed(1)) : null;
-  }, [myInterviews, rangeAvg]);
+  }, [myInterviews, range]);
 
-  const todaysInterviewList = useMemo(() =>
+  const scheduledList = useMemo(() =>
     myInterviews
-      .filter(iv => inRange(iv.datetime, rangeToday.from, rangeToday.to))
+      .filter(iv => inRange(iv.datetime, range.from, range.to))
       .sort((a, b) => (parseDate(a.datetime) || 0) - (parseDate(b.datetime) || 0)),
-    [myInterviews, rangeToday]
+    [myInterviews, range]
   );
 
   const scoreBreakdown = useMemo(() => {
     const filtered = myInterviews.filter(iv =>
-      iv.ratings && inRange(iv.datetime, rangeBreakdown.from, rangeBreakdown.to)
+      iv.ratings && inRange(iv.datetime, range.from, range.to)
     );
     if (!filtered.length) return { communication: 0, problem_solving: 0, domain_knowledge: 0 };
     const sum = { communication: 0, problem_solving: 0, domain_knowledge: 0 };
@@ -184,40 +226,59 @@ function InterviewerDashboard() {
       problem_solving:  cnt ? parseFloat((sum.problem_solving  / cnt).toFixed(1)) : 0,
       domain_knowledge: cnt ? parseFloat((sum.domain_knowledge / cnt).toFixed(1)) : 0,
     };
-  }, [myInterviews, rangeBreakdown]);
+  }, [myInterviews, range]);
 
-
-  // ── Chart ─────────────────────────────────────────────────────────────────
+  // ── Chart — daily buckets for short ranges, weekly for longer ────────────
   const chartData = useMemo(() => {
-    const days = [];
+    const start = new Date(range.from);
+    const end   = new Date(range.to);
+    const spanDays = Math.round((end - start) / 86400000) + 1;
+    const stepDays = spanDays <= 31 ? 1 : 7;
+
+    const labels = [];
     const counts = [];
-    const start = new Date(rangeMonth.from);
-    const end   = new Date(rangeMonth.to);
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 7)) {
-      const label = d.toLocaleDateString('en-CA');
-      days.push(label);
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + stepDays)) {
+      const bStart = new Date(d);
+      const bEnd   = new Date(d); bEnd.setDate(bEnd.getDate() + stepDays - 1);
+      const bEndEod = new Date(bEnd.getFullYear(), bEnd.getMonth(), bEnd.getDate(), 23, 59, 59);
+
+      labels.push(bStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
       counts.push(myInterviews.filter(iv => {
         const dt = parseDate(iv.datetime);
-        return dt && dt.toLocaleDateString('en-CA') === label;
+        return dt && dt >= bStart && dt <= bEndEod;
       }).length);
     }
     return {
-      labels: days,
+      labels,
       datasets: [{
         label: 'Interviews',
         data: counts,
-        backgroundColor: '#0055ff44',
-        borderColor: '#0055ff',
-        borderWidth: 2,
-        borderRadius: 6,
+        backgroundColor: '#0055ff',
+        hoverBackgroundColor: '#003fcc',
+        borderRadius: 8,
+        maxBarThickness: 30,
       }]
     };
-  }, [myInterviews, rangeMonth]);
+  }, [myInterviews, range]);
 
   const chartOptions = {
     responsive: true,
-    plugins: { legend: { display: false } },
-    scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: '#0b1220',
+        padding: 10,
+        cornerRadius: 8,
+        titleColor: '#ffffff',
+        bodyColor: '#cbd5e1',
+        displayColors: false,
+      },
+    },
+    scales: {
+      x: { grid: { display: false }, ticks: { color: '#94a3b8', maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },
+      y: { beginAtZero: true, grid: { color: '#eef2f7' }, ticks: { stepSize: 1, color: '#94a3b8' } },
+    },
   };
 
   const thisWeekCount = useMemo(() => {
@@ -260,49 +321,68 @@ function InterviewerDashboard() {
   const name = interviewerData?.name || 'Interviewer';
 
   return (
-    <div className="interviewer-dashboard">
-      <div className="dash-header">
+    <div className="interviewer-dashboard idash-enhanced">
+      {/* scoped enhancement styles — additive only, never overrides existing CSS */}
+      <style>{IDASH_STYLES}</style>
+
+      <div className="dash-header idash-header">
         <div>
           <h1 className="dash-title">Welcome back, {name.split(' ')[0]} 👋</h1>
           <p className="dash-sub">Here's your interview activity overview — assigned candidates only.</p>
+        </div>
+
+        {/* ── ONE common date range picker for the whole dashboard ── */}
+        <div className="idash-toolbar">
+          <div className="idash-presets">
+            {PRESETS.map(p => (
+              <button
+                key={p.key}
+                className={`idash-chip ${activePreset === p.key ? 'active' : ''}`}
+                onClick={() => setRange(p.range())}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <DateRangePicker
+            from={range.from} to={range.to}
+            onChange={(f, t) => setRange({ from: f, to: t })}
+          />
         </div>
       </div>
 
       {/* ── Row 1 ──────────────────────────────────────────────── */}
       <div className="dash-row1">
-        <div className="dash-card stat-card">
+        <div className="dash-card stat-card clickable"
+          onClick={() => navigate(`/interviewer/${userId}/interviews`)}>
           <div className="stat-icon blue"><i className="bi bi-calendar-check" /></div>
           <div className="stat-body">
-            <div className="stat-num">{interviewsToday}</div>
+            <StatNum value={interviewsToday} />
             <div className="stat-lbl">Today's Interviews</div>
           </div>
         </div>
+
         <div className="dash-card stat-card">
           <div className="stat-icon purple"><i className="bi bi-graph-up" /></div>
           <div className="stat-body">
-            <DateRangePicker
-              from={rangeMonth.from} to={rangeMonth.to}
-              onChange={(f, t) => setRangeMonth({ from: f, to: t })}
-            />
-            <div className="stat-num">{interviewsInRange}</div>
+            <StatNum value={interviewsInRange} />
             <div className="stat-lbl">Interviews in Range</div>
           </div>
         </div>
+
         <div className="dash-card stat-card">
           <div className="stat-icon green"><i className="bi bi-star-half" /></div>
           <div className="stat-body">
-            <DateRangePicker
-              from={rangeAvg.from} to={rangeAvg.to}
-              onChange={(f, t) => setRangeAvg({ from: f, to: t })}
-            />
-            <div className="stat-num">{avgScoreInRange ?? '—'}</div>
+            <StatNum value={avgScoreInRange} decimals={1} />
             <div className="stat-lbl">Avg Score / 5</div>
           </div>
         </div>
-        <div className="dash-card stat-card">
+
+        <div className="dash-card stat-card clickable"
+          onClick={() => navigate(`/interviewer/${userId}/interviews`)}>
           <div className="stat-icon orange"><i className="bi bi-people" /></div>
           <div className="stat-body">
-            <div className="stat-num">{allCandidates.length}</div>
+            <StatNum value={allCandidates.length} />
             <div className="stat-lbl">Assigned Candidates</div>
           </div>
         </div>
@@ -312,22 +392,19 @@ function InterviewerDashboard() {
       <div className="dash-row2">
         <div className="dash-card">
           <div className="card-header">
-            <span className="card-title"><i className="bi bi-clock" /> Today's schedule</span>
+            <span className="card-title"><i className="bi bi-clock" /> Scheduled interviews</span>
+            <span className="idash-range-tag">{range.from} → {range.to}</span>
           </div>
-          <DateRangePicker
-            from={rangeToday.from} to={rangeToday.to}
-            onChange={(f, t) => setRangeToday({ from: f, to: t })}
-          />
-          <div className="card-sub" style={{ marginTop: '0.5rem' }}>
-            {todaysInterviewList.length} interview{todaysInterviewList.length !== 1 ? 's' : ''} found
+          <div className="card-sub" style={{ marginTop: '0.25rem' }}>
+            {scheduledList.length} interview{scheduledList.length !== 1 ? 's' : ''} in range
           </div>
-          {todaysInterviewList.length === 0 ? (
+          {scheduledList.length === 0 ? (
             <div className="empty-state">
               <i className="bi bi-calendar-x" />
               <p>No interviews in this date range</p>
             </div>
           ) : (
-            todaysInterviewList.map((iv, idx) => (
+            scheduledList.map((iv, idx) => (
               <div className="cand-row" key={idx}>
                 <div className="avatar">{getInitials(iv.candidateName)}</div>
                 <div className="cand-info">
@@ -335,7 +412,7 @@ function InterviewerDashboard() {
                   <div className="cand-meta">
                     {iv.candidateRole} ·{' '}
                     {iv.datetime
-                      ? parseDate(iv.datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                      ? parseDate(iv.datetime).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
                       : '—'}
                   </div>
                 </div>
@@ -385,11 +462,8 @@ function InterviewerDashboard() {
         <div className="dash-card">
           <div className="card-header">
             <span className="card-title"><i className="bi bi-sliders" /> My scoring breakdown</span>
+            <span className="idash-range-tag">{range.from} → {range.to}</span>
           </div>
-          <DateRangePicker
-            from={rangeBreakdown.from} to={rangeBreakdown.to}
-            onChange={(f, t) => setRangeBreakdown({ from: f, to: t })}
-          />
           <div style={{ marginTop: '0.8rem' }}>
             <ScoreBar label="Communication"    value={scoreBreakdown.communication}    color="#0055ff" />
             <ScoreBar label="Problem Solving"  value={scoreBreakdown.problem_solving}  color="#7c6ff7" />
@@ -438,9 +512,11 @@ function InterviewerDashboard() {
             </span>
           </div>
           <div className="card-sub" style={{ marginBottom: '0.6rem' }}>
-            Range: {rangeMonth.from} → {rangeMonth.to}
+            Range: {range.from} → {range.to}
           </div>
-          <Bar data={chartData} options={chartOptions} />
+          <div className="idash-chart-wrap">
+            <Bar data={chartData} options={chartOptions} />
+          </div>
         </div>
 
         <div className="dash-card">
@@ -474,5 +550,99 @@ function InterviewerDashboard() {
     </div>
   );
 }
+
+/* Scoped, additive enhancement styles. Everything is namespaced under
+   .idash-enhanced so it layers on top of your existing InterviewerDashboard.css
+   without overriding any of the original rules. */
+const IDASH_STYLES = `
+.idash-enhanced .idash-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.idash-enhanced .idash-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.idash-enhanced .idash-presets {
+  display: inline-flex;
+  gap: 4px;
+  background: #f1f5fb;
+  border: 1px solid #e3e9f4;
+  border-radius: 12px;
+  padding: 4px;
+}
+.idash-enhanced .idash-chip {
+  border: none;
+  background: transparent;
+  color: #5b6577;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease, transform .12s ease;
+}
+.idash-enhanced .idash-chip:hover { color: #0055ff; transform: translateY(-1px); }
+.idash-enhanced .idash-chip.active {
+  background: #0055ff;
+  color: #fff;
+  box-shadow: 0 4px 10px rgba(0,85,255,.28);
+}
+.idash-enhanced .idash-range-tag {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #6b7280;
+  background: #f3f5fa;
+  border: 1px solid #e6eaf2;
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+
+/* card + stat-card interactivity */
+.idash-enhanced .stat-card,
+.idash-enhanced .dash-card {
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+.idash-enhanced .stat-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 26px rgba(2, 32, 71, .10);
+}
+.idash-enhanced .stat-card.clickable { cursor: pointer; }
+.idash-enhanced .stat-card.clickable:active { transform: translateY(-1px); }
+.idash-enhanced .quick-btn { transition: transform .15s ease, box-shadow .15s ease; }
+.idash-enhanced .quick-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 18px rgba(0, 85, 255, .14);
+}
+.idash-enhanced .cand-row.clickable { transition: background .15s ease, transform .12s ease; }
+.idash-enhanced .cand-row.clickable:hover { transform: translateX(2px); }
+
+/* fixed-height chart container so the bar chart stays crisp */
+.idash-enhanced .idash-chart-wrap { height: 240px; position: relative; }
+
+/* gentle entrance for the rows */
+.idash-enhanced .dash-row1,
+.idash-enhanced .dash-row2,
+.idash-enhanced .dash-row3,
+.idash-enhanced .dash-row4 {
+  animation: idashFade .35s ease both;
+}
+.idash-enhanced .dash-row2 { animation-delay: .04s; }
+.idash-enhanced .dash-row3 { animation-delay: .08s; }
+.idash-enhanced .dash-row4 { animation-delay: .12s; }
+@keyframes idashFade {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (max-width: 640px) {
+  .idash-enhanced .idash-toolbar { width: 100%; }
+  .idash-enhanced .idash-presets { width: 100%; justify-content: space-between; }
+}
+`;
 
 export default InterviewerDashboard;
