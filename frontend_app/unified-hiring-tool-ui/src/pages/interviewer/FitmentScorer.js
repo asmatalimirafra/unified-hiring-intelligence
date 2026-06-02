@@ -1,5 +1,5 @@
 // src/pages/interviewer/FitmentScorer.js
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import axios from 'axios';
 import './FitmentScorer.css';
 import ResumeViewer from '../../components/ResumeViewer';
@@ -8,11 +8,27 @@ import FitmentViewer from '../../components/FitmentViewer';
 const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 const HEADERS = { headers: { 'ngrok-skip-browser-warning': 'true' } };
 
+// Robust "completed" check: prefer the backend flag, fall back to feedback
+// history when the flag isn't present (a candidate with at least one recorded
+// interview and not currently re-scheduled is treated as completed).
+const isCompleted = (c) => {
+  if (c.interview_completed === true) return true;
+  if (c.interview_completed === false) return false;
+  const hasFeedback = Array.isArray(c.interviews) && c.interviews.length > 0;
+  return hasFeedback && c.status !== 'Scheduled';
+};
+
 function ScoreBadge({ score }) {
   if (score === null || score === undefined) return <span className="badge badge-unscored">—</span>;
   if (score >= 75) return <span className="badge badge-high">{score.toFixed(1)}%</span>;
   if (score >= 50) return <span className="badge badge-mid">{score.toFixed(1)}%</span>;
   return <span className="badge badge-low">{score.toFixed(1)}%</span>;
+}
+
+function StatusPill({ completed }) {
+  return completed
+    ? <span className="fs-status fs-status--done">✓ Completed</span>
+    : <span className="fs-status fs-status--pending">● Pending</span>;
 }
 
 function FitmentScorer() {
@@ -25,12 +41,21 @@ function FitmentScorer() {
   const [allAssignedCandidates, setAllAssignedCandidates] = useState([]);
   const [selectedRoleId, setSelectedRoleId]     = useState('');
   const [selectedRoleName, setSelectedRoleName] = useState('');
-  const [candidates, setCandidates]             = useState([]);
-  const [candidatesLoading, setCandidatesLoading] = useState(false);
   const [inlineScores, setInlineScores]         = useState({});
   const [rescoringId, setRescoringId]           = useState(null);
   const [resumeModal, setResumeModal]           = useState({ open: false, candidateId: '', fileName: '' });
   const [fitmentModal, setFitmentModal]         = useState({ open: false, data: null, loading: false, candidateId: null, candidateName: null });
+
+  // ── Tabs + search ────────────────────────────────────────────────────────
+  const [activeTab, setActiveTab]   = useState('pending'); // 'pending' | 'completed'
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // ── Toast (same pattern as the HR portal pages) ──────────────────────────
+  const [toast, setToast] = useState(null);
+  const showToast = (msg, type = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
+  };
 
   // ── HR name lookup map (hr_id → name) ────────────────────────────────────
   const [hrMap, setHrMap] = useState({});
@@ -48,7 +73,7 @@ function FitmentScorer() {
       .catch(() => {}); // non-critical, fail silently
   }, []);
 
-  // ── Fetch all candidates assigned to this interviewer, derive roles from them ──
+  // ── Fetch all candidates assigned to this interviewer, derive roles ───────
   useEffect(() => {
     if (!interviewerEmail) { setRolesLoading(false); return; }
     setRolesLoading(true);
@@ -56,10 +81,10 @@ function FitmentScorer() {
       .then(res => {
         const all = res.data || [];
         setAllAssignedCandidates(all);
-        // Build unique roles list only from assigned candidates (pending only)
-        const pending = all.filter(c => c.interview_completed !== true);
+        // Build the role list from ALL assigned candidates (pending + completed)
+        // so a role with only completed interviews still appears in the dropdown.
         const roleMap = {};
-        pending.forEach(c => {
+        all.forEach(c => {
           if (c.applied_role_id && c.applied_role) {
             roleMap[String(c.applied_role_id)] = c.applied_role;
           }
@@ -67,27 +92,46 @@ function FitmentScorer() {
         const derivedRoles = Object.entries(roleMap).map(([role_id, role]) => ({ role_id, role }));
         setRoles(derivedRoles);
       })
-      .catch(err => console.error('Failed to fetch assigned candidates:', err))
+      .catch(err => {
+        console.error('Failed to fetch assigned candidates:', err);
+        showToast('Could not load your assigned candidates.', 'error');
+      })
       .finally(() => setRolesLoading(false));
   }, [interviewerEmail]);
 
-  // ── Filter candidates from already-fetched list when role changes ─────────
-  useEffect(() => {
-    if (!selectedRoleId) { setCandidates([]); return; }
-    setCandidatesLoading(true);
-    const pending = allAssignedCandidates.filter(
-      c => String(c.applied_role_id) === String(selectedRoleId) && c.interview_completed !== true
+  // ── Candidates for the selected role (both pending and completed) ─────────
+  const roleCandidates = useMemo(() => {
+    if (!selectedRoleId) return [];
+    return allAssignedCandidates.filter(
+      c => String(c.applied_role_id) === String(selectedRoleId)
     );
-    setCandidates(pending);
+  }, [allAssignedCandidates, selectedRoleId]);
+
+  // ── Seed cached fitment scores whenever the role's candidate set changes ──
+  useEffect(() => {
     const scoreMap = {};
-    pending.forEach(c => {
+    roleCandidates.forEach(c => {
       if (c.results?.fitment_score !== undefined) {
         scoreMap[c.candidate_id] = c.results.fitment_score;
       }
     });
     setInlineScores(scoreMap);
-    setCandidatesLoading(false);
-  }, [selectedRoleId, allAssignedCandidates]);
+  }, [roleCandidates]);
+
+  const pendingList   = useMemo(() => roleCandidates.filter(c => !isCompleted(c)), [roleCandidates]);
+  const completedList = useMemo(() => roleCandidates.filter(c =>  isCompleted(c)), [roleCandidates]);
+
+  const activeList = activeTab === 'pending' ? pendingList : completedList;
+
+  // ── Apply the search filter (name or candidate ID) ────────────────────────
+  const visibleCandidates = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return activeList;
+    return activeList.filter(c =>
+      (c.name || '').toLowerCase().includes(q) ||
+      String(c.candidate_id || '').toLowerCase().includes(q)
+    );
+  }, [activeList, searchQuery]);
 
   const fetchFitmentData = useCallback(async (candidateId, forceRescore = false, candidateName = '') => {
     if (forceRescore) setRescoringId(candidateId);
@@ -99,10 +143,14 @@ function FitmentScorer() {
       const res = await axios.get(url, HEADERS);
       if (res.data?.fitment_score !== undefined) {
         setInlineScores(prev => ({ ...prev, [candidateId]: res.data.fitment_score }));
+        if (forceRescore) {
+          showToast(`Re-scored ${candidateName || candidateId} — ${res.data.fitment_score.toFixed(1)}%`, 'success');
+        }
       }
       setFitmentModal({ open: true, data: res.data, loading: false, candidateId, candidateName });
     } catch (err) {
       console.error('Fitment fetch failed:', err);
+      showToast('Fitment analysis failed. Please check backend logs.', 'error');
       setFitmentModal({
         open: true,
         data: { error: 'Fitment analysis failed. Please check backend logs.' },
@@ -117,7 +165,7 @@ function FitmentScorer() {
     const roleId = e.target.value;
     setSelectedRoleId(roleId);
     setSelectedRoleName(roles.find(r => r.role_id === roleId)?.role || '');
-    setInlineScores({});
+    setSearchQuery('');
   };
 
   return (
@@ -135,7 +183,7 @@ function FitmentScorer() {
           <div className="inline-spinner" />
         ) : (
           <select className="dropdown" onChange={handleRoleChange} value={selectedRoleId}>
-            <option value="">— Choose an open role —</option>
+            <option value="">— Choose a role —</option>
             {roles.map(role => (
               <option key={role.role_id} value={role.role_id}>{role.role}</option>
             ))}
@@ -149,22 +197,56 @@ function FitmentScorer() {
             <h3 className="section-title">
               Candidates for <span className="role-highlight">{selectedRoleName}</span>
             </h3>
-            {!candidatesLoading && (
-              <span className="candidate-count">
-                {candidates.length} candidate{candidates.length !== 1 ? 's' : ''}
-              </span>
-            )}
           </div>
 
-          {candidatesLoading ? (
-            <div className="loading-state">
-              <div className="inline-spinner large" />
-              <p>Loading candidates…</p>
+          {/* ── Tabs ──────────────────────────────────────────────── */}
+          <div className="fs-tabs">
+            <button
+              className={`fs-tab ${activeTab === 'pending' ? 'active' : ''}`}
+              onClick={() => setActiveTab('pending')}
+            >
+              Pending Interview
+              <span className="fs-tab-count">{pendingList.length}</span>
+            </button>
+            <button
+              className={`fs-tab ${activeTab === 'completed' ? 'active' : ''}`}
+              onClick={() => setActiveTab('completed')}
+            >
+              Completed Interview
+              <span className="fs-tab-count">{completedList.length}</span>
+            </button>
+          </div>
+
+          {/* ── Search ────────────────────────────────────────────── */}
+          <div className="fs-toolbar">
+            <div className="fs-search-wrap">
+              <span className="fs-search-icon">🔍</span>
+              <input
+                type="text"
+                className="fs-search-input"
+                placeholder="Search by name or candidate ID…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+              {searchQuery && (
+                <button className="fs-search-clear" onClick={() => setSearchQuery('')} title="Clear">✕</button>
+              )}
             </div>
-          ) : candidates.length === 0 ? (
+            <span className="candidate-count">
+              {visibleCandidates.length} candidate{visibleCandidates.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+
+          {visibleCandidates.length === 0 ? (
             <div className="empty-state">
               <span className="empty-icon">🔍</span>
-              <p>No candidates assigned to you for this role.</p>
+              <p>
+                {searchQuery
+                  ? `No candidates match “${searchQuery}”.`
+                  : activeTab === 'pending'
+                    ? 'No pending candidates for this role.'
+                    : 'No completed interviews for this role yet.'}
+              </p>
             </div>
           ) : (
             <table className="candidate-table">
@@ -174,19 +256,20 @@ function FitmentScorer() {
                   <th>Name</th>
                   <th>Assigned By (HR)</th>
                   <th>Scheduled Date</th>
+                  <th>Interview Status</th>
                   <th>Resume</th>
                   <th>Fitment Score</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {candidates.map(candidate => {
+                {visibleCandidates.map(candidate => {
                   const cachedScore  = inlineScores[candidate.candidate_id];
                   const isRescoring  = rescoringId === candidate.candidate_id;
-                  // HR name: prefer what's stored directly on interview_details, fall back to hrMap lookup
-                  // After feedback, interview_details is cleared by the backend.
-                  // Fall back to the most recent interviews[] entry where
-                  // scheduled_by_hr_name and scheduled_datetime are now preserved.
+                  const completed    = isCompleted(candidate);
+
+                  // HR name: prefer live interview_details, then preserved values on the
+                  // most recent interviews[] entry (kept after completion), then hrMap.
                   const lastRound = [...(candidate.interviews || [])].sort((a, b) => b.round - a.round)[0];
                   const hrName = candidate.interview_details?.scheduled_by_hr_name
                     || candidate.last_interview_info?.scheduled_by_hr_name
@@ -194,12 +277,12 @@ function FitmentScorer() {
                     || hrMap[candidate.hr_id]
                     || candidate.hr_id
                     || '—';
-                  // Support both field names: scheduled_datetime (new) and scheduled_date (old)
-                  // Also fall back to the preserved value inside the interviews[] entry.
+                  // Scheduled date: same fallback chain so it never blanks after completion.
                   const rawDt = candidate.interview_details?.scheduled_datetime
                     || candidate.interview_details?.scheduled_date
                     || candidate.last_interview_info?.scheduled_datetime
-                    || lastRound?.scheduled_datetime;
+                    || lastRound?.scheduled_datetime
+                    || lastRound?.datetime;
                   const scheduledDate = rawDt
                     ? new Date(rawDt).toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })
                     : '—';
@@ -212,6 +295,9 @@ function FitmentScorer() {
                         <span className="hr-tag">👤 {hrName}</span>
                       </td>
                       <td>{scheduledDate}</td>
+                      <td>
+                        <StatusPill completed={completed} />
+                      </td>
                       <td>
                         <button
                           className="btn-resume"
@@ -271,6 +357,16 @@ function FitmentScorer() {
           candidateName={fitmentModal.candidateName}
           onClose={() => setFitmentModal({ open: false, data: null, loading: false, candidateId: null, candidateName: null })}
         />
+      )}
+
+      {/* ── Toast ─────────────────────────────────────────────────── */}
+      {toast && (
+        <div className="fs-toast-container">
+          <div className={`fs-toast fs-toast--${toast.type}`}>
+            <span className="fs-toast-icon">{toast.type === 'success' ? '✓' : '✕'}</span>
+            <span className="fs-toast-msg">{toast.msg}</span>
+          </div>
+        </div>
       )}
     </div>
   );
