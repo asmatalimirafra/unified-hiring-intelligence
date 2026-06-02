@@ -8,7 +8,7 @@
 #   are auto-rejected (unless HR manually overrides).
 #
 # WHY THIS REWRITE (vs the previous implementation)
-#   Matched candidates were stuck at 25-35% due to several silent bugs:
+#   Matched candidates were stuck at 25-38% due to several silent bugs:
 #
 #   1. FREQUENCY WAS BROKEN: tokens were de-duplicated (`set()`) before being
 #      counted, so frequency weighting never actually happened.
@@ -29,6 +29,11 @@
 #   7. JD SECTIONS WERE NOT DISTINGUISHED: "About the company" boilerplate
 #      contributed as many keywords to the denominator as actual requirements.
 #
+#   8. FILLER SET INCOMPLETE: common JD prose words ("backend", "engineer",
+#      "team", "technical", "framework", "tools", "systems", "work", "need"
+#      etc.) were not in FILLER, so they inflated the denominator without
+#      appearing in resumes — artificially capping scores at ~38%.
+#
 # NEW DESIGN PRINCIPLES
 #   - Tokenize with frequencies preserved (no premature deduplication).
 #   - Unified alias map: one source of truth for all variants/abbreviations.
@@ -43,6 +48,7 @@
 #   - Protected words: PostgreSQL, MongoDB, etc. stay whole through tokenizing.
 #   - Header classification uses substring/token matching for flexibility,
 #     catching variants like "Technical Requirements" or "Key Skills & Experience".
+#   - Expanded FILLER: covers all common JD prose words that aren't skills.
 # ─────────────────────────────────────────────────────────────────────────────
 
 import re as _re
@@ -70,7 +76,8 @@ FILLER = {
     "designed", "deployed", "serving", "requests", "worked", "extensively",
     "transactional", "workloads",
     # HR boilerplate
-    "year", "years", "role", "roles", "position", "company", "candidate",
+    "year", "years", "role", "roles", "position", "company",
+    "candidate", "candidates",
     "qualifications", "requirements", "responsibilities", "duties",
     "following", "including", "minimum", "preferred", "plus", "bonus",
     "apply", "join", "seeking", "hire", "looking", "ability", "working",
@@ -92,7 +99,7 @@ FILLER = {
     # aren't themselves skills. Including these in the JD denominator
     # punishes candidates whose resumes don't echo the exact JD phrasing.
     "programming", "development", "deployment", "design", "build",
-    "maintain", "develop", "deliver", "create", "manage", "build",
+    "maintain", "develop", "deliver", "create", "manage",
     "implement", "integrate", "deploy", "write", "communicate",
     "exposure", "streaming", "message", "messages", "salary",
     "competitive", "hybrid", "offer", "offers", "version",
@@ -101,6 +108,34 @@ FILLER = {
     "day", "days", "week", "weeks", "month", "months", "fast", "real",
     "high", "low", "complex", "simple", "multiple", "large", "scale",
     "senior", "junior", "mid", "level",
+    # ── NEW: common JD prose words that are NOT skills ────────────────────
+    # These were missing from FILLER, causing them to inflate the denominator
+    # while rarely appearing in resumes — the primary cause of scores capping
+    # at ~38% even for well-matched candidates.
+    # Action verbs in JD prose
+    "need", "needs", "know", "work", "expect", "expected", "require",
+    "ensure", "contribute", "participate", "collaborate", "own", "help",
+    "lead", "mentor", "drive", "support", "build", "scale",
+    # Role/org nouns
+    "engineer", "engineers", "developer", "developers",
+    "team", "teams", "member", "members", "stakeholder", "stakeholders",
+    "partner", "partners", "cross", "functional",
+    # Tech-adjacent nouns that aren't skills
+    "technical", "technology", "technologies", "tech",
+    "stack", "platform", "platforms", "tools", "tool",
+    "system", "systems", "solution", "solutions",
+    "application", "applications", "app", "apps",
+    "framework", "frameworks", "library", "libraries",
+    "language", "languages", "codebase", "architecture",
+    "product", "products", "project", "projects",
+    "task", "tasks", "problem", "problems", "feature", "features",
+    "workflow", "workflows", "process", "processes",
+    "pattern", "patterns", "practice", "practices", "approach",
+    "end", "side",
+    # Soft-skill / attitude words
+    "proficient", "solid", "comfortable", "ideally", "ideally",
+    "new", "key", "core", "primary", "main", "critical", "important",
+    "backend", "frontend",
 }
 
 # Unified alias map. Each canonical form maps to a list of equivalents.
@@ -232,19 +267,17 @@ IGNORE_HEADERS = (
     "compensation", "equal opportunity", "eeo",
 )
 
-# FIX: Reduced REQUIRED_WEIGHT from 2.0 → 1.5 to avoid over-inflating the
-# denominator. At 2.0, a required keyword costs 2 units but a resume match
-# of that keyword only earns min(resume_freq, 2) — often just 1 — capping
-# the score even for strong matches. 1.5 preserves the signal that required
-# sections matter more while being fairer to well-matched candidates.
+# Reduced from 2.0 → 1.5: at 2.0, a required keyword costs 2 units in the
+# denominator but a resume match earns min(freq, 2) — often just 1 — capping
+# the score even for strong matches. 1.5 preserves priority while being fairer.
 REQUIRED_WEIGHT = 1.5
 NICE_WEIGHT     = 1.0
 DEFAULT_WEIGHT  = 1.0
 
-# FIX: Weight for "other" sections when structured sections exist.
-# Previously these were dropped entirely (score ceiling ~38%). Now they
-# contribute at a reduced weight so free-form JD content still participates
-# without dominating over explicitly labelled requirement sections.
+# "Other" sections included at reduced weight instead of being dropped entirely.
+# Dropping them was the main cause of scores capping at ~38% when the JD had
+# even one recognized section header, because skills listed in free-form prose
+# contributed to the denominator but never matched anything.
 OTHER_WEIGHT_WHEN_STRUCTURED = 0.5
 
 
@@ -276,8 +309,6 @@ def _strip_html(text: str) -> str:
     if not text:
         return text
 
-    # Step 1: convert block-level tags to newlines.
-    # Pattern: opening tag, closing tag, OR self-closing (like <br/>).
     BLOCK_TAGS = (
         r"p|div|br|li|ul|ol|tr|table|thead|tbody|tfoot|"
         r"h[1-6]|section|article|header|footer|nav|aside|"
@@ -292,11 +323,10 @@ def _strip_html(text: str) -> str:
         rf"<\s*(?:{BLOCK_TAGS})(?:\s[^>]*)?/?\s*>",
         "\n", text, flags=_re.IGNORECASE,
     )
-
-    # Step 2: strip remaining inline tags (and any block tags we missed).
+    # Strip remaining inline tags
     text = _re.sub(r"<[^>]+>", " ", text)
 
-    # Step 3: decode HTML entities.
+    # Decode HTML entities
     text = (text.replace("&nbsp;", " ")
                 .replace("&amp;", "&")
                 .replace("&lt;", "<")
@@ -311,18 +341,14 @@ def _strip_html(text: str) -> str:
                 .replace("&mdash;", "—")
                 .replace("&ndash;", "–")
                 .replace("&hellip;", "…"))
-    # Numeric entities like &#xNN; or &#NN;
     text = _re.sub(r"&#x([0-9a-fA-F]+);",
                    lambda m: chr(int(m.group(1), 16)), text)
     text = _re.sub(r"&#(\d+);",
                    lambda m: chr(int(m.group(1))), text)
 
-    # Step 4: tidy whitespace.
-    # Collapse runs of spaces/tabs (but keep newlines).
+    # Tidy whitespace
     text = _re.sub(r"[ \t]+", " ", text)
-    # Collapse 3+ newlines down to 2 (preserve paragraph breaks).
     text = _re.sub(r"\n{3,}", "\n\n", text)
-    # Strip trailing whitespace on each line.
     text = _re.sub(r"[ \t]+\n", "\n", text)
 
     return text
@@ -345,7 +371,6 @@ def _split_merged(text: str) -> str:
     digit splitters can't break them apart.
     """
     def _index_to_letters(n: int) -> str:
-        # 0→'a', 1→'b', ..., 25→'z', 26→'ba', 27→'bb', ...
         s = ""
         n += 1
         while n > 0:
@@ -379,9 +404,6 @@ def _normalize(text: str) -> str:
     canonical alias form uses underscores."""
     text = _strip_html(text)
     text = _split_merged(text)
-    # Hyphen between two letters → space (so "scikit-learn" tokenizes as
-    # two words, then the SKILL_BIGRAMS detector catches "scikit learn"
-    # via its alias mapping). Doesn't touch numbers or punctuation around.
     text = _re.sub(r"([a-zA-Z])-([a-zA-Z])", r"\1 \2", text)
     return text.lower()
 
@@ -406,7 +428,6 @@ def _remove_bigrams_from_text(text: str) -> str:
 
 def _tokenize_unigrams(text: str) -> list:
     """Tokenize unigrams (frequencies preserved). Drop filler & short tokens."""
-    # Pattern allows + and # (for C++ / C#) but stops at periods/commas.
     words = _re.findall(r"[a-zA-Z][a-zA-Z0-9+#]*", text)
     return [w for w in words if len(w) >= 2 and w not in FILLER]
 
@@ -419,21 +440,15 @@ def _classify_header(header: str) -> str:
     """
     Return 'required', 'nice', 'skill', 'ignore', or 'other'.
 
-    FIX: Previously used exact/prefix/suffix matching only, missing common
-    real-world variants like "Technical Requirements", "Key Skills & Experience",
-    "What You Need", "Skills & Qualifications". Now also checks whether any
-    known header keyword appears as a token within the candidate header string,
-    giving flexible partial matching while still being specific enough to avoid
-    false positives.
+    Uses flexible substring/token matching to catch real-world variants like
+    "Technical Requirements", "Key Skills & Experience", "What You Need",
+    "Skills & Qualifications" that exact matching would miss.
     """
     h = header.strip().lower().rstrip(":").rstrip("-").strip()
-    # Also strip trailing punctuation like '&', '|' etc.
     h = _re.sub(r"[&|]+$", "", h).strip()
     if not h:
         return "other"
 
-    # Helper: check if header h matches a known phrase via exact, prefix,
-    # suffix, OR token containment (any word of the phrase appears in h).
     def _matches_any(phrases):
         for phrase in phrases:
             if h == phrase:
@@ -441,12 +456,10 @@ def _classify_header(header: str) -> str:
             if h.startswith(phrase + " ") or h.endswith(" " + phrase):
                 return True
             # Flexible: check if the core keyword of the phrase appears in h.
-            # Use the longest single word in the phrase as the signal token.
             core_words = [w for w in phrase.split() if len(w) >= 5
                           and w not in {"skills", "about", "quali", "bonus",
                                         "offer", "equal", "oppor"}]
             for word in core_words:
-                # word boundary match within h
                 if _re.search(r"\b" + _re.escape(word) + r"\b", h):
                     return True
         return False
@@ -471,12 +484,9 @@ def _parse_jd_sections(jd_text: str) -> list:
 
     for line in lines:
         stripped = line.strip()
-        # A line is a candidate header if it's short, mostly letters,
-        # and either ends with ':' or classifies as a known section type.
         is_short = 0 < len(stripped) <= 60
         ends_colon = stripped.endswith(":")
         classification = _classify_header(stripped) if is_short else "other"
-
         is_header = is_short and (ends_colon or classification != "other")
 
         if is_header:
@@ -527,16 +537,11 @@ def _extract_jd_tokens(jd_text: str) -> tuple:
     """
     Build weighted Counter of JD keywords + list of OR-alternative groups.
 
-      - 'required' sections → weight × 1.5  (was 2.0; see REQUIRED_WEIGHT note)
+      - 'required' sections → weight × 1.5
       - 'nice'/'skill' sections → weight × 1.0
       - 'ignore' sections → skipped entirely
-      - 'other' sections → weight × 0.5 when structured sections exist
-                           (was dropped entirely; see OTHER_WEIGHT note)
+      - 'other' sections → weight × 0.5 when structured sections exist,
                            weight × 1.0 when no structured sections found
-
-    Returns (counts, or_groups) where or_groups is a list of
-    (frozenset_of_tokens, weight) tuples. Matching ANY token in a group
-    satisfies the whole group.
 
     IMPORTANT: HTML stripping happens HERE, before section parsing. JDs from
     rich-text editors arrive as one long HTML blob with no real newlines —
@@ -545,9 +550,7 @@ def _extract_jd_tokens(jd_text: str) -> tuple:
     with company-description tokens. Running _strip_html first converts
     `<p>...</p>` boundaries into real newlines so the section parser works.
     """
-    # Convert HTML→plaintext FIRST so section headers appear on their own lines.
     jd_plain = _strip_html(jd_text)
-
     sections = _parse_jd_sections(jd_plain)
 
     has_structured = any(
@@ -566,21 +569,13 @@ def _extract_jd_tokens(jd_text: str) -> tuple:
         elif s_type == "nice":
             weight = NICE_WEIGHT
         elif s_type == "other":
-            # FIX: Previously dropped entirely when structured sections existed.
-            # Now included at a reduced weight so free-form JD content (skills
-            # listed in prose paragraphs, job summary, etc.) still contributes
-            # to matching without dominating the denominator.
             weight = OTHER_WEIGHT_WHEN_STRUCTURED if has_structured else DEFAULT_WEIGHT
         else:
             # "skill" section
             weight = DEFAULT_WEIGHT
 
-        # Section text is already plaintext (HTML stripped above), but
-        # _normalize still does camelCase splitting and lowercasing.
         normalized = _normalize(s_text)
-
         section_alternatives = _extract_or_alternatives(normalized)
-
         bigrams = _extract_bigrams(normalized)
         remainder = _remove_bigrams_from_text(normalized)
         unigrams = _tokenize_unigrams(remainder)
@@ -617,25 +612,17 @@ def _build_match_index(jd_tokens: set) -> dict:
     index = {tok: tok for tok in jd_tokens}
 
     def _maybe_register(alias: str, canonical: str) -> None:
-        # Never overwrite a token that is itself in the JD.
         if alias in jd_tokens:
             return
-        # First write wins (deterministic). If the alias has already been
-        # mapped to a different canonical, keep the first mapping.
         if alias in index:
             return
         index[alias] = canonical
 
     for jd_tok in jd_tokens:
-        # If this JD token is a canonical alias key, register its variants
-        # so the resume can express the skill in any equivalent form.
         if jd_tok in ALIASES:
             for variant in ALIASES[jd_tok]:
                 _maybe_register(variant, jd_tok)
 
-        # If this JD token is itself a variant of some canonical form,
-        # register the canonical AND all sibling variants pointing to
-        # this JD token.
         for canonical, variants in ALIASES.items():
             if jd_tok == canonical:
                 continue
@@ -689,14 +676,10 @@ def calculate_ats_score(resume_text: str, jd_text: str) -> float:
     # for not having alternatives that the JD explicitly accepts as substitutes.
     refunded = 0.0
     for group, group_weight in or_groups:
-        # Translate group members through alias index too — so "postgres" in the
-        # JD's "X or Y" still matches "postgresql" in the canonical map.
         group_canonical = {match_index.get(g, g) for g in group}
-        # Did the resume match any side?
         matched_any = any(translated.get(g, 0) > 0 for g in group_canonical)
         if not matched_any:
             continue
-        # For each side that wasn't matched, refund its unmatched portion.
         for g in group_canonical:
             jd_c = jd_counts.get(g, 0)
             rc = translated.get(g, 0)
