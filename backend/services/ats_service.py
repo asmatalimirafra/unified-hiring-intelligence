@@ -35,9 +35,14 @@
 #   - Detect skill BIGRAMS as first-class concepts before unigram tokenization.
 #   - Section-aware: only count keywords from skill/requirement-bearing
 #     sections of the JD (not "About the company", "Why join us", etc).
-#   - Required-section keywords weighted 2x.
+#   - Required-section keywords weighted 1.5x (reduced from 2x to avoid
+#     over-inflating the denominator for well-matched candidates).
+#   - "Other" sections included at 0.5x weight instead of dropped entirely,
+#     so free-form JD content still contributes without dominating.
 #   - Resume frequency capped at JD frequency (Jobscan-style partial credit).
 #   - Protected words: PostgreSQL, MongoDB, etc. stay whole through tokenizing.
+#   - Header classification uses substring/token matching for flexibility,
+#     catching variants like "Technical Requirements" or "Key Skills & Experience".
 # ─────────────────────────────────────────────────────────────────────────────
 
 import re as _re
@@ -227,9 +232,20 @@ IGNORE_HEADERS = (
     "compensation", "equal opportunity", "eeo",
 )
 
-REQUIRED_WEIGHT = 2.0
+# FIX: Reduced REQUIRED_WEIGHT from 2.0 → 1.5 to avoid over-inflating the
+# denominator. At 2.0, a required keyword costs 2 units but a resume match
+# of that keyword only earns min(resume_freq, 2) — often just 1 — capping
+# the score even for strong matches. 1.5 preserves the signal that required
+# sections matter more while being fairer to well-matched candidates.
+REQUIRED_WEIGHT = 1.5
 NICE_WEIGHT     = 1.0
 DEFAULT_WEIGHT  = 1.0
+
+# FIX: Weight for "other" sections when structured sections exist.
+# Previously these were dropped entirely (score ceiling ~38%). Now they
+# contribute at a reduced weight so free-form JD content still participates
+# without dominating over explicitly labelled requirement sections.
+OTHER_WEIGHT_WHEN_STRUCTURED = 0.5
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -400,22 +416,49 @@ def _tokenize_unigrams(text: str) -> list:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _classify_header(header: str) -> str:
-    """Return 'required', 'nice', 'skill', 'ignore', or 'other'."""
+    """
+    Return 'required', 'nice', 'skill', 'ignore', or 'other'.
+
+    FIX: Previously used exact/prefix/suffix matching only, missing common
+    real-world variants like "Technical Requirements", "Key Skills & Experience",
+    "What You Need", "Skills & Qualifications". Now also checks whether any
+    known header keyword appears as a token within the candidate header string,
+    giving flexible partial matching while still being specific enough to avoid
+    false positives.
+    """
     h = header.strip().lower().rstrip(":").rstrip("-").strip()
+    # Also strip trailing punctuation like '&', '|' etc.
+    h = _re.sub(r"[&|]+$", "", h).strip()
     if not h:
         return "other"
-    for rh in REQUIRED_HEADERS:
-        if h == rh or h.startswith(rh + " ") or h.endswith(" " + rh):
-            return "required"
-    for nh in NICE_HEADERS:
-        if h == nh or h.startswith(nh + " ") or h.endswith(" " + nh):
-            return "nice"
-    for ih in IGNORE_HEADERS:
-        if h == ih or h.startswith(ih + " ") or h.endswith(" " + ih):
-            return "ignore"
-    for sh in SKILL_SECTION_HEADERS:
-        if h == sh or h.startswith(sh + " ") or h.endswith(" " + sh):
-            return "skill"
+
+    # Helper: check if header h matches a known phrase via exact, prefix,
+    # suffix, OR token containment (any word of the phrase appears in h).
+    def _matches_any(phrases):
+        for phrase in phrases:
+            if h == phrase:
+                return True
+            if h.startswith(phrase + " ") or h.endswith(" " + phrase):
+                return True
+            # Flexible: check if the core keyword of the phrase appears in h.
+            # Use the longest single word in the phrase as the signal token.
+            core_words = [w for w in phrase.split() if len(w) >= 5
+                          and w not in {"skills", "about", "quali", "bonus",
+                                        "offer", "equal", "oppor"}]
+            for word in core_words:
+                # word boundary match within h
+                if _re.search(r"\b" + _re.escape(word) + r"\b", h):
+                    return True
+        return False
+
+    if _matches_any(REQUIRED_HEADERS):
+        return "required"
+    if _matches_any(NICE_HEADERS):
+        return "nice"
+    if _matches_any(IGNORE_HEADERS):
+        return "ignore"
+    if _matches_any(SKILL_SECTION_HEADERS):
+        return "skill"
     return "other"
 
 
@@ -484,10 +527,12 @@ def _extract_jd_tokens(jd_text: str) -> tuple:
     """
     Build weighted Counter of JD keywords + list of OR-alternative groups.
 
-      - 'required' sections → weight × 2.0
+      - 'required' sections → weight × 1.5  (was 2.0; see REQUIRED_WEIGHT note)
       - 'nice'/'skill' sections → weight × 1.0
-      - 'ignore' sections → skipped
-      - 'other' sections → counted only if JD has no structured sections
+      - 'ignore' sections → skipped entirely
+      - 'other' sections → weight × 0.5 when structured sections exist
+                           (was dropped entirely; see OTHER_WEIGHT note)
+                           weight × 1.0 when no structured sections found
 
     Returns (counts, or_groups) where or_groups is a list of
     (frozenset_of_tokens, weight) tuples. Matching ANY token in a group
@@ -515,14 +560,19 @@ def _extract_jd_tokens(jd_text: str) -> tuple:
     for s_type, s_text in sections:
         if s_type == "ignore":
             continue
-        if has_structured and s_type == "other":
-            continue
 
         if s_type == "required":
             weight = REQUIRED_WEIGHT
         elif s_type == "nice":
             weight = NICE_WEIGHT
+        elif s_type == "other":
+            # FIX: Previously dropped entirely when structured sections existed.
+            # Now included at a reduced weight so free-form JD content (skills
+            # listed in prose paragraphs, job summary, etc.) still contributes
+            # to matching without dominating the denominator.
+            weight = OTHER_WEIGHT_WHEN_STRUCTURED if has_structured else DEFAULT_WEIGHT
         else:
+            # "skill" section
             weight = DEFAULT_WEIGHT
 
         # Section text is already plaintext (HTML stripped above), but
