@@ -311,24 +311,120 @@ def _resume_token_set(resume_text: str) -> set:
     return {_canon_tok(t) for t in toks}
 
 
-def _skill_present(skill: str, resume_canon: set) -> bool:
-    """True iff every meaningful token of `skill` is present in the resume
-    (alias-aware). Multi-word skills require all their tokens; this avoids
-    crediting 'AWS Lambda' when only 'AWS' appears."""
-    norm = _normalize(skill)
+# ─────────────────────────────────────────────────────────────────────────────
+# Concept synonyms — JD's GENERAL term → resume's SPECIFIC evidence.
+#
+# Token matching cannot catch "image generation" (JD) vs "GAN" (resume): there
+# is zero token overlap, yet they mean the same capability. This map lets a gap
+# be rescued when the resume shows any concrete technique for that concept.
+#
+# Direction is JD-general → resume-specific (the common case: JDs say "image
+# generation", resumes say "GANs"/"diffusion"). Extend freely — keys and values
+# are matched with the same normalizer/alias logic as everything else.
+# ─────────────────────────────────────────────────────────────────────────────
+CONCEPT_SYNONYMS = {
+    # ── Generative / Computer Vision ──
+    "image generation": ["gan", "gans", "generative adversarial network",
+                          "generative adversarial", "diffusion", "diffusion model",
+                          "stable diffusion", "image synthesis", "vae",
+                          "variational autoencoder", "text to image",
+                          "dcgan", "stylegan", "cyclegan", "pix2pix", "wgan"],
+    "image synthesis": ["gan", "gans", "diffusion", "stable diffusion", "vae"],
+    "image classification": ["resnet", "vgg", "efficientnet", "vit",
+                             "vision transformer", "cnn",
+                             "convolutional neural network", "alexnet", "densenet"],
+    "object detection": ["yolo", "faster rcnn", "rcnn", "detr", "ssd",
+                         "retinanet", "mask rcnn"],
+    "image segmentation": ["unet", "deeplab", "segformer", "mask rcnn",
+                           "fcn", "instance segmentation"],
+    "semantic segmentation": ["unet", "deeplab", "segformer", "fcn"],
+    # ── NLP / LLM ──
+    "large language model": ["llm", "gpt", "bert", "llama", "mistral",
+                             "transformer", "fine tuning", "instruction tuning"],
+    "text generation": ["gpt", "llm", "language model", "seq2seq"],
+    "named entity recognition": ["ner", "spacy", "bert"],
+    # ── Vector / retrieval / DB ──
+    "vector database": ["qdrant", "faiss", "pinecone", "milvus", "chroma",
+                        "weaviate", "vector store", "vector db"],
+    "vector search": ["faiss", "qdrant", "ann", "hnsw", "semantic search",
+                      "approximate nearest neighbor"],
+    "similarity search": ["faiss", "qdrant", "cosine similarity", "embeddings"],
+    # ── ML general ──
+    "deep learning": ["pytorch", "tensorflow", "keras", "neural network", "cnn"],
+    "machine learning": ["scikit learn", "sklearn", "xgboost", "random forest",
+                         "pytorch", "tensorflow"],
+}
+
+
+def _phrase_tokens(phrase: str) -> set:
+    """Canonical token set (unigrams + skill bigrams, alias-mapped) for a phrase."""
+    norm = _normalize(phrase)
     bigrams = _extract_bigrams(norm)
     remainder = _remove_bigrams_from_text(norm)
     unigrams = _tokenize_unigrams(remainder)
-    cand = set(unigrams) | set(bigrams.keys())
-    if not cand:
+    return {_canon_tok(t) for t in (set(unigrams) | set(bigrams.keys()))}
+
+
+def _tokens_in_resume(tokens: set, resume_canon: set) -> bool:
+    """True iff ALL given canonical tokens are present in the resume (alias-aware)."""
+    if not tokens:
         return False
-    for t in cand:
-        ct = _canon_tok(t)
-        forms = {ct} | set(ALIASES.get(ct, []))
-        forms = {_canon_tok(f) for f in forms} | {ct}
+    for ct in tokens:
+        forms = {ct} | {_canon_tok(f) for f in ALIASES.get(ct, [])}
         if not (forms & resume_canon):
             return False
     return True
+
+
+def _split_alternatives(skill: str) -> list:
+    """Split a skill into alternative phrases on ENUMERATION delimiters only.
+
+      'Database (Qdrant, FAISS etc)' → ['Qdrant', 'FAISS', 'Database']
+      'C/C++'                        → ['C', 'C++']
+      'REST or GraphQL'              → ['REST', 'GraphQL']
+      'AWS Lambda'                   → ['AWS Lambda']   (no delimiter, kept whole)
+      'Python, Java, Go'             → ['Python, Java, Go']  (bare commas NOT split)
+
+    Bare commas are only treated as alternatives INSIDE parentheses (the
+    'Category (a, b, etc)' form). Outside parens, a bare comma usually joins
+    distinct required skills, so splitting there would wrongly rescue the whole
+    group when only one item is present.
+    """
+    alts = []
+    for m in re.finditer(r"\(([^)]*)\)", skill):
+        for piece in re.split(r"[,/]|\bor\b|\betc\b|&|;", m.group(1), flags=re.IGNORECASE):
+            piece = piece.strip()
+            if piece:
+                alts.append(piece)
+    outside = re.sub(r"\([^)]*\)", " ", skill)
+    for piece in re.split(r"\s*(?:/|\bor\b|&|;|\bvs\b)\s*", outside, flags=re.IGNORECASE):
+        piece = piece.strip().strip(",").strip()
+        if piece:
+            alts.append(piece)
+    return alts or [skill.strip()]
+
+
+def _skill_present(skill: str, resume_canon: set) -> bool:
+    """True if the skill is evidenced in the resume, via any of:
+      1. ALTERNATIVES — any enumerated alternative's tokens are all present
+         (fixes 'Database (Qdrant, FAISS etc)' when only FAISS is on the CV).
+      2. WHOLE-PHRASE — every token of the skill is present (the original rule;
+         still requires both of 'AWS Lambda').
+      3. CONCEPT SYNONYM — the skill maps to a concept and the resume shows a
+         concrete technique for it (fixes 'image generation' ↔ 'GAN')."""
+    # 1 + 2: alternatives (a whole, no-delimiter skill is just one alternative)
+    for alt in _split_alternatives(skill):
+        if _tokens_in_resume(_phrase_tokens(alt), resume_canon):
+            return True
+
+    # 3: concept synonyms (JD-general term → resume-specific evidence)
+    norm_skill = _normalize(skill).strip()
+    for concept, evidence in CONCEPT_SYNONYMS.items():
+        if re.search(r"\b" + re.escape(concept) + r"\b", norm_skill):
+            for ev in evidence:
+                if _tokens_in_resume(_phrase_tokens(ev), resume_canon):
+                    return True
+    return False
 
 
 def _dedup_by_canon(skills: list) -> list:
