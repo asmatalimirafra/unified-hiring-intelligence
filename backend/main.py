@@ -261,14 +261,71 @@ async def get_roles_closed():
 # CANDIDATES
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@app.post("/add-candidate/", status_code=201)
-async def add_candidate(
-    background_tasks: BackgroundTasks,
-    name: Optional[str] = Form(None),
+@app.post("/parse-resume/", status_code=200)
+async def parse_resume_endpoint(
     applied_role: str = Form(...),
     resume_file: UploadFile = Form(...),
     hr_id: Optional[str] = Form(None)
 ):
+    """
+    Extract fields + ATS score from a resume WITHOUT saving anything to the DB.
+    Called during Step 1 of Add Candidate. The candidate is only persisted when
+    /add-candidate/ is called on Save & Exit.
+    """
+    if not resume_file.filename.endswith((".pdf", ".docx")):
+        raise HTTPException(status_code=400, detail="Only PDF and DOCX files are supported.")
+
+    file_bytes = await resume_file.read()
+
+    applied_role_id = get_role_id_by_name(applied_role, hr_id=hr_id)
+    if applied_role_id is None:
+        raise HTTPException(status_code=404, detail=f"Role '{applied_role}' not found.")
+
+    resume_text = extract_text_from_resume(file_bytes, resume_file.filename)
+    print("🔎 parse-resume preview:\n", resume_text[:2000])
+
+    parsed = parse_resume_fields(resume_text)
+
+    role_doc = (
+        db["roles"].find_one({"role_id": str(applied_role_id)}) or
+        db["roles"].find_one({"role_id": int(applied_role_id)}) or
+        db["roles"].find_one({"role_id": applied_role_id})
+    )
+    jd_text_for_ats = role_doc.get("job_description", "") if role_doc else ""
+    ats_score = calculate_ats_score(resume_text, jd_text_for_ats)
+
+    print(f"📊 parse-resume ATS: {ats_score}% | parsed fields: {parsed}")
+
+    return {
+        "applied_role_id": applied_role_id,
+        "ats_score":       ats_score,
+        "name":            parsed.get("name",     ""),
+        "email":           parsed.get("email",    ""),
+        "phone":           parsed.get("phone",    ""),
+        "linkedin":        parsed.get("linkedin", ""),
+        "github":          parsed.get("github",   ""),
+        "location":        parsed.get("location", ""),
+    }
+
+
+@app.post("/add-candidate/", status_code=201)
+async def add_candidate(
+    background_tasks: BackgroundTasks,
+    name: str = Form(...),
+    email: str = Form(...),
+    phone: str = Form(...),
+    linkedin: str = Form(...),
+    applied_role: str = Form(...),
+    resume_file: UploadFile = Form(...),
+    hr_id: Optional[str] = Form(None),
+    github: Optional[str] = Form(None),
+    location: Optional[str] = Form(None),
+):
+    """
+    Persist a candidate to the DB. Only called on Save & Exit after the user
+    has reviewed and filled in all mandatory fields in Step 2.
+    All contact fields are provided by the frontend (user-reviewed values).
+    """
     if not resume_file.filename.endswith((".pdf", ".docx")):
         raise HTTPException(status_code=400, detail="Only PDF and DOCX files are supported.")
 
@@ -282,23 +339,6 @@ async def add_candidate(
     candidate_id_str = f"CND-{candidate_id_num}"
 
     resume_text = extract_text_from_resume(file_bytes, resume_file.filename)
-    print("🔎 Extracted resume text preview:\n", resume_text[:3000])
-
-    # ── Extract all contact fields from resume text ───────────────────────────
-    parsed = parse_resume_fields(resume_text)
-
-    # Name: use form-submitted name if provided, otherwise fall back to extracted
-    submitted_name = (name or "").strip()
-    final_name = submitted_name if submitted_name else parsed.get("name", "")
-
-    email    = parsed.get("email",    "")
-    phone    = parsed.get("phone",    "")
-    github   = parsed.get("github",   "")
-    location = parsed.get("location", "")
-    linkedin = parsed.get("linkedin", "")
-
-    print(f"📬 Parsed metadata — name: {final_name}, email: {email}, phone: {phone}, "
-          f"github: {github}, location: {location}, linkedin: {linkedin}")
 
     role_doc = (
         db["roles"].find_one({"role_id": str(applied_role_id)}) or
@@ -307,23 +347,22 @@ async def add_candidate(
     )
     jd_text_for_ats = role_doc.get("job_description", "") if role_doc else ""
     ats_score = calculate_ats_score(resume_text, jd_text_for_ats)
-    print(f"📊 ATS Score for {candidate_id_str}: {ats_score}% (JD length: {len(jd_text_for_ats)} chars, role_doc found: {role_doc is not None})")
+    print(f"📊 ATS Score for {candidate_id_str}: {ats_score}%")
 
     ext = resume_file.filename.split(".")[-1]
-    name_for_file = final_name.replace(' ', '_') if final_name else "candidate"
-    stored_file_name = f"{name_for_file}_{applied_role.replace(' ', '_')}_{candidate_id_str}.{ext}"
+    stored_file_name = f"{name.replace(' ', '_')}_{applied_role.replace(' ', '_')}_{candidate_id_str}.{ext}"
 
     mongo_status = store_candidate(
         candidate_id=candidate_id_str,
-        name=final_name,
+        name=name,
         applied_role=applied_role,
         applied_role_id=applied_role_id,
         resume_text=resume_text,
         file_bytes=file_bytes,
         stored_file_name=stored_file_name,
         email=email,
-        github=github,
-        location=location,
+        github=github or "",
+        location=location or "",
         phone=phone,
         timestamp=datetime.now(),
         hr_id=hr_id,
@@ -343,19 +382,19 @@ async def add_candidate(
     import threading
     def _embed_in_background():
         try:
-            store_resume_embedding(candidate_id_num, resume_text, final_name, applied_role)
+            store_resume_embedding(candidate_id_num, resume_text, name, applied_role)
             print(f"✅ Background embedding done for {candidate_id_str}")
         except Exception as e:
             print(f"⚠️ Background embedding failed for {candidate_id_str}: {e}")
     threading.Thread(target=_embed_in_background, daemon=True).start()
 
     return {
-        "candidate_id": candidate_id_str,
-        "stored_as": stored_file_name,
+        "candidate_id":    candidate_id_str,
+        "stored_as":       stored_file_name,
         "applied_role_id": applied_role_id,
-        "ats_score": ats_score,
-        "mongo_status": mongo_status,
-        "qdrant_status": "queued"
+        "ats_score":       ats_score,
+        "mongo_status":    mongo_status,
+        "qdrant_status":   "queued"
     }
 
 @app.get("/get-candidates/")
