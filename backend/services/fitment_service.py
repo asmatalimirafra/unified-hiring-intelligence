@@ -4,6 +4,13 @@ from services.qdrant_service import client, RESUME_COLLECTION, JD_COLLECTION
 from sklearn.metrics.pairwise import cosine_similarity
 from services.resume_segmenter import split_resume_into_chunks
 from services.ollama_utils import call_fitment_llm, build_prompt
+# Reuse the ATS tokenizer + alias machinery so fitment skill-matching is
+# deterministic and consistent with the ATS score (no new dependencies).
+from services.ats_service import (
+    _strip_html, _split_merged, _normalize,
+    _extract_bigrams, _remove_bigrams_from_text, _tokenize_unigrams,
+    ALIASES,
+)
 import numpy as np
 import json
 import re
@@ -261,9 +268,148 @@ def prepare_resume_for_llm(resume_text: str) -> str:
 # LLM analysis & output cleaning
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Grounding layer — validate every LLM skill against the actual resume
+#
+# WHY (fixes hallucinated matches AND false gaps like "C/C++", "SQL"):
+#   llama3.1:8b does literal set-difference and gets it wrong both ways:
+#     • claims skills are matched that aren't in the resume (hallucination)
+#     • puts skills in major/minor gaps that ARE in the resume (false gap)
+#   This layer re-derives ground truth from the resume itself using the same
+#   tokenizer + alias map the ATS score uses, then:
+#     • drops matched skills not actually present  (kills hallucination)
+#     • rescues gap skills that ARE present → moves them to matched
+#   Because suggestions are filtered to gaps-only, vague advice on skills the
+#   candidate already has disappears automatically once those skills are rescued.
+#
+#   Token-level robustness: "C/C++" and "C++" both normalize to {"c++"};
+#   "scikit-learn"/"sklearn", "k8s"/"kubernetes", "js"/"javascript", etc. are
+#   unified via ALIASES — so present skills stop being reported as gaps.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# alias form → canonical form (e.g. "k8s" → "kubernetes", "js" → "javascript")
+_ALIAS_TO_CANON = {}
+for _canon, _variants in ALIASES.items():
+    _ALIAS_TO_CANON[_canon] = _canon
+    for _v in _variants:
+        _ALIAS_TO_CANON[_v] = _canon
+
+
+def _canon_tok(tok: str) -> str:
+    return _ALIAS_TO_CANON.get(tok, tok)
+
+
+def _resume_token_set(resume_text: str) -> set:
+    """Canonical set of skill tokens (unigrams + skill bigrams) present in the
+    resume. Uses the ATS normalizer (strips HTML, de-merges glued words,
+    lowercases) so it sees the same clean tokens the ATS score does."""
+    norm = _normalize(resume_text)
+    bigrams = _extract_bigrams(norm)                 # Counter of underscore bigrams
+    remainder = _remove_bigrams_from_text(norm)
+    unigrams = _tokenize_unigrams(remainder)
+    toks = set(unigrams) | set(bigrams.keys())
+    return {_canon_tok(t) for t in toks}
+
+
+def _skill_present(skill: str, resume_canon: set) -> bool:
+    """True iff every meaningful token of `skill` is present in the resume
+    (alias-aware). Multi-word skills require all their tokens; this avoids
+    crediting 'AWS Lambda' when only 'AWS' appears."""
+    norm = _normalize(skill)
+    bigrams = _extract_bigrams(norm)
+    remainder = _remove_bigrams_from_text(norm)
+    unigrams = _tokenize_unigrams(remainder)
+    cand = set(unigrams) | set(bigrams.keys())
+    if not cand:
+        return False
+    for t in cand:
+        ct = _canon_tok(t)
+        forms = {ct} | set(ALIASES.get(ct, []))
+        forms = {_canon_tok(f) for f in forms} | {ct}
+        if not (forms & resume_canon):
+            return False
+    return True
+
+
+def _dedup_by_canon(skills: list) -> list:
+    seen, out = set(), []
+    for s in skills:
+        key = _normalize(str(s)).strip()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(s)
+    return out
+
+
+def ground_fitment_against_resume(cleaned: dict, resume_text: str) -> dict:
+    """Post-process a cleaned LLM analysis against the real resume tokens.
+    Drops hallucinated matches; rescues present-but-gapped skills into matched;
+    re-filters suggestions so they only address genuine gaps."""
+    resume_canon = _resume_token_set(resume_text)
+    if not resume_canon:
+        # Nothing reliable to ground against — leave the LLM output untouched.
+        return cleaned
+
+    matched = cleaned.get("matched_skills", [])
+    minor   = cleaned.get("gap_analysis", {}).get("minor", [])
+    major   = cleaned.get("gap_analysis", {}).get("major", [])
+
+    grounded_matched = [s for s in matched if _skill_present(s, resume_canon)]
+    dropped = [s for s in matched if s not in grounded_matched]
+
+    true_minor, true_major, rescued = [], [], []
+    for s in minor:
+        (rescued if _skill_present(s, resume_canon) else true_minor).append(s)
+    for s in major:
+        (rescued if _skill_present(s, resume_canon) else true_major).append(s)
+
+    final_matched = _dedup_by_canon(grounded_matched + rescued)
+
+    # Re-filter suggestions to genuine gaps only.
+    gap_keys = {_normalize(str(s)).strip() for s in (true_minor + true_major)}
+    sugg = cleaned.get("suggestions", {})
+
+    skills_to_add = [s for s in sugg.get("skills_to_add", [])
+                     if _normalize(str(s)).strip() in gap_keys]
+
+    learning_resources = []
+    for res in sugg.get("learning_resources", []):
+        name = res.get("skill", "") if isinstance(res, dict) else ""
+        if name and _normalize(name).strip() in gap_keys:
+            learning_resources.append(res)
+    if gap_keys and not learning_resources:
+        learning_resources = [{
+            "skill": "Core Technical Skills",
+            "resource": "https://www.google.com/search?q=best+technical+courses+online"
+        }]
+
+    if dropped or rescued:
+        print(f"🛠️  Grounding → dropped {len(dropped)} hallucinated match(es), "
+              f"rescued {len(rescued)} false gap(s) into matched.")
+
+    return {
+        "gap_analysis": {"minor": sorted(true_minor), "major": sorted(true_major)},
+        "suggestions": {
+            "resume_improvements": sugg.get("resume_improvements", ""),
+            "skills_to_add":       sorted(skills_to_add),
+            "learning_resources":  learning_resources,
+        },
+        "matched_skills": sorted(final_matched),
+    }
+
+
 def get_cleaned_fitment_analysis(jd_text, resume_text):
-    prepared_resume = prepare_resume_for_llm(resume_text)
-    prompt          = build_prompt(jd_text, prepared_resume)
+    # Clean both inputs BEFORE the LLM sees them:
+    #   • JD comes from the WYSIWYG editor as HTML — strip tags so the model
+    #     isn't reading <p>/<li>/&nbsp; markup instead of skills.
+    #   • Resume from pdfplumber/fitz often has glued words (PythonSQLC++);
+    #     _split_merged de-merges them WITHOUT destroying newlines (so section
+    #     labels survive), unlike clean_resume_text which collapses all space.
+    jd_clean        = _strip_html(jd_text)
+    resume_clean    = _split_merged(_strip_html(resume_text))
+
+    prepared_resume = prepare_resume_for_llm(resume_clean)
+    prompt          = build_prompt(jd_clean, prepared_resume)
     raw_output      = call_fitment_llm(prompt, max_tokens=2000)
 
     if not raw_output:
@@ -283,7 +429,10 @@ def get_cleaned_fitment_analysis(jd_text, resume_text):
     if not parsed:
         return empty_fitment_output()
 
-    return clean_llm_gap_output(parsed)
+    cleaned = clean_llm_gap_output(parsed)
+    # Ground against the real resume: kill hallucinated matches, rescue
+    # present-but-gapped skills (C/C++, SQL, etc.) into matched.
+    return ground_fitment_against_resume(cleaned, resume_clean)
 
 
 def clean_llm_gap_output(raw_output):
