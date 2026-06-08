@@ -37,7 +37,7 @@ from services.qdrant_service import (
     delete_jd_vector
 )
 
-from services.jd_parser import extract_text_from_pdf, extract_text_from_docx
+from services.jd_parser import extract_text_from_pdf, extract_text_from_docx, parse_resume_fields
 
 from services.resume_utils import (
     extract_text_from_resume,
@@ -264,7 +264,7 @@ async def get_roles_closed():
 @app.post("/add-candidate/", status_code=201)
 async def add_candidate(
     background_tasks: BackgroundTasks,
-    name: str = Form(...),
+    name: Optional[str] = Form(None),
     applied_role: str = Form(...),
     resume_file: UploadFile = Form(...),
     hr_id: Optional[str] = Form(None)
@@ -284,32 +284,21 @@ async def add_candidate(
     resume_text = extract_text_from_resume(file_bytes, resume_file.filename)
     print("🔎 Extracted resume text preview:\n", resume_text[:3000])
 
-    import re as _re
+    # ── Extract all contact fields from resume text ───────────────────────────
+    parsed = parse_resume_fields(resume_text)
 
-    _email_match = _re.search(
-        r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", resume_text
-    )
-    email = _email_match.group(0).lower() if _email_match else ""
+    # Name: use form-submitted name if provided, otherwise fall back to extracted
+    submitted_name = (name or "").strip()
+    final_name = submitted_name if submitted_name else parsed.get("name", "")
 
-    _phone_match = _re.search(
-        r"(?:\+?\d{1,3}[\s\-\.\(\)]?)?(?:\(?\d{3}\)?[\s\-\.]?){1,2}\d{4,}",
-        resume_text
-    )
-    phone = _phone_match.group(0).strip() if _phone_match else ""
+    email    = parsed.get("email",    "")
+    phone    = parsed.get("phone",    "")
+    github   = parsed.get("github",   "")
+    location = parsed.get("location", "")
+    linkedin = parsed.get("linkedin", "")
 
-    _github_match = _re.search(
-        r"github\.com/[a-zA-Z0-9_\-]+(?:/[a-zA-Z0-9_\-]+)?",
-        resume_text, _re.IGNORECASE
-    )
-    github = ("https://" + _github_match.group(0)) if _github_match else ""
-
-    _loc_match = _re.search(
-        r"([A-Z][a-zA-Z\s]+,\s*(?:[A-Z]{2}|[A-Z][a-zA-Z]+))",
-        resume_text[:2000]
-    )
-    location = _loc_match.group(1).strip() if _loc_match else ""
-
-    print(f"📬 Regex metadata — email: {email}, phone: {phone}, github: {github}, location: {location}")
+    print(f"📬 Parsed metadata — name: {final_name}, email: {email}, phone: {phone}, "
+          f"github: {github}, location: {location}, linkedin: {linkedin}")
 
     role_doc = (
         db["roles"].find_one({"role_id": str(applied_role_id)}) or
@@ -321,11 +310,12 @@ async def add_candidate(
     print(f"📊 ATS Score for {candidate_id_str}: {ats_score}% (JD length: {len(jd_text_for_ats)} chars, role_doc found: {role_doc is not None})")
 
     ext = resume_file.filename.split(".")[-1]
-    stored_file_name = f"{name.replace(' ', '_')}_{applied_role.replace(' ', '_')}_{candidate_id_str}.{ext}"
+    name_for_file = final_name.replace(' ', '_') if final_name else "candidate"
+    stored_file_name = f"{name_for_file}_{applied_role.replace(' ', '_')}_{candidate_id_str}.{ext}"
 
     mongo_status = store_candidate(
         candidate_id=candidate_id_str,
-        name=name,
+        name=final_name,
         applied_role=applied_role,
         applied_role_id=applied_role_id,
         resume_text=resume_text,
@@ -343,10 +333,17 @@ async def add_candidate(
     if mongo_status is None:
         raise HTTPException(status_code=409, detail=f"Candidate ID '{candidate_id_str}' already exists.")
 
+    # Store linkedin separately (store_candidate doesn't have this param yet)
+    if linkedin:
+        candidates_collection.update_one(
+            {"candidate_id": candidate_id_str},
+            {"$set": {"linkedin": linkedin}}
+        )
+
     import threading
     def _embed_in_background():
         try:
-            store_resume_embedding(candidate_id_num, resume_text, name, applied_role)
+            store_resume_embedding(candidate_id_num, resume_text, final_name, applied_role)
             print(f"✅ Background embedding done for {candidate_id_str}")
         except Exception as e:
             print(f"⚠️ Background embedding failed for {candidate_id_str}: {e}")
