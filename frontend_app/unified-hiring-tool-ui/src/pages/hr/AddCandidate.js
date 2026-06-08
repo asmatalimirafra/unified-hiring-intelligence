@@ -158,6 +158,7 @@ export default function AddCandidate() {
 
     try {
       const data = new FormData();
+      data.append('name', '');           // backend may require this field; name will be extracted from CV
       data.append('applied_role', formData.applied_role);
       data.append('resume_file', formData.resume_file);
       if (hrId) data.append('hr_id', hrId);
@@ -210,15 +211,29 @@ export default function AddCandidate() {
       }
 
       console.error('❌ Upload error:', err);
+
+      // Safely convert FastAPI `detail` to a readable string.
+      // It can be a plain string, a Pydantic error array, or a nested object.
+      const safeDetail = (detail) => {
+        if (!detail) return null;
+        if (typeof detail === 'string') return detail;
+        if (Array.isArray(detail)) {
+          return detail.map(e => e.msg || e.message || JSON.stringify(e)).join('; ');
+        }
+        return JSON.stringify(detail);
+      };
+
       let errorMessage = '❌ Upload failed. Please try again.';
       if (err.response) {
+        const detail = safeDetail(err.response.data?.detail);
         switch (err.response.status) {
-          case 400: errorMessage = err.response.data?.detail || '❌ Invalid file format.'; break;
+          case 400: errorMessage = detail || '❌ Invalid file format.'; break;
+          case 422: errorMessage = '❌ Validation error. Please check all fields and try again.'; break;
           case 404: errorMessage = '❌ Selected role not found. Please refresh and try again.'; break;
           case 409: errorMessage = '❌ Candidate already exists with this information.'; break;
           case 413: errorMessage = '❌ File too large. Please upload a smaller file.'; break;
           case 500: errorMessage = '❌ Server error. Please try again later.'; break;
-          default:  errorMessage = `❌ Upload failed: ${err.response.data?.detail || err.response.statusText}`;
+          default:  errorMessage = detail ? `❌ Upload failed: ${detail}` : `❌ Upload failed (${err.response.status}).`;
         }
       } else if (err.code === 'ECONNABORTED') {
         errorMessage = '❌ Request timed out. The resume processing took too long — please try again.';
@@ -353,7 +368,7 @@ export default function AddCandidate() {
       {step === 1 && (
         <div className="upload-form">
           <div className="form-group">
-            <label htmlFor="role">Applied Role *</label>
+            <label htmlFor="role">Applied Role <span className="ac-required-star">*</span></label>
             <select
               id="role"
               value={formData.applied_role}
@@ -370,7 +385,7 @@ export default function AddCandidate() {
           </div>
 
           <div className="form-group">
-            <label htmlFor="resume">Upload Resume * (PDF or DOCX only)</label>
+            <label htmlFor="resume">Upload Resume <span className="ac-required-star">*</span> (PDF or DOCX only)</label>
             <input
               id="resume"
               type="file"
@@ -492,7 +507,7 @@ export default function AddCandidate() {
             />
           </div>
           <div className="form-group">
-            <label>GitHub Profile <span className="ac-optional-label">(optional)</span></label>
+            <label>GitHub Profile</label>
             <input
               type="url"
               value={formData.github}
@@ -501,7 +516,7 @@ export default function AddCandidate() {
             />
           </div>
           <div className="form-group">
-            <label>Location <span className="ac-optional-label">(optional)</span></label>
+            <label>Location</label>
             <input
               type="text"
               value={formData.location}
