@@ -146,24 +146,31 @@ export default function AddCandidate() {
     setStatusType('');
   };
 
+  // ── Safe error detail extractor (FastAPI can return string, array, or object) ─
+  const safeDetail = (detail) => {
+    if (!detail) return null;
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) return detail.map(e => e.msg || e.message || JSON.stringify(e)).join('; ');
+    return JSON.stringify(detail);
+  };
+
   const handleUpload = async () => {
     if (!formData.applied_role) { setStatusType('error'); setStatusMsg('Please select an applied role.'); return; }
     if (!formData.resume_file)  { setStatusType('error'); setStatusMsg('Please upload a resume file.'); return; }
 
     abortControllerRef.current = new AbortController();
-
     setLoading(true);
     setStatusMsg('Extracting details from resume...');
     setStatusType('info');
 
     try {
       const data = new FormData();
-      data.append('name', '');           // backend may require this field; name will be extracted from CV
       data.append('applied_role', formData.applied_role);
       data.append('resume_file', formData.resume_file);
       if (hrId) data.append('hr_id', hrId);
 
-      const res = await axios.post(`${BASE_URL}/add-candidate/`, data, {
+      // /parse-resume/ extracts fields + ATS score — saves NOTHING to DB
+      const res = await axios.post(`${BASE_URL}/parse-resume/`, data, {
         headers: {
           "Content-Type": "multipart/form-data",
           "ngrok-skip-browser-warning": "true"
@@ -171,58 +178,26 @@ export default function AddCandidate() {
         signal: abortControllerRef.current.signal
       });
 
-      const added = res.data;
-      setCandidateId(added.candidate_id);
-      setAtsScore(added.ats_score ?? null);
-      setAddedOn(new Date().toLocaleDateString('en-IN', {
-        day: '2-digit', month: 'short', year: 'numeric',
-        hour: '2-digit', minute: '2-digit'
+      const parsed = res.data;
+      setAtsScore(parsed.ats_score ?? null);
+      setFormData((prev) => ({
+        ...prev,
+        name:     parsed.name     || '',
+        email:    parsed.email    || '',
+        phone:    parsed.phone    || '',
+        linkedin: parsed.linkedin || '',
+        github:   parsed.github   || '',
+        location: parsed.location || '',
       }));
 
-      setStatusMsg('Fetching extracted details...');
-      const params = hrId ? { hr_id: hrId } : {};
-      const allCandidates = await axios.get(`${BASE_URL}/get-candidates/`, {
-        headers: { "ngrok-skip-browser-warning": "true" },
-        params
-      });
-      const newCandidate = allCandidates.data.find((c) => c.candidate_id === added.candidate_id);
-
-      if (newCandidate) {
-        setFormData((prev) => ({
-          ...prev,
-          name:     newCandidate.name     || '',
-          email:    newCandidate.email    || '',
-          phone:    newCandidate.phone    || '',
-          linkedin: newCandidate.linkedin || '',
-          github:   newCandidate.github   || '',
-          location: newCandidate.location || '',
-        }));
-        setStatusType('success');
-        setStatusMsg('✅ Resume processed! Review & complete any missing fields below.');
-      }
-
+      setStatusType('success');
+      setStatusMsg('✅ Resume processed! Review & complete any missing fields below.');
       setStep(2);
     } catch (err) {
       if (axios.isCancel(err) || err.name === 'CanceledError' || err.code === 'ERR_CANCELED') {
-        setStatusType('');
-        setStatusMsg('');
-        setLoading(false);
-        return;
+        setStatusType(''); setStatusMsg(''); setLoading(false); return;
       }
-
       console.error('❌ Upload error:', err);
-
-      // Safely convert FastAPI `detail` to a readable string.
-      // It can be a plain string, a Pydantic error array, or a nested object.
-      const safeDetail = (detail) => {
-        if (!detail) return null;
-        if (typeof detail === 'string') return detail;
-        if (Array.isArray(detail)) {
-          return detail.map(e => e.msg || e.message || JSON.stringify(e)).join('; ');
-        }
-        return JSON.stringify(detail);
-      };
-
       let errorMessage = '❌ Upload failed. Please try again.';
       if (err.response) {
         const detail = safeDetail(err.response.data?.detail);
@@ -230,15 +205,14 @@ export default function AddCandidate() {
           case 400: errorMessage = detail || '❌ Invalid file format.'; break;
           case 422: errorMessage = '❌ Validation error. Please check all fields and try again.'; break;
           case 404: errorMessage = '❌ Selected role not found. Please refresh and try again.'; break;
-          case 409: errorMessage = '❌ Candidate already exists with this information.'; break;
           case 413: errorMessage = '❌ File too large. Please upload a smaller file.'; break;
           case 500: errorMessage = '❌ Server error. Please try again later.'; break;
           default:  errorMessage = detail ? `❌ Upload failed: ${detail}` : `❌ Upload failed (${err.response.status}).`;
         }
       } else if (err.code === 'ECONNABORTED') {
-        errorMessage = '❌ Request timed out. The resume processing took too long — please try again.';
+        errorMessage = '❌ Request timed out. Please try again.';
       } else if (err.message?.includes('Network Error')) {
-        errorMessage = '❌ Network error. Please check your connection and try again.';
+        errorMessage = '❌ Network error. Please check your connection.';
       }
       setStatusType('error');
       setStatusMsg(errorMessage);
@@ -258,41 +232,22 @@ export default function AddCandidate() {
     setStatusType('');
   };
 
-  // ── Cancel in Step 2 — confirm, then delete candidate record + reset ─────────
+  // ── Cancel in Step 2 — nothing saved yet, just confirm + reset ──────────────
   const handleCancelStep2 = async () => {
-    if (!candidateId) { resetForm(); return; }
-
-    const candidateName = formData.name.trim() || 'this candidate';
-
     const yes = await askConfirm({
       icon: '🗑️',
-      title: `Cancel adding "${candidateName}"?`,
-      message: 'The candidate record will be permanently removed from the system.',
-      confirmLabel: 'Yes, Remove',
+      title: 'Discard this candidate?',
+      message: 'The resume has not been saved yet. Cancelling will discard all extracted information.',
+      confirmLabel: 'Yes, Discard',
       variant: 'danger'
     });
     if (!yes) return;
-
-    setLoading(true);
-    setStatusMsg('Cancelling — removing candidate...');
-    setStatusType('info');
-    try {
-      await axios.delete(`${BASE_URL}/delete-candidate/${candidateId}`, {
-        headers: { "ngrok-skip-browser-warning": "true" }
-      });
-      showToast('Candidate removed. Form has been reset.');
-    } catch (err) {
-      console.error('Cancel delete failed:', err);
-      showToast('Could not remove candidate record — please delete manually.', 'error');
-    } finally {
-      setLoading(false);
-      resetForm();
-    }
+    resetForm();
+    showToast('Discarded. Form has been reset.');
   };
 
-  // ── Save & Exit ───────────────────────────────────────────────────────────────
+  // ── Save & Exit — first real DB write happens here ───────────────────────────
   const handleSaveAndExit = async () => {
-    // Validate mandatory fields before saving
     const missing = [];
     if (!formData.name.trim())     missing.push('Name');
     if (!formData.email.trim())    missing.push('Email');
@@ -308,30 +263,55 @@ export default function AddCandidate() {
 
     const yes = await askConfirm({
       icon: '✅',
-      title: 'Save and exit?',
-      message: `"${formData.name}" has been added to the system. Click confirm to finish and reload the page.`,
-      confirmLabel: 'Yes, Save & Exit',
+      title: 'Save candidate?',
+      message: `Save "${formData.name}" to the system?`,
+      confirmLabel: 'Yes, Save',
       variant: 'success'
     });
-    if (yes) {
-      // Persist any manually-edited fields back to the backend
-      try {
-        await axios.put(`${BASE_URL}/update-candidate/${candidateId}`, {
-          name:     formData.name.trim(),
-          email:    formData.email.trim(),
-          phone:    formData.phone.trim(),
-          linkedin: formData.linkedin.trim(),
-          github:   formData.github.trim(),
-          location: formData.location.trim(),
-        }, {
-          headers: { "ngrok-skip-browser-warning": "true" }
-        });
-      } catch (err) {
-        console.error('Update candidate failed:', err);
-        showToast('Warning: Could not persist edits — please update manually.', 'error');
-      }
+    if (!yes) return;
+
+    setLoading(true);
+    setStatusMsg('Saving candidate...');
+    setStatusType('info');
+
+    try {
+      const data = new FormData();
+      data.append('name',         formData.name.trim());
+      data.append('email',        formData.email.trim());
+      data.append('phone',        formData.phone.trim());
+      data.append('linkedin',     formData.linkedin.trim());
+      data.append('github',       formData.github.trim());
+      data.append('location',     formData.location.trim());
+      data.append('applied_role', formData.applied_role);
+      data.append('resume_file',  formData.resume_file);
+      if (hrId) data.append('hr_id', hrId);
+
+      await axios.post(`${BASE_URL}/add-candidate/`, data, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+          "ngrok-skip-browser-warning": "true"
+        }
+      });
+
       showToast(`${formData.name} saved successfully!`);
       setTimeout(() => window.location.reload(), 1000);
+    } catch (err) {
+      console.error('❌ Save error:', err);
+      let errorMessage = 'Failed to save candidate. Please try again.';
+      if (err.response) {
+        const detail = safeDetail(err.response.data?.detail);
+        switch (err.response.status) {
+          case 409: errorMessage = 'A candidate with this information already exists.'; break;
+          case 404: errorMessage = 'Selected role not found. Please go back and reselect.'; break;
+          case 400: errorMessage = detail || 'Invalid data. Please check all fields.'; break;
+          default:  errorMessage = detail || `Save failed (${err.response.status}).`;
+        }
+      }
+      setStatusType('error');
+      setStatusMsg(`❌ ${errorMessage}`);
+      showToast(errorMessage, 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -440,7 +420,7 @@ export default function AddCandidate() {
           </p>
 
           {addedOn && (
-            <div className="timestamp-badge">🕐 Added on: <strong>{addedOn}</strong></div>
+            <div className="timestamp-badge">🕐 Saved on: <strong>{addedOn}</strong></div>
           )}
 
           {atsScore !== null && (
