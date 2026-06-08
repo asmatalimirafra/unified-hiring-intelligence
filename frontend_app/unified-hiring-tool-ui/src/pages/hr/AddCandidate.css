@@ -106,11 +106,15 @@
   font-weight: 500;
 }
 
-.form-group label[for="review-email"]::after,
-.form-group label[for="review-phone"]::after,
-.form-group label[for="review-github"]::after,
-.form-group label[for="review-location"]::after {
+/* Suppress star for optional fields — add class="ac-optional" to the form-group div */
+.ac-optional label::after {
   content: '';
+}
+
+/* Red star used in informational text (e.g. review note paragraph) */
+.ac-required-star {
+  color: #ef4444;
+  font-weight: bold;
 }
 
 /* Enhanced Inputs */
