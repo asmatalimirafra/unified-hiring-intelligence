@@ -2,6 +2,13 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct, Distance, VectorParams, PointIdsList
 from sentence_transformers import SentenceTransformer
 import torch
+import numpy as np
+
+# Reuse existing machinery — no new dependencies.
+#   _strip_html: converts WYSIWYG JD HTML → plaintext (block tags → newlines)
+#   split_resume_into_chunks: semantic chunking used elsewhere for the LLM
+from services.ats_service import _strip_html
+from services.resume_segmenter import split_resume_into_chunks
 
 # Initialize Qdrant client
 #client = QdrantClient(host="localhost", port=7000)
@@ -19,6 +26,81 @@ model.max_seq_length = 512 # Added for more details
 JD_COLLECTION = "job_descriptions"
 RESUME_COLLECTION = "resumes"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Document embedding — chunk + mean-pool
+#
+# WHY (this is the fix for low/erratic semantic similarity):
+#   bge-large-en-v1.5 has a HARD 512-token limit (~350-400 words). Calling
+#   model.encode(full_resume) silently truncates everything past the first
+#   ~400 words BEFORE the vector is built — so skills/experience at the bottom
+#   of a resume (and the body of a long JD) never reach the embedding. The
+#   vector ends up representing the contact block + summary only.
+#
+# FIX:
+#   1. Strip HTML first (JDs from the WYSIWYG editor are one HTML blob; the raw
+#      tags pollute the vector and there are no real newlines to chunk on).
+#   2. Split into chunks that each fit comfortably under 512 tokens.
+#   3. Encode each chunk normalized, mean-pool, then re-normalize.
+#      The pooled unit vector represents the WHOLE document, and cosine on
+#      normalized vectors is well-behaved.
+#
+# NOTE: existing stored vectors were built the OLD (truncated) way. They must
+# be re-embedded for cosine to be consistent — see reembed_all.py.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ~1500 chars ≈ ~375 tokens — safely under the 512-token ceiling.
+_MAX_CHUNK_CHARS = 1500
+
+
+def _window_long_chunk(chunk: str, max_chars: int = _MAX_CHUNK_CHARS):
+    """Hard-wrap an oversized chunk on whitespace so no chunk exceeds the
+    token ceiling. The segmenter's no-heading fallback returns the whole text
+    as one chunk; for a long JD that would re-trigger truncation, so we guard
+    against it here."""
+    if len(chunk) <= max_chars:
+        return [chunk]
+    words, windows, cur = chunk.split(), [], ""
+    for w in words:
+        if len(cur) + len(w) + 1 > max_chars:
+            if cur:
+                windows.append(cur)
+            cur = w
+        else:
+            cur = f"{cur} {w}".strip()
+    if cur:
+        windows.append(cur)
+    return windows
+
+
+def _embed_document(text: str):
+    """Strip HTML → chunk → encode each chunk normalized → mean-pool →
+    re-normalize. Returns a unit vector (list[float]) representing the whole
+    document. Falls back to a single direct encode if anything goes wrong."""
+    if not text or not text.strip():
+        # Encode empty string rather than crash; cosine will simply be low.
+        return model.encode("", normalize_embeddings=True).tolist()
+
+    plain = _strip_html(text)
+
+    raw_chunks = split_resume_into_chunks(plain) or [plain]
+    chunks = []
+    for c in raw_chunks:
+        chunks.extend(_window_long_chunk(c))
+    chunks = [c for c in chunks if c and c.strip()]
+    if not chunks:
+        chunks = [plain[:_MAX_CHUNK_CHARS]]
+
+    vectors = model.encode(chunks, normalize_embeddings=True)
+    vectors = np.asarray(vectors, dtype=np.float32)
+    if vectors.ndim == 1:
+        vectors = vectors.reshape(1, -1)
+
+    pooled = vectors.mean(axis=0)
+    norm = np.linalg.norm(pooled)
+    if norm > 0:
+        pooled = pooled / norm
+    return pooled.tolist()
+
 # Qdrant vector config for both collections
 vector_config = VectorParams(size=1024, distance=Distance.COSINE)
 
@@ -30,8 +112,9 @@ for collection in [JD_COLLECTION, RESUME_COLLECTION]:
         client.recreate_collection(collection, vectors_config=vector_config)
 
 def store_jd_embedding(role_id, jd_text):
-    """Generate vector from JD text and store in Qdrant."""
-    vector = model.encode(jd_text).tolist()
+    """Generate vector from JD text and store in Qdrant.
+    JD arrives as WYSIWYG HTML — _embed_document strips it before encoding."""
+    vector = _embed_document(jd_text)
     client.upsert(
         collection_name=JD_COLLECTION,
         points=[
@@ -41,8 +124,10 @@ def store_jd_embedding(role_id, jd_text):
     return "JD embedded in Qdrant"
 
 def store_resume_embedding(candidate_id, resume_text, name, applied_role):
-    """Generate vector from resume text and store in Qdrant."""
-    vector = model.encode(resume_text).tolist()
+    """Generate vector from resume text and store in Qdrant.
+    Chunk + mean-pool so the WHOLE resume is represented, not just the
+    first ~400 words (the 512-token truncation that was capping cosine)."""
+    vector = _embed_document(resume_text)
     client.upsert(
         collection_name=RESUME_COLLECTION,
         points=[
