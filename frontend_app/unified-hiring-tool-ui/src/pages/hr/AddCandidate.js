@@ -368,7 +368,7 @@ export default function AddCandidate() {
       {step === 1 && (
         <div className="upload-form">
           <div className="form-group">
-            <label htmlFor="role">Applied Role <span className="ac-required-star">*</span></label>
+            <label htmlFor="role">Applied Role</label>
             <select
               id="role"
               value={formData.applied_role}
@@ -385,7 +385,7 @@ export default function AddCandidate() {
           </div>
 
           <div className="form-group">
-            <label htmlFor="resume">Upload Resume <span className="ac-required-star">*</span> (PDF or DOCX only)</label>
+            <label htmlFor="resume">Upload Resume (PDF or DOCX only)</label>
             <input
               id="resume"
               type="file"
@@ -453,7 +453,7 @@ export default function AddCandidate() {
           )}
 
           <div className="form-group">
-            <label>Name <span className="ac-required-star">*</span></label>
+            <label>Name</label>
             <input
               type="text"
               value={formData.name}
@@ -463,7 +463,7 @@ export default function AddCandidate() {
             />
           </div>
           <div className="form-group">
-            <label>Applied Role <span className="ac-required-star">*</span></label>
+            <label>Applied Role</label>
             <select
               value={formData.applied_role}
               onChange={(e) => setFormData({ ...formData, applied_role: e.target.value })}
@@ -477,7 +477,7 @@ export default function AddCandidate() {
             </select>
           </div>
           <div className="form-group">
-            <label>Email <span className="ac-required-star">*</span></label>
+            <label>Email</label>
             <input
               type="email"
               value={formData.email}
@@ -487,7 +487,7 @@ export default function AddCandidate() {
             />
           </div>
           <div className="form-group">
-            <label>Contact Number <span className="ac-required-star">*</span></label>
+            <label>Contact Number</label>
             <input
               type="tel"
               value={formData.phone}
@@ -497,7 +497,7 @@ export default function AddCandidate() {
             />
           </div>
           <div className="form-group">
-            <label>LinkedIn Profile <span className="ac-required-star">*</span></label>
+            <label>LinkedIn Profile</label>
             <input
               type="url"
               value={formData.linkedin}
@@ -506,7 +506,7 @@ export default function AddCandidate() {
               required
             />
           </div>
-          <div className="form-group">
+          <div className="form-group ac-optional">
             <label>GitHub Profile</label>
             <input
               type="url"
@@ -515,7 +515,7 @@ export default function AddCandidate() {
               placeholder="https://github.com/username"
             />
           </div>
-          <div className="form-group">
+          <div className="form-group ac-optional">
             <label>Location</label>
             <input
               type="text"
