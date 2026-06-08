@@ -52,7 +52,7 @@ export default function AddCandidate() {
   const [roles, setRoles]         = useState([]);
   const [formData, setFormData]   = useState({
     name: '', applied_role: '', email: '',
-    phone: '', github: '', location: '', resume_file: null,
+    phone: '', linkedin: '', github: '', location: '', resume_file: null,
   });
   const [candidateId, setCandidateId] = useState('');
   const [atsScore, setAtsScore]       = useState(null);
@@ -138,7 +138,7 @@ export default function AddCandidate() {
   // ── Reset helper ─────────────────────────────────────────────────────────────
   const resetForm = () => {
     setStep(1);
-    setFormData({ name: '', applied_role: '', email: '', phone: '', github: '', location: '', resume_file: null });
+    setFormData({ name: '', applied_role: '', email: '', phone: '', linkedin: '', github: '', location: '', resume_file: null });
     setCandidateId('');
     setAddedOn('');
     setAtsScore(null);
@@ -147,7 +147,6 @@ export default function AddCandidate() {
   };
 
   const handleUpload = async () => {
-    if (!formData.name.trim())  { setStatusType('error'); setStatusMsg('Please enter candidate name.'); return; }
     if (!formData.applied_role) { setStatusType('error'); setStatusMsg('Please select an applied role.'); return; }
     if (!formData.resume_file)  { setStatusType('error'); setStatusMsg('Please upload a resume file.'); return; }
 
@@ -159,7 +158,6 @@ export default function AddCandidate() {
 
     try {
       const data = new FormData();
-      data.append('name', formData.name.trim());
       data.append('applied_role', formData.applied_role);
       data.append('resume_file', formData.resume_file);
       if (hrId) data.append('hr_id', hrId);
@@ -191,13 +189,15 @@ export default function AddCandidate() {
       if (newCandidate) {
         setFormData((prev) => ({
           ...prev,
+          name:     newCandidate.name     || '',
           email:    newCandidate.email    || '',
           phone:    newCandidate.phone    || '',
+          linkedin: newCandidate.linkedin || '',
           github:   newCandidate.github   || '',
           location: newCandidate.location || '',
         }));
         setStatusType('success');
-        setStatusMsg('✅ Resume processed successfully! Please review the extracted details.');
+        setStatusMsg('✅ Resume processed! Review & complete any missing fields below.');
       }
 
       setStep(2);
@@ -247,9 +247,11 @@ export default function AddCandidate() {
   const handleCancelStep2 = async () => {
     if (!candidateId) { resetForm(); return; }
 
+    const candidateName = formData.name.trim() || 'this candidate';
+
     const yes = await askConfirm({
       icon: '🗑️',
-      title: `Cancel adding "${formData.name}"?`,
+      title: `Cancel adding "${candidateName}"?`,
       message: 'The candidate record will be permanently removed from the system.',
       confirmLabel: 'Yes, Remove',
       variant: 'danger'
@@ -275,6 +277,20 @@ export default function AddCandidate() {
 
   // ── Save & Exit ───────────────────────────────────────────────────────────────
   const handleSaveAndExit = async () => {
+    // Validate mandatory fields before saving
+    const missing = [];
+    if (!formData.name.trim())     missing.push('Name');
+    if (!formData.email.trim())    missing.push('Email');
+    if (!formData.linkedin.trim()) missing.push('LinkedIn');
+    if (!formData.phone.trim())    missing.push('Contact Number');
+
+    if (missing.length > 0) {
+      setStatusType('error');
+      setStatusMsg(`Please fill in the required fields: ${missing.join(', ')}.`);
+      showToast(`Missing required fields: ${missing.join(', ')}`, 'error');
+      return;
+    }
+
     const yes = await askConfirm({
       icon: '✅',
       title: 'Save and exit?',
@@ -283,6 +299,22 @@ export default function AddCandidate() {
       variant: 'success'
     });
     if (yes) {
+      // Persist any manually-edited fields back to the backend
+      try {
+        await axios.put(`${BASE_URL}/update-candidate/${candidateId}`, {
+          name:     formData.name.trim(),
+          email:    formData.email.trim(),
+          phone:    formData.phone.trim(),
+          linkedin: formData.linkedin.trim(),
+          github:   formData.github.trim(),
+          location: formData.location.trim(),
+        }, {
+          headers: { "ngrok-skip-browser-warning": "true" }
+        });
+      } catch (err) {
+        console.error('Update candidate failed:', err);
+        showToast('Warning: Could not persist edits — please update manually.', 'error');
+      }
       showToast(`${formData.name} saved successfully!`);
       setTimeout(() => window.location.reload(), 1000);
     }
@@ -320,18 +352,6 @@ export default function AddCandidate() {
 
       {step === 1 && (
         <div className="upload-form">
-          <div className="form-group">
-            <label htmlFor="name">Candidate Name *</label>
-            <input
-              id="name"
-              type="text"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              placeholder="Enter candidate's full name"
-              required
-            />
-          </div>
-
           <div className="form-group">
             <label htmlFor="role">Applied Role *</label>
             <select
@@ -401,7 +421,7 @@ export default function AddCandidate() {
         <div className="review-form">
           <h3>Review &amp; Edit Candidate Details</h3>
           <p className="review-note">
-            Please review the extracted information and make any necessary corrections:
+            Fields marked <span className="ac-required-star">*</span> are mandatory. Review extracted info and fill in any blanks before saving.
           </p>
 
           {addedOn && (
@@ -418,16 +438,17 @@ export default function AddCandidate() {
           )}
 
           <div className="form-group">
-            <label>Name *</label>
+            <label>Name <span className="ac-required-star">*</span></label>
             <input
               type="text"
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              placeholder="Full name (required)"
               required
             />
           </div>
           <div className="form-group">
-            <label>Applied Role *</label>
+            <label>Applied Role <span className="ac-required-star">*</span></label>
             <select
               value={formData.applied_role}
               onChange={(e) => setFormData({ ...formData, applied_role: e.target.value })}
@@ -441,24 +462,37 @@ export default function AddCandidate() {
             </select>
           </div>
           <div className="form-group">
-            <label>Email</label>
+            <label>Email <span className="ac-required-star">*</span></label>
             <input
               type="email"
               value={formData.email}
               onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              placeholder="candidate@example.com"
+              placeholder="candidate@example.com (required)"
+              required
             />
           </div>
           <div className="form-group">
-            <label>Phone</label>
+            <label>Contact Number <span className="ac-required-star">*</span></label>
             <input
               type="tel"
               value={formData.phone}
               onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+              placeholder="+91 XXXXX XXXXX (required)"
+              required
             />
           </div>
           <div className="form-group">
-            <label>GitHub Profile</label>
+            <label>LinkedIn Profile <span className="ac-required-star">*</span></label>
+            <input
+              type="url"
+              value={formData.linkedin}
+              onChange={(e) => setFormData({ ...formData, linkedin: e.target.value })}
+              placeholder="https://linkedin.com/in/username (required)"
+              required
+            />
+          </div>
+          <div className="form-group">
+            <label>GitHub Profile <span className="ac-optional-label">(optional)</span></label>
             <input
               type="url"
               value={formData.github}
@@ -467,7 +501,7 @@ export default function AddCandidate() {
             />
           </div>
           <div className="form-group">
-            <label>Location</label>
+            <label>Location <span className="ac-optional-label">(optional)</span></label>
             <input
               type="text"
               value={formData.location}
