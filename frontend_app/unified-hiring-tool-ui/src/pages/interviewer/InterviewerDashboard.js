@@ -19,10 +19,21 @@ const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 const HEADERS  = { headers: { 'ngrok-skip-browser-warning': 'true' } };
 
 const parseDate = (dt) => {
-  if (!dt) return null;
-  const raw = (dt && typeof dt === 'object' && dt.$date) ? dt.$date : dt;
+  if (dt == null) return null;
+  let raw = dt;
+  if (typeof raw === 'object' && '$date' in raw) raw = raw.$date;                 // {$date: ...}
+  if (raw && typeof raw === 'object' && '$numberLong' in raw) raw = Number(raw.$numberLong);
   const d = new Date(raw);
   return isNaN(d.getTime()) ? null : d;
+};
+
+// Candidate creation date is stored at the root as `datetime` (an ISO string,
+// e.g. "2026-06-08T09:30:11.468000"). Other names kept as defensive fallbacks.
+const CREATED_KEYS = ['datetime', 'created_at', 'timestamp', 'createdAt', 'created', 'added_on'];
+const createdDate = (obj) => {
+  if (!obj) return null;
+  for (const k of CREATED_KEYS) if (obj[k] != null) return obj[k];
+  return null;
 };
 
 const todayStr   = () => new Date().toLocaleDateString('en-CA');
@@ -165,10 +176,15 @@ function InterviewerDashboard() {
     }).length;
   }, [myInterviews]);
 
-  // Pending = assigned candidates not yet selected or rejected
+  // Pending = assigned candidates not yet selected or rejected, whose creation
+  // date falls in the shared range (consistent with the HR dashboard).
   const pendingCandidatesList = useMemo(() =>
-    allCandidates.filter(c => !c.candidate_selected && !c.candidate_rejected),
-    [allCandidates]
+    allCandidates.filter(c =>
+      !c.candidate_selected &&
+      !c.candidate_rejected &&
+      inRange(createdDate(c), range.from, range.to)
+    ),
+    [allCandidates, range]
   );
   const pendingFeedbackCount = pendingCandidatesList.length;
 
@@ -205,6 +221,15 @@ function InterviewerDashboard() {
     myInterviews
       .filter(iv => inRange(iv.datetime, range.from, range.to))
       .sort((a, b) => (parseDate(a.datetime) || 0) - (parseDate(b.datetime) || 0)),
+    [myInterviews, range]
+  );
+
+  // Recent activity — interviews I conducted, filtered to the shared range
+  const recentActivityList = useMemo(() =>
+    myInterviews
+      .filter(iv => inRange(iv.datetime, range.from, range.to))
+      .sort((a, b) => (parseDate(b.datetime) || 0) - (parseDate(a.datetime) || 0))
+      .slice(0, 6),
     [myInterviews, range]
   );
 
@@ -431,12 +456,12 @@ function InterviewerDashboard() {
               <span className="card-tag danger">{pendingFeedbackCount} not completed</span>
             )}
           </div>
-          <div className="card-sub">Your assigned candidates with pending interviews</div>
+          <div className="card-sub">Assigned candidates with no verdict yet · {range.from} → {range.to}</div>
 
           {pendingFeedbackList.length === 0 ? (
             <div className="empty-state success">
               <i className="bi bi-check2-all" />
-              <p>All caught up! No pending candidates</p>
+              <p>No pending candidates in this range</p>
             </div>
           ) : (
             pendingFeedbackList.map((c, idx) => (
@@ -522,14 +547,12 @@ function InterviewerDashboard() {
         <div className="dash-card">
           <div className="card-header">
             <span className="card-title"><i className="bi bi-clock-history" /> Recent activity</span>
+            <span className="idash-range-tag">{range.from} → {range.to}</span>
           </div>
-          {myInterviews.length === 0 ? (
-            <div className="empty-state"><i className="bi bi-inbox" /><p>No activity found</p></div>
+          {recentActivityList.length === 0 ? (
+            <div className="empty-state"><i className="bi bi-inbox" /><p>No activity in this range</p></div>
           ) : (
-            [...myInterviews]
-              .filter(iv => iv.datetime)
-              .sort((a, b) => (parseDate(b.datetime) || 0) - (parseDate(a.datetime) || 0))
-              .slice(0, 6)
+            recentActivityList
               .map((iv, idx) => {
                 const daysAgo = Math.floor((Date.now() - (parseDate(iv.datetime) || 0)) / 86400000);
                 const timeLabel = daysAgo === 0 ? 'Today' : daysAgo === 1 ? 'Yesterday' : `${daysAgo}d ago`;
