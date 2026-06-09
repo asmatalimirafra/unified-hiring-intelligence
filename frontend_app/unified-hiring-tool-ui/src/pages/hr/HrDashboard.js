@@ -63,6 +63,16 @@ const inRange = (dateVal, from, to) => {
   return d ? (d >= from && d <= to) : false;
 };
 
+// Confirmed: the candidate creation date is stored at the root as `datetime`
+// (an ISO string, e.g. "2026-06-08T09:30:11.468000"). store_candidate persists
+// the `timestamp` param under that key. Other names kept as defensive fallbacks.
+const CREATED_KEYS = ['datetime', 'created_at', 'timestamp', 'createdAt', 'created', 'added_on', 'date_added'];
+const createdDate = (obj) => {
+  if (!obj) return null;
+  for (const k of CREATED_KEYS) if (obj[k] != null) return obj[k];
+  return null;
+};
+
 const getInitials = (name = '') =>
   name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
 
@@ -259,7 +269,7 @@ export default function HrDashboard() {
     const cnt = allCandidatesData.filter(c =>
       !c.candidate_selected &&
       !c.candidate_rejected &&
-      inRange(c.created_at, range.from, range.to)
+      inRange(createdDate(c), range.from, range.to)
     ).length;
     setInterviewsPending(cnt);
   }, [allCandidatesData, range]);
@@ -269,7 +279,7 @@ export default function HrDashboard() {
   // if a role has no created_at, so a missing field never silently hides it.
   useEffect(() => {
     const filtered = allOpenRolesData.filter(r =>
-      inRange(r.created_at ?? r.last_edited_at, range.from, range.to)
+      inRange(r.created_at ?? r.datetime ?? r.last_edited_at, range.from, range.to)
     );
     setOpenPositions(filtered.length);
     setOpenRolesList(filtered);
@@ -281,11 +291,12 @@ export default function HrDashboard() {
     const events = [];
 
     allCandidatesData.forEach(c => {
-      if (inRange(c.created_at, range.from, range.to)) {
+      const created = createdDate(c);
+      if (inRange(created, range.from, range.to)) {
         events.push({
           text:  `Candidate ${c.name} added — ${c.applied_role || ''}`,
-          time:  relativeTime(c.created_at),
-          ts:    toTs(c.created_at),
+          time:  relativeTime(created),
+          ts:    toTs(created),
           color: '#059669',
         });
       }
