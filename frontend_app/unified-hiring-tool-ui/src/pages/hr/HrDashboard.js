@@ -29,14 +29,39 @@ const monthEndStr = () => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
 
-const inRange = (dateStr, from, to) => {
-  if (!dateStr) return false;
-  const d = dateStr.slice(0, 10); // safe: no timezone conversion
-  return d >= from && d <= to;
+// Normalize any date shape → "YYYY-MM-DD" (or null). Handles plain ISO
+// strings, Mongo extended-JSON ({$date:"ISO"} and {$date:{$numberLong}}),
+// and epoch numbers. For ISO strings the date part is sliced directly so
+// there is no timezone shift.
+const toYMD = (v) => {
+  if (v == null) return null;
+  if (typeof v === 'object' && '$date' in v) v = v.$date;            // {$date: ...}
+  if (v && typeof v === 'object' && '$numberLong' in v) v = Number(v.$numberLong);
+  if (typeof v === 'number') {
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+  }
+  if (typeof v === 'string') {
+    if (/^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);          // ISO-like, tz-safe
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+  }
+  return null;
 };
 
-// Unwrap Mongo extended-JSON dates ({$date: "..."}) → plain ISO string
-const rawDate = (v) => (v && typeof v === 'object' && v.$date) ? v.$date : v;
+// Normalize any date shape → epoch ms (or 0) for sorting / relative time.
+const toTs = (v) => {
+  if (v == null) return 0;
+  if (typeof v === 'object' && '$date' in v) v = v.$date;
+  if (v && typeof v === 'object' && '$numberLong' in v) v = Number(v.$numberLong);
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? 0 : d.getTime();
+};
+
+const inRange = (dateVal, from, to) => {
+  const d = toYMD(dateVal);
+  return d ? (d >= from && d <= to) : false;
+};
 
 const getInitials = (name = '') =>
   name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
@@ -53,10 +78,10 @@ function DateRangePicker({ from, to, onChange }) {
   );
 }
 
-const relativeTime = (dateStr) => {
-  if (!dateStr) return '';
-  const d = new Date(dateStr);
-  const days = Math.floor((Date.now() - d) / 86400000);
+const relativeTime = (v) => {
+  const ms = toTs(v);
+  if (!ms) return '';
+  const days = Math.floor((Date.now() - ms) / 86400000);
   if (days === 0) return 'Today';
   if (days === 1) return 'Yesterday';
   return `${days}d ago`;
@@ -234,7 +259,7 @@ export default function HrDashboard() {
     const cnt = allCandidatesData.filter(c =>
       !c.candidate_selected &&
       !c.candidate_rejected &&
-      inRange(rawDate(c.created_at), range.from, range.to)
+      inRange(c.created_at, range.from, range.to)
     ).length;
     setInterviewsPending(cnt);
   }, [allCandidatesData, range]);
@@ -244,7 +269,7 @@ export default function HrDashboard() {
   // if a role has no created_at, so a missing field never silently hides it.
   useEffect(() => {
     const filtered = allOpenRolesData.filter(r =>
-      inRange(rawDate(r.created_at) || rawDate(r.last_edited_at), range.from, range.to)
+      inRange(r.created_at ?? r.last_edited_at, range.from, range.to)
     );
     setOpenPositions(filtered.length);
     setOpenRolesList(filtered);
@@ -256,33 +281,32 @@ export default function HrDashboard() {
     const events = [];
 
     allCandidatesData.forEach(c => {
-      if (inRange(rawDate(c.created_at), range.from, range.to)) {
+      if (inRange(c.created_at, range.from, range.to)) {
         events.push({
           text:  `Candidate ${c.name} added — ${c.applied_role || ''}`,
-          time:  relativeTime(rawDate(c.created_at)),
-          ts:    new Date(rawDate(c.created_at) || 0),
+          time:  relativeTime(c.created_at),
+          ts:    toTs(c.created_at),
           color: '#059669',
         });
       }
       const aggAt = c.interview_aggregate?.aggregated_at;
-      if (c.interview_aggregate?.verdict && inRange(rawDate(aggAt), range.from, range.to)) {
+      if (c.interview_aggregate?.verdict && inRange(aggAt, range.from, range.to)) {
         const v = c.interview_aggregate.verdict;
         events.push({
           text:  `Verdict for ${c.name}: ${v}`,
-          time:  relativeTime(rawDate(aggAt)),
-          ts:    new Date(rawDate(aggAt) || 0),
+          time:  relativeTime(aggAt),
+          ts:    toTs(aggAt),
           color: v.includes('Hire') && v !== 'No Hire' ? '#2563eb' : '#dc2626',
         });
       }
     });
 
     allClosedRolesData.forEach(r => {
-      const raw = rawDate(r.closed_on);
-      if (inRange(raw, range.from, range.to)) {
+      if (inRange(r.closed_on, range.from, range.to)) {
         events.push({
           text:  `Role "${r.role}" closed`,
-          time:  relativeTime(raw),
-          ts:    new Date(raw || 0),
+          time:  relativeTime(r.closed_on),
+          ts:    toTs(r.closed_on),
           color: '#f59e0b',
         });
       }
