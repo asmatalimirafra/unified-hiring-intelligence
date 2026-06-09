@@ -35,6 +35,9 @@ const inRange = (dateStr, from, to) => {
   return d >= from && d <= to;
 };
 
+// Unwrap Mongo extended-JSON dates ({$date: "..."}) → plain ISO string
+const rawDate = (v) => (v && typeof v === 'object' && v.$date) ? v.$date : v;
+
 const getInitials = (name = '') =>
   name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
 
@@ -75,6 +78,7 @@ export default function HrDashboard() {
   // Raw data stored for range-picker re-computation
   const [allInterviewerData, setAllInterviewerData] = useState([]);
   const [allCandidatesData,  setAllCandidatesData]  = useState([]);
+  const [allOpenRolesData,   setAllOpenRolesData]   = useState([]);
 
   /* ── ONE common date range picker ──────────────────────────── */
   const [range, setRange] = useState({ from: monthStartStr(), to: monthEndStr() });
@@ -106,63 +110,20 @@ export default function HrDashboard() {
         setAllInterviewerData(interviewers);
         setAllCandidatesData(candidates);
 
-        /* ── candidates pending ───────────────────────────── */
-        setInterviewsPending(candidates.filter(c => !c.candidate_selected && !c.candidate_rejected).length);
-
-        /* ── open / closed counts ─────────────────────────── */
+        /* ── store raw data; pending / open-roles / recent-activity
+              are now recomputed reactively from the common range ── */
         const open   = roles.filter(r => r.status === 'open');
         const closed = roles.filter(r => r.status === 'closed');
-        setOpenPositions(open.length);
-        setRolesClosedCount(closed.length);
+
+        setRolesClosedCount(closed.length);     // lifetime total (range-independent)
         setAllClosedRolesData(closed);
 
-        /* ── open roles list with candidate counts ────────── */
-        setOpenRolesList(open.map(role => ({
+        setAllOpenRolesData(open.map(role => ({
           ...role,
           candidateCount: candidates.filter(
             c => String(c.applied_role_id) === String(role.role_id)
           ).length,
         })));
-
-        /* ── recent activity ──────────────────────────────── */
-        const events = [];
-        [...candidates]
-          .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
-          .slice(0, 4)
-          .forEach(c => events.push({
-            text:  `Candidate ${c.name} added — ${c.applied_role || ''}`,
-            time:  relativeTime(c.created_at),
-            ts:    new Date(c.created_at || 0),
-            color: '#059669',
-          }));
-        candidates
-          .filter(c => c.interview_aggregate?.verdict && c.interview_aggregate?.aggregated_at)
-          .sort((a, b) => new Date(b.interview_aggregate.aggregated_at) - new Date(a.interview_aggregate.aggregated_at))
-          .slice(0, 4)
-          .forEach(c => {
-            const v = c.interview_aggregate.verdict;
-            events.push({
-              text:  `Verdict for ${c.name}: ${v}`,
-              time:  relativeTime(c.interview_aggregate.aggregated_at),
-              ts:    new Date(c.interview_aggregate.aggregated_at),
-              color: v.includes('Hire') && v !== 'No Hire' ? '#2563eb' : '#dc2626',
-            });
-          });
-        [...closed]
-          .sort((a, b) => new Date(a.closed_on?.$date || a.closed_on || 0) - new Date(b.closed_on?.$date || b.closed_on || 0))
-          .reverse()
-          .slice(0, 3)
-          .forEach(r => {
-            const raw = r.closed_on?.$date || r.closed_on;
-            events.push({
-              text:  `Role "${r.role}" closed`,
-              time:  relativeTime(raw),
-              ts:    new Date(raw || 0),
-              color: '#f59e0b',
-            });
-          });
-        events.sort((a, b) => b.ts - a.ts);
-        setRecentActivity(events.slice(0, 8));
 
       } catch (e) {
         console.error('❌ HR Dashboard fetch failed:', e);
@@ -266,6 +227,70 @@ export default function HrDashboard() {
     const maxCount = ranked[0]?.count || 1;
     setInterviewerRanking(ranked.map(i => ({ ...i, pct: Math.round((i.count / maxCount) * 100) })));
   }, [allInterviewerData, range]);
+
+  /* ── re-compute CANDIDATES PENDING (in range) ───────────────── */
+  // Candidates still awaiting a verdict, whose creation date falls in range.
+  useEffect(() => {
+    const cnt = allCandidatesData.filter(c =>
+      !c.candidate_selected &&
+      !c.candidate_rejected &&
+      inRange(rawDate(c.created_at), range.from, range.to)
+    ).length;
+    setInterviewsPending(cnt);
+  }, [allCandidatesData, range]);
+
+  /* ── re-compute OPEN ROLES (in range) ───────────────────────── */
+  // Roles opened (created) within the range. Falls back to last_edited_at
+  // if a role has no created_at, so a missing field never silently hides it.
+  useEffect(() => {
+    const filtered = allOpenRolesData.filter(r =>
+      inRange(rawDate(r.created_at) || rawDate(r.last_edited_at), range.from, range.to)
+    );
+    setOpenPositions(filtered.length);
+    setOpenRolesList(filtered);
+  }, [allOpenRolesData, range]);
+
+  /* ── re-compute RECENT ACTIVITY (in range) ──────────────────── */
+  // Each event filtered by its own timestamp, then merged + sorted desc.
+  useEffect(() => {
+    const events = [];
+
+    allCandidatesData.forEach(c => {
+      if (inRange(rawDate(c.created_at), range.from, range.to)) {
+        events.push({
+          text:  `Candidate ${c.name} added — ${c.applied_role || ''}`,
+          time:  relativeTime(rawDate(c.created_at)),
+          ts:    new Date(rawDate(c.created_at) || 0),
+          color: '#059669',
+        });
+      }
+      const aggAt = c.interview_aggregate?.aggregated_at;
+      if (c.interview_aggregate?.verdict && inRange(rawDate(aggAt), range.from, range.to)) {
+        const v = c.interview_aggregate.verdict;
+        events.push({
+          text:  `Verdict for ${c.name}: ${v}`,
+          time:  relativeTime(rawDate(aggAt)),
+          ts:    new Date(rawDate(aggAt) || 0),
+          color: v.includes('Hire') && v !== 'No Hire' ? '#2563eb' : '#dc2626',
+        });
+      }
+    });
+
+    allClosedRolesData.forEach(r => {
+      const raw = rawDate(r.closed_on);
+      if (inRange(raw, range.from, range.to)) {
+        events.push({
+          text:  `Role "${r.role}" closed`,
+          time:  relativeTime(raw),
+          ts:    new Date(raw || 0),
+          color: '#f59e0b',
+        });
+      }
+    });
+
+    events.sort((a, b) => b.ts - a.ts);
+    setRecentActivity(events.slice(0, 8));
+  }, [allCandidatesData, allClosedRolesData, range]);
 
   /* ── weekly growth helper ───────────────────────────────────── */
   const getWeeklyGrowth = (weekly) => {
@@ -384,8 +409,8 @@ export default function HrDashboard() {
       {/* ── Stat cards (5) ─────────────────────────────────────── */}
       <div className="hr-stat-grid">
         {[
-          { icon:'⏳', val: interviewsPending,  lbl:'Candidates pending',     accent:'#f59e0b', bg:'#fff8e1', delta: 'Awaiting review' },
-          { icon:'💼', val: openPositions,      lbl:'Open roles',             accent:'#2563eb', bg:'#e6f0fb', delta: 'Active now' },
+          { icon:'⏳', val: interviewsPending,  lbl:'Candidates pending',     accent:'#f59e0b', bg:'#fff8e1', delta: 'Pending · in range' },
+          { icon:'💼', val: openPositions,      lbl:'Open roles',             accent:'#2563eb', bg:'#e6f0fb', delta: 'Opened in range' },
           { icon:'🔒', val: rolesClosedCount,   lbl:'Roles closed',           accent:'#dc2626', bg:'#fde8e8', delta: 'Total closed roles' },
           { icon:'🎯', val: hireCount,          lbl:'Hire verdicts',          accent:'#7c3aed', bg:'#ede9fe', delta: 'In selected range' },
           { icon:'📊', val: interviewsInRange,  lbl:'Interviews in range',    accent:'#059669', bg:'#e8f5e9', delta: 'In selected range' },
@@ -416,7 +441,7 @@ export default function HrDashboard() {
             <span className="hr-tag info">{openPositions} active</span>
           </div>
           {openRolesList.length === 0 ? (
-            <div className="hr-empty">No open roles</div>
+            <div className="hr-empty">No open roles in this range</div>
           ) : (
             openRolesList.map((role, i) => (
               <div className="hr-role-row" key={i}>
@@ -564,7 +589,7 @@ export default function HrDashboard() {
         </div>
         <div className="hr-activity-grid">
           {recentActivity.length === 0 ? (
-            <div className="hr-empty">No recent activity</div>
+            <div className="hr-empty">No activity in this range</div>
           ) : (
             recentActivity.map((a, i) => (
               <div className="hr-activity-row" key={i}>
