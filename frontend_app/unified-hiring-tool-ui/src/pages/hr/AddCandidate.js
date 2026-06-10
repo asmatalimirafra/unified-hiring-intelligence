@@ -3,8 +3,48 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import './AddCandidate.css';
 import { FaCheckCircle } from 'react-icons/fa';
+import { BASE_URL } from '../../services/api';
 
-const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
+// const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
+
+// ── Toast Component ───────────────────────────────────────────────────────────
+function Toast({ toasts }) {
+  return (
+    <div className="ac-toast-container">
+      {toasts.map(t => (
+        <div key={t.id} className={`ac-toast ac-toast--${t.type}`}>
+          <span className="ac-toast-icon">{t.type === 'success' ? '✓' : '✕'}</span>
+          <span className="ac-toast-msg">{t.msg}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Confirmation Dialog ───────────────────────────────────────────────────────
+function ConfirmDialog({ config, onConfirm, onCancel }) {
+  if (!config) return null;
+  return (
+    <div className="ac-confirm-overlay" onClick={onCancel}>
+      <div className="ac-confirm-box" onClick={e => e.stopPropagation()}>
+        <div className="ac-confirm-icon">{config.icon || '❓'}</div>
+        <h4 className="ac-confirm-title">{config.title}</h4>
+        <p className="ac-confirm-msg">{config.message}</p>
+        <div className="ac-confirm-actions">
+          <button className="ac-confirm-btn ac-confirm-btn--cancel" onClick={onCancel}>
+            Cancel
+          </button>
+          <button
+            className={`ac-confirm-btn ac-confirm-btn--ok ac-confirm-btn--${config.variant || 'danger'}`}
+            onClick={onConfirm}
+          >
+            {config.confirmLabel || 'Yes'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ── Toast Component ───────────────────────────────────────────────────────────
 function Toast({ toasts }) {

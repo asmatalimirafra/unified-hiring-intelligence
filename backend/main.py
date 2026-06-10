@@ -7,6 +7,8 @@ from fastapi import FastAPI, UploadFile, Form, HTTPException, Body, Query, Backg
 
 from fastapi.middleware.cors import CORSMiddleware
 
+from config import CORS_ORIGINS, ATS_REJECT_THRESHOLD
+
 
 from services.mongo_service import (
     store_job_description,
@@ -67,7 +69,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1086,7 +1088,7 @@ async def talent_pool_search(payload: dict = Body(...)):
             pipeline_status = "Interview Rejected"
         elif c.get("status") == "Scheduled":
             pipeline_status = "Scheduled"
-        elif c.get("ats_score", 100) < 30 and not c.get("manual_override"):
+        elif c.get("ats_score", 100) < ATS_REJECT_THRESHOLD and not c.get("manual_override"):
             pipeline_status = "ATS Rejected"
         else:
             pipeline_status = "Pending"

@@ -9,18 +9,20 @@ import numpy as np
 #   split_resume_into_chunks: semantic chunking used elsewhere for the LLM
 from services.ats_service import _strip_html
 from services.resume_segmenter import split_resume_into_chunks
+<<<<<<< HEAD
+=======
+
+from config import QDRANT_URL, QDRANT_API_KEY, EMBEDDING_MODEL
+>>>>>>> b03856d (Remove hardcoded config: centralize in config.py + env vars)
 
 # Initialize Qdrant client
 #client = QdrantClient(host="localhost", port=7000)
 # client = QdrantClient(host="127.0.0.1", port=6333)
-client = QdrantClient(
-    url="https://1b6f8eb5-ecc0-405c-b80f-f3e686272de1.europe-west3-0.gcp.cloud.qdrant.io:6333", 
-    api_key="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIn0.A65FYUgndGwk8r4qMN5RB94IUIqNliMA8wYTVaclsqs",
-)
+client = QdrantClient( url=QDRANT_URL, api_key=QDRANT_API_KEY or None)
 # Load SentenceTransformer model (384-dimensional)
 device = "cuda" if torch.cuda.is_available() else "cpu"
 # model = SentenceTransformer("all-MiniLM-L6-v2", device=device)
-model = SentenceTransformer("BAAI/bge-large-en-v1.5", device=device)
+model = SentenceTransformer(EMBEDDING_MODEL, device=device)
 model.max_seq_length = 512 # Added for more details
 # Collection names
 JD_COLLECTION = "job_descriptions"

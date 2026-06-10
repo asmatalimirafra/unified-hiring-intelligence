@@ -4,8 +4,9 @@ import axios from 'axios';
 import './FitmentScorer.css';
 import ResumeViewer from '../../components/ResumeViewer';
 import FitmentViewer from '../../components/FitmentViewer';
+import { BASE_URL } from '../../services/api';
 
-const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
+// const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 const HEADERS = { headers: { 'ngrok-skip-browser-warning': 'true' } };
 
 // Robust "completed" check: prefer the backend flag, fall back to feedback

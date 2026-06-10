@@ -2,7 +2,9 @@ import React, { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import "./TalentPool.css";
 
-const BASE_URL = "https://unwithering-unattentively-herbert.ngrok-free.dev";
+// const BASE_URL = "https://unwithering-unattentively-herbert.ngrok-free.dev";
+
+import { BASE_URL } from '../../services/api';
 const axiosConfig = { headers: { "ngrok-skip-browser-warning": "69420" } };
 const PAGE_SIZE = 50;
 

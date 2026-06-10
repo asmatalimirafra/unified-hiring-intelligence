@@ -4,9 +4,25 @@ import axios from 'axios';
 import './CompareCandidates.css';
 import ResumeViewer from '../../components/ResumeViewer';
 import ComparisonSection from '../../components/ComparisonSection';
+import { BASE_URL } from '../../services/api';
 
-const BASE_URL = "https://unwithering-unattentively-herbert.ngrok-free.dev";
+// const BASE_URL = "https://unwithering-unattentively-herbert.ngrok-free.dev";
 const headers = { headers: { "ngrok-skip-browser-warning": "true" } };
+
+// ── Added from FitmentScorer.js ──────────────────────────────────────────
+const isCompleted = (c) => {
+  if (c.interview_completed === true) return true;
+  if (c.interview_completed === false) return false;
+  const hasFeedback = Array.isArray(c.interviews) && c.interviews.length > 0;
+  return hasFeedback && c.status !== 'Scheduled';
+};
+
+function StatusPill({ completed }) {
+  return completed
+    ? <span className="fs-status fs-status--done">✓ Completed</span>
+    : <span className="fs-status fs-status--pending">● Pending</span>;
+}
+// ─────────────────────────────────────────────────────────────────────────
 
 function CompareCandidates() {
   // ── Logged-in interviewer's email ────────────────────────────────────────
@@ -140,6 +156,7 @@ function CompareCandidates() {
                 <th>Name</th>
                 <th>Assigned By (HR)</th>
                 <th>Scheduled Date</th>
+                <th>Interview Status</th>
                 <th>Resume</th>
                 <th>Select</th>
               </tr>
@@ -147,7 +164,7 @@ function CompareCandidates() {
             <tbody>
               {candidates.length === 0 ? (
                 <tr>
-                  <td colSpan="6">No candidates assigned to you for this role.</td>
+                  <td colSpan="7">No candidates assigned to you for this role.</td>
                 </tr>
               ) : (
                 candidates.map((c) => {
@@ -164,10 +181,13 @@ function CompareCandidates() {
                   const rawDt = c.interview_details?.scheduled_datetime
                     || c.interview_details?.scheduled_date
                     || c.last_interview_info?.scheduled_datetime
-                    || lastRound?.scheduled_datetime;
+                    || lastRound?.scheduled_datetime
+                    || lastRound?.datetime;
                   const scheduledDate = rawDt
                     ? new Date(rawDt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
                     : '—';
+                  
+                  const completed = isCompleted(c);
 
                   return (
                     <tr key={c.candidate_id}>
@@ -177,6 +197,9 @@ function CompareCandidates() {
                         <span className="hr-tag">👤 {hrName}</span>
                       </td>
                       <td>{scheduledDate}</td>
+                      <td>
+                        <StatusPill completed={completed} />
+                      </td>
                       <td>
                         <a
                           href={`${BASE_URL}/get-resume/${c.candidate_id}`}

@@ -2,8 +2,9 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import './ScheduleInterview.css';
+import { BASE_URL } from '../../services/api';
 
-const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
+// const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 const axiosConfig = { headers: { 'ngrok-skip-browser-warning': 'true' } };
 
 // ── Toast Component ───────────────────────────────────────────────────────────

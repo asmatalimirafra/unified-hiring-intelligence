@@ -1,8 +1,10 @@
 import requests
 import re
 
-OLLAMA_BASE_URL = "http://localhost:11434/api/generate"
-MODEL = "llama3.1:8b"
+from config import OLLAMA_GENERATE_URL as OLLAMA_BASE_URL, LLM_MODEL as MODEL
+
+# OLLAMA_BASE_URL = "http://localhost:11434/api/generate"
+# MODEL = "llama3.1:8b"
 
 
 def call_fitment_llm(prompt: str, max_tokens: int = 2000) -> str:

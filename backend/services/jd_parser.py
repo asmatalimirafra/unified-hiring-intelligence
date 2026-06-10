@@ -188,4 +188,8 @@ def parse_resume_fields(text: str) -> dict:
             fields["name"] = line.strip()
             break
 
+<<<<<<< HEAD
     return fields
+=======
+    return fields
+>>>>>>> b03856d (Remove hardcoded config: centralize in config.py + env vars)

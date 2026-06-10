@@ -4,11 +4,13 @@
 
 /* ── Page shell ─────────────────────────────────────────────── */
 .interview-page {
-  padding: 2rem;
-  max-width: 1200px;
-  margin: 0 auto;
+  padding: 2.5rem 3rem; /* Matched the padding from FitmentScorer */
+  width: 100%;
+  box-sizing: border-box;
+  /* Removed max-width: 1200px and margin: 0 auto */
   font-family: 'Segoe UI', sans-serif;
   color: #1a1a2e;
+  min-height: 100vh;
 }
 
 .page-title {
@@ -681,6 +683,7 @@
 }
 
 /* ═════════════════════════════════════════════════════════════════════════
+<<<<<<< HEAD
    APPEND THESE RULES TO THE END OF YOUR EXISTING InterviewPage.css
    (new classes only — nothing here overrides your current styles)
    ═════════════════════════════════════════════════════════════════════════ */
@@ -837,6 +840,9 @@
 /* ═════════════════════════════════════════════════════════════════════════
    APPEND THESE RULES TO THE END OF YOUR EXISTING InterviewPage.css
    (new classes only — nothing here overrides your current styles)
+=======
+   NEW CLASSES FOR TABS, SEARCH, STATUS PILLS, TOAST, AND MODALS
+>>>>>>> b03856d (Remove hardcoded config: centralize in config.py + env vars)
    ═════════════════════════════════════════════════════════════════════════ */
 
 /* ── Tabs ──────────────────────────────────────────────────────────────── */
@@ -1021,4 +1027,8 @@
   .interview-page .ratings-grid {
     grid-template-columns: 1fr;
   }
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> b03856d (Remove hardcoded config: centralize in config.py + env vars)

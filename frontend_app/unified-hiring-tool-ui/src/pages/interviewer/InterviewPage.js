@@ -2,8 +2,9 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import "./InterviewPage.css";
+import { BASE_URL } from '../../services/api';
 
-const BASE_URL = "https://unwithering-unattentively-herbert.ngrok-free.dev";
+// const BASE_URL = "https://unwithering-unattentively-herbert.ngrok-free.dev";
 const axiosConfig = { headers: { "ngrok-skip-browser-warning": "true" } };
 
 function getHireLabel(avg) {
@@ -546,6 +547,7 @@ function InterviewPage() {
                     <th>Candidate</th>
                     <th>Interview Status</th>
                     <th>Assigned By (HR)</th>
+                    <th>Date & Time</th>
                     <th>Resume</th>
                     <th>Rounds Done</th>
                     <th>Overall Score</th>
@@ -556,7 +558,11 @@ function InterviewPage() {
                 <tbody>
                   {completedFiltered.length === 0 ? (
                     <tr>
+<<<<<<< HEAD
                       <td colSpan="8" className="empty-row">
+=======
+                      <td colSpan="9" className="empty-row">
+>>>>>>> b03856d (Remove hardcoded config: centralize in config.py + env vars)
                         {searchQuery
                           ? `No completed interviews match “${searchQuery}”.`
                           : "No completed interviews yet."}
@@ -584,6 +590,17 @@ function InterviewPage() {
                                 || c.hr_id
                                 || "—";
                               return <span className="hr-tag">👤 {hrName}</span>;
+                            })()}
+                          </td>
+                          <td className="datetime-cell">
+                            {(() => {
+                              const lastRound = [...(c.interviews || [])].sort((a, b) => b.round - a.round)[0];
+                              const rawDt = c.interview_details?.scheduled_datetime
+                                || c.interview_details?.scheduled_date
+                                || c.last_interview_info?.scheduled_datetime
+                                || lastRound?.scheduled_datetime
+                                || lastRound?.datetime;
+                              return formatDateTime(rawDt);
                             })()}
                           </td>
                           <td>

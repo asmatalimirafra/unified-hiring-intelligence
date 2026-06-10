@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import './Interviewer_Rag.css';
-
-const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
+import { BASE_URL } from '../../services/api';
+// const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 
 const NGROK_HEADERS = {
     "ngrok-skip-browser-warning": "69420",

@@ -1,0 +1,19 @@
+# Environment files — contain secrets, never commit
+.env
+backend/.env
+frontend_app/unified-hiring-tool-ui/.env
+
+# Python
+__pycache__/
+*.pyc
+
+# Node
+frontend_app/unified-hiring-tool-ui/node_modules/
+frontend_app/unified-hiring-tool-ui/build/
+
+# Local data / logs
+backend/qdrant_data/collections/
+qdrant_storage/
+fitment_metrics.log
+fitment_metrics.counts
+.idea/

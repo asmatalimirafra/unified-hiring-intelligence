@@ -4,8 +4,9 @@ import axios from 'axios';
 import './HrCompareCandidates.css';
 import ResumeViewer from '../../components/ResumeViewer';
 import ComparisonSection from '../../components/ComparisonSection';
+import { BASE_URL } from '../../services/api';
 
-const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
+// const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 const HEADERS  = { headers: { 'ngrok-skip-browser-warning': 'true' } };
 
 // ── Pipeline status helper ────────────────────────────────────────────────────

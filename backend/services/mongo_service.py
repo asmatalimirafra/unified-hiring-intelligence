@@ -1,8 +1,10 @@
 from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError
 
-client = MongoClient("mongodb+srv://admin:admin123@cluster0.jon3j76.mongodb.net/?appName=Cluster0")
-db = client["test-positions"]
+from config import MONGO_URI, MONGO_DB_NAME
+
+client = MongoClient(MONGO_URI)
+db = client[MONGO_DB_NAME]
 
 # Collections
 roles_collection = db["roles"]

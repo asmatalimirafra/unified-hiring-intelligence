@@ -4,6 +4,8 @@ import './RolesPage.css';
 import { FaEye, FaEdit, FaTrashAlt, FaTimesCircle, FaUndo } from 'react-icons/fa';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
+import { BASE_URL } from '../../services/api';
+
 
 const quillModules = {
   toolbar: [
@@ -110,6 +112,7 @@ function RolesPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [newRoleData, setNewRoleData]   = useState({ role: '', positions: 1, jd_text: '' });
   const [submitting, setSubmitting]     = useState(false);
+<<<<<<< HEAD
 
   // ── Toast state ─────────────────────────────────────────────────────────────
   const [toasts, setToasts] = useState([]);
@@ -142,9 +145,46 @@ function RolesPage() {
     confirmCallback && confirmCallback(false);
     setConfirmCallback(null);
   };
+=======
+>>>>>>> b03856d (Remove hardcoded config: centralize in config.py + env vars)
 
-  const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
+  // ── Toast state ─────────────────────────────────────────────────────────────
+  const [toasts, setToasts] = useState([]);
 
+<<<<<<< HEAD
+=======
+  const showToast = (msg, type = 'success') => {
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, msg, type }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500);
+  };
+
+  // ── Confirm dialog state ─────────────────────────────────────────────────────
+  const [confirmConfig, setConfirmConfig]   = useState(null);
+  const [confirmCallback, setConfirmCallback] = useState(null);
+
+  // Ask a yes/no question — returns a promise that resolves true/false
+  const askConfirm = (config) =>
+    new Promise((resolve) => {
+      setConfirmConfig(config);
+      setConfirmCallback(() => resolve);
+    });
+
+  const handleConfirmYes = () => {
+    setConfirmConfig(null);
+    confirmCallback && confirmCallback(true);
+    setConfirmCallback(null);
+  };
+
+  const handleConfirmNo = () => {
+    setConfirmConfig(null);
+    confirmCallback && confirmCallback(false);
+    setConfirmCallback(null);
+  };
+
+  // const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
+
+>>>>>>> b03856d (Remove hardcoded config: centralize in config.py + env vars)
   useEffect(() => { fetchRoles(); }, []); // eslint-disable-line
 
   const fetchRoles = async () => {

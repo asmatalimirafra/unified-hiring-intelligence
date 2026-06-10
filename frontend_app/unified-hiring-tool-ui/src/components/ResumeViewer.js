@@ -1,7 +1,9 @@
 import React from 'react';
 import './ResumeViewer.css';
+import { BASE_URL } from '../services/api';
 
-const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
+
+// const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 
 function ResumeViewer({ candidateId, fileName, onClose }) {
   // ✅ FIX: Use a template string and add the ngrok bypass as a query parameter

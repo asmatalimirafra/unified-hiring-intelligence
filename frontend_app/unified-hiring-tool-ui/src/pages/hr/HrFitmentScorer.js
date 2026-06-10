@@ -4,8 +4,9 @@ import axios from 'axios';
 import './HrFitmentScorer.css';
 import ResumeViewer from '../../components/ResumeViewer';
 import FitmentViewer from '../../components/FitmentViewer';
+import { BASE_URL } from '../../services/api';
 
-const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
+// const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 const HEADERS  = { headers: { 'ngrok-skip-browser-warning': 'true' } };
 
 // ── Pipeline status helper ────────────────────────────────────────────────────
@@ -46,7 +47,7 @@ function HrFitmentScorer() {
   const [resumeModal, setResumeModal]           = useState({ open: false, candidateId: '', fileName: '' });
   const [fitmentModal, setFitmentModal]         = useState({ open: false, data: null, loading: false, candidateId: null, candidateName: null });
 
-  // ── Fetch roles and candidates exactly like ViewCandidates.js ────────────
+  // ── Fetch roles and candidates ───────────────────────────────────────────
   useEffect(() => {
     const params = hrId ? { hr_id: hrId } : {};
 
@@ -56,8 +57,6 @@ function HrFitmentScorer() {
     ])
       .then(([rolesRes, candidatesRes]) => {
         setRoles(Array.isArray(rolesRes.data) ? rolesRes.data : []);
-
-        // Exclude joined candidates
         const eligible = (candidatesRes.data || []).filter(c => !c.candidate_joined);
         setAllCandidates(eligible);
       })
@@ -83,6 +82,12 @@ function HrFitmentScorer() {
     setCandidatesLoading(false);
   }, [selectedRoleId, allCandidates]);
 
+  // ── Fetch / rescore fitment ──────────────────────────────────────────────
+  // FIX: force_rescore=true is passed as a query param to the backend, which
+  // now correctly accepts it via Query(False) and forwards it to
+  // score_fitment_logic(candidate_id, force_rescore=True), bypassing the cache
+  // and triggering a fresh LLM call. Previously the backend endpoint didn't
+  // accept the param at all, so every call returned the cached result.
   const fetchFitmentData = useCallback(async (candidateId, forceRescore = false, candidateName = '') => {
     if (forceRescore) setRescoringId(candidateId);
     setFitmentModal({ open: true, data: null, loading: true, candidateId, candidateName });

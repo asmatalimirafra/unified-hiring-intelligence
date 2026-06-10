@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './Login.css';
 import { useNavigate } from 'react-router-dom';
+import { BASE_URL } from '../../services/api';
+
 
 function Login() {
   const [email, setEmail] = useState('');
@@ -60,7 +62,7 @@ function Login() {
       //     'Content-Type': 'multipart/form-data',
       //   },
       // });
-      const res = await axios.post('https://unwithering-unattentively-herbert.ngrok-free.dev/login/', formData, {
+      const res = await axios.post(`${BASE_URL}/login/`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
           // 2. ADD THIS HEADER TO BYPASS THE NGROK WARNING PAGE

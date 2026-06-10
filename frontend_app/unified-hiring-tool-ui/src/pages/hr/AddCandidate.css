@@ -767,4 +767,8 @@
 
 .ac-confirm-btn--danger  { background: #ef4444; }
 .ac-confirm-btn--warning { background: #f97316; }
+<<<<<<< HEAD
 .ac-confirm-btn--success { background: #10b981; }
+=======
+.ac-confirm-btn--success { background: #10b981; }
+>>>>>>> b03856d (Remove hardcoded config: centralize in config.py + env vars)
