@@ -423,8 +423,4 @@ h2 {
 
 .rp-confirm-btn--danger  { background: #ef4444; }
 .rp-confirm-btn--warning { background: #f97316; }
-<<<<<<< HEAD
 .rp-confirm-btn--success { background: #10b981; }
-=======
-.rp-confirm-btn--success { background: #10b981; }
->>>>>>> b03856d (Remove hardcoded config: centralize in config.py + env vars)

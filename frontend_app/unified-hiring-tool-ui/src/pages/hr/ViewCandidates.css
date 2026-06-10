@@ -660,8 +660,4 @@ button.btn {
 .vc-matched-label {
   font-size: 0.72rem;
   font-weight: 500;
-<<<<<<< HEAD
 }
-=======
-}
->>>>>>> b03856d (Remove hardcoded config: centralize in config.py + env vars)

@@ -628,8 +628,4 @@
 .fp-confirm-btn--ok      { color: #ffffff; }
 .fp-confirm-btn--danger  { background: #ef4444; }
 .fp-confirm-btn--warning { background: #f97316; }
-<<<<<<< HEAD
 .fp-confirm-btn--success { background: #10b981; }
-=======
-.fp-confirm-btn--success { background: #10b981; }
->>>>>>> b03856d (Remove hardcoded config: centralize in config.py + env vars)

@@ -745,8 +745,4 @@
 .si-confirm-btn--ok      { color: #ffffff; }
 .si-confirm-btn--danger  { background: #ef4444; }
 .si-confirm-btn--warning { background: #f97316; }
-<<<<<<< HEAD
 .si-confirm-btn--success { background: #10b981; }
-=======
-.si-confirm-btn--success { background: #10b981; }
->>>>>>> b03856d (Remove hardcoded config: centralize in config.py + env vars)
