@@ -4,7 +4,6 @@ import axios from "axios";
 import "./InterviewPage.css";
 import { BASE_URL } from '../../services/api';
 
-// const BASE_URL = "https://unwithering-unattentively-herbert.ngrok-free.dev";
 const axiosConfig = { headers: { "ngrok-skip-browser-warning": "true" } };
 
 function getHireLabel(avg) {
@@ -558,11 +557,7 @@ function InterviewPage() {
                 <tbody>
                   {completedFiltered.length === 0 ? (
                     <tr>
-<<<<<<< HEAD
-                      <td colSpan="8" className="empty-row">
-=======
                       <td colSpan="9" className="empty-row">
->>>>>>> b03856d (Remove hardcoded config: centralize in config.py + env vars)
                         {searchQuery
                           ? `No completed interviews match “${searchQuery}”.`
                           : "No completed interviews yet."}

@@ -9,12 +9,7 @@ import numpy as np
 #   split_resume_into_chunks: semantic chunking used elsewhere for the LLM
 from services.ats_service import _strip_html
 from services.resume_segmenter import split_resume_into_chunks
-<<<<<<< HEAD
-=======
-
 from config import QDRANT_URL, QDRANT_API_KEY, EMBEDDING_MODEL
->>>>>>> b03856d (Remove hardcoded config: centralize in config.py + env vars)
-
 # Initialize Qdrant client
 #client = QdrantClient(host="localhost", port=7000)
 # client = QdrantClient(host="127.0.0.1", port=6333)

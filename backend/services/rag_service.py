@@ -16,13 +16,7 @@ embedder.max_seq_length = 512
 # ─────────────────────────────────────────────────────────────────────────────
 # Config
 # ─────────────────────────────────────────────────────────────────────────────
-<<<<<<< HEAD
-OLLAMA_URL  = "http://localhost:11434/api/generate"
-CHAT_MODEL  = "llama3.1:8b"
-=======
-# OLLAMA_URL  = "http://localhost:11434/api/generate"
-# CHAT_MODEL  = "llama3.1:8b"
->>>>>>> b03856d (Remove hardcoded config: centralize in config.py + env vars)
+from config import QDRANT_URL, QDRANT_API_KEY, EMBEDDING_MODEL
 
 # IMPORTANT: Ollama's default context window is small (~2048 tokens). Without
 # this, stuffing several full resumes into the prompt overflows and is silently
@@ -365,8 +359,5 @@ def get_hr_chat_response(user_query: str, chat_history: list = None, stream: boo
     except Exception as e:
         error_msg = f"Lion encountered an issue: {str(e)}"
         print(f"DEBUG ERROR: {error_msg}")
-<<<<<<< HEAD
+
         return _as_stream(error_msg) if stream else error_msg
-=======
-        return _as_stream(error_msg) if stream else error_msg
->>>>>>> b03856d (Remove hardcoded config: centralize in config.py + env vars)

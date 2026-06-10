@@ -16,7 +16,6 @@ import { BASE_URL } from '../../services/api';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
-// const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 const HEADERS  = { headers: { 'ngrok-skip-browser-warning': 'true' } };
 
 const parseDate = (dt) => {
@@ -669,8 +668,4 @@ const IDASH_STYLES = `
 }
 `;
 
-<<<<<<< HEAD
 export default InterviewerDashboard;
-=======
-export default InterviewerDashboard;
->>>>>>> b03856d (Remove hardcoded config: centralize in config.py + env vars)

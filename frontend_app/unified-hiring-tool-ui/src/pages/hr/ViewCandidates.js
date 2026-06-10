@@ -4,12 +4,8 @@ import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import './ViewCandidates.css';
 import { FaTrashAlt, FaEye, FaCalendarPlus, FaBriefcase, FaSearch, FaTimes } from 'react-icons/fa';
-<<<<<<< HEAD
-=======
 import { BASE_URL } from '../../services/api';
->>>>>>> b03856d (Remove hardcoded config: centralize in config.py + env vars)
 
-// const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 const axiosConfig = { headers: { 'ngrok-skip-browser-warning': 'true' } };
 
 // ── Toast Component ───────────────────────────────────────────────────────────
