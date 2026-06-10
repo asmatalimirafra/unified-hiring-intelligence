@@ -1142,7 +1142,7 @@ async def talent_pool_send_to_pending(candidate_id: str):
     update_unset = {}
 
     ats_score = candidate.get("ats_score", 100)
-    if ats_score < 30 and not candidate.get("manual_override"):
+    if ats_score < ATS_REJECT_THRESHOLD and not candidate.get("manual_override"):
         update_set["manual_override"] = True
 
     if candidate.get("candidate_rejected"):
