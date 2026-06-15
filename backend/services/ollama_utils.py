@@ -7,12 +7,15 @@ from config import OLLAMA_GENERATE_URL as OLLAMA_BASE_URL, LLM_MODEL as MODEL
 # MODEL = "llama3.1:8b"
 
 
-def call_fitment_llm(prompt: str, max_tokens: int = 2000) -> str:
+def call_fitment_llm(prompt: str, max_tokens: int = 2000, model_name: str = None) -> str:
+    # FIX: Added 'if' for the ternary operator
+    active_model = model_name if model_name else MODEL
+    
     try:
         response = requests.post(
             OLLAMA_BASE_URL,
             json={
-                "model": MODEL,
+                "model": active_model,
                 "prompt": prompt,
                 "stream": False,
                 "format": "json",   # forces valid JSON output

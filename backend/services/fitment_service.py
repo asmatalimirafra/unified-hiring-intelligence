@@ -1,5 +1,5 @@
 from datetime import datetime
-from services.mongo_service import candidates_collection, roles_collection
+from services.mongo_service import candidates_collection, roles_collection, db
 from services.qdrant_service import client, RESUME_COLLECTION, JD_COLLECTION
 from sklearn.metrics.pairwise import cosine_similarity
 from services.resume_segmenter import split_resume_into_chunks
@@ -506,7 +506,9 @@ def get_cleaned_fitment_analysis(jd_text, resume_text):
 
     prepared_resume = prepare_resume_for_llm(resume_clean)
     prompt          = build_prompt(jd_clean, prepared_resume)
-    raw_output      = call_fitment_llm(prompt, max_tokens=2000)
+    settings = db["admin_settings"].find_one({"setting_id": "global"})
+    active_llm = settings.get("active_llm") if settings else None
+    raw_output = call_fitment_llm(prompt, max_tokens=2000, model_name=active_llm)
 
     if not raw_output:
         return empty_fitment_output()

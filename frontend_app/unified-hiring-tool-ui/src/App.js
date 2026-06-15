@@ -28,6 +28,9 @@ import HrCompareCandidates from './pages/hr/HrCompareCandidates';
 import RagChat from './pages/hr/Rag';
 import InterviewerRag from './pages/interviewer/Interviewer_Rag';
 
+import AdminLayout from './layouts/AdminLayout';
+import AdminDashboard from './pages/admin/AdminDashboard';
+
 function App() {
   return (
     <Router>
@@ -55,6 +58,18 @@ function App() {
           <Route path="compare"        element={<HrCompareCandidates />} />
         </Route>
 
+        {/* ── ADMIN ROUTES ─────────────────────────────────────────────────── */}
+        <Route
+          path="/admin"
+          element={
+            <ProtectedRoute allowedRole="Admin">
+              <AdminLayout />
+            </ProtectedRoute>
+          }
+        >
+          <Route path="dashboard" element={<AdminDashboard />} />
+        </Route>
+
         {/* ── INTERVIEWER ROUTES ────────────────────────────────────────── */}
         <Route
           path="/interviewer/:userId"
@@ -63,6 +78,8 @@ function App() {
               <InterviewerLayout />
             </ProtectedRoute>
           }
+
+        
         >
           <Route path="dashboard"  element={<InterviewerDashboard />} />
           <Route path="fitment"    element={<FitmentScorer />} />

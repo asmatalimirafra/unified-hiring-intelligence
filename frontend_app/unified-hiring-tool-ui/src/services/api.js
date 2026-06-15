@@ -18,3 +18,18 @@ export const api = axios.create({ baseURL: BASE_URL });
 
 export const getInterviewers = () => axios.get(`${BASE_URL}/get-interviewers/`);
 export const getCandidates = () => axios.get(`${BASE_URL}/get-candidates/`);
+
+// ─────────────────────────────────────────────────────────────────────────
+// ATS thresholds — single source of truth for the frontend.
+// ATS_REJECT_THRESHOLD is the BUSINESS RULE (reject below this) and MUST
+// match the backend's ATS_REJECT_THRESHOLD in backend/.env.
+// ATS_TIERS are display-only color/label bands.
+// ─────────────────────────────────────────────────────────────────────────
+export const ATS_REJECT_THRESHOLD = Number(process.env.REACT_APP_ATS_REJECT_THRESHOLD || 50);
+
+export const ATS_TIERS = {
+  strong: 70,   // "Strong Match" label band
+  good:   50,   // "Good Match" band
+  weak:   30,   // "Moderate" band
+  high:   75,   // green badge band in candidate tables
+};

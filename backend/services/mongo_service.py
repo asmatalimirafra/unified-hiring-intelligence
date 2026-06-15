@@ -10,6 +10,8 @@ db = client[MONGO_DB_NAME]
 roles_collection = db["roles"]
 candidates_collection = db["candidates"]
 interviewers_collection = db["interviewers"]
+# Add this under your other collections (around line 12)
+admin_settings_collection = db["admin_settings"]
 users_collection = db["users"]
 closed_roles_collection = db["closed_roles"]
 

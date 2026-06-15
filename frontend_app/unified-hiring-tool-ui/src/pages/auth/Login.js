@@ -4,51 +4,15 @@ import './Login.css';
 import { useNavigate } from 'react-router-dom';
 import { BASE_URL } from '../../services/api';
 
-
 function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [isAdminMode, setIsAdminMode] = useState(false); // Toggle state for Admin Login
   const navigate = useNavigate();
 
   useEffect(() => {
     localStorage.removeItem('user'); // Force logout on visiting login
   }, []);
-
-  // const handleLogin = async (e) => {
-  //   e.preventDefault();
-  //   try {
-  //     const formData = new FormData();
-  //     formData.append('email', email);
-  //     formData.append('password', password);
-
-  //     const res = await axios.post('http://localhost:8080/login/', formData, {
-  //       headers: {
-  //         'Content-Type': 'multipart/form-data',
-  //       },
-  //     });
-
-  //     console.log('✅ Login Response:', res);
-
-  //     alert(`Login succeeded. Got role: ${res.data?.role}`);
-
-  //     const { role, user_id, name } = res.data;
-
-  //     // Save login status
-  //     localStorage.setItem('user', JSON.stringify({ role, user_id, name }));
-
-  //     // Redirect based on role
-  //     if (role === 'HR') {
-  //       navigate('/hr/dashboard');
-  //     } else if (role === 'Interviewer') {
-  //       navigate(`/interviewer/${user_id}/dashboard`);
-  //     } else {
-  //       alert('Unknown role');
-  //     }
-  //   } catch (err) {
-  //     console.error('❌ Login Error:', err);
-  //     alert('Invalid credentials');
-  //   }
-  // };
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -57,31 +21,28 @@ function Login() {
       formData.append('email', email);
       formData.append('password', password);
 
-      // const res = await axios.post('http://localhost:8080/login/', formData, {
-      //   headers: {
-      //     'Content-Type': 'multipart/form-data',
-      //   },
-      // });
       const res = await axios.post(`${BASE_URL}/login/`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
-          // 2. ADD THIS HEADER TO BYPASS THE NGROK WARNING PAGE
+          // BYPASS THE NGROK WARNING PAGE
           'ngrok-skip-browser-warning': '69420',
         },
       });
 
       console.log('✅ Login Response:', res.data);
 
-      // 1. Save the WHOLE res.data object to include interviews_taken
+      // Save the WHOLE res.data object to include all user details
       localStorage.setItem('user', JSON.stringify(res.data));
 
       const { role, user_id } = res.data;
 
-      // 2. Redirect based on role
+      // Redirect based on role
       if (role === 'HR') {
         navigate('/hr/dashboard');
       } else if (role === 'Interviewer') {
         navigate(`/interviewer/${user_id}/dashboard`);
+      } else if (role === 'Admin') {
+        navigate('/admin/dashboard'); // Admin routing
       } else {
         alert('Unknown role');
       }
@@ -95,13 +56,17 @@ function Login() {
     <div className="login-container">
       <div className="login-box">
         <div className="login-title">
-          Mirafra<span>Technologies</span>
+          {isAdminMode ? (
+            <>System <span>Admin</span></>
+          ) : (
+            <>Mirafra<span>Technologies</span></>
+          )}
         </div>
         <form onSubmit={handleLogin}>
           <input
             type="email"
             className="form-control"
-            placeholder="Username"
+            placeholder={isAdminMode ? "Admin Email" : "Username"}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
@@ -114,12 +79,31 @@ function Login() {
             onChange={(e) => setPassword(e.target.value)}
             required
           />
-          <button type="submit" className="btn">
-            Sign In
+          <button 
+            type="submit" 
+            className="btn" 
+            style={isAdminMode ? { backgroundColor: '#d32f2f' } : {}}
+          >
+            {isAdminMode ? "Sign In as Admin" : "Sign In"}
           </button>
         </form>
         <div className="login-footer">
-          <a href="/admin-login">ADMIN SIGN-IN PAGE</a>
+          <button 
+            type="button" 
+            className="btn-text-only" 
+            onClick={() => setIsAdminMode(!isAdminMode)}
+            style={{ 
+              background: 'none', 
+              border: 'none', 
+              color: '#007bff', 
+              cursor: 'pointer', 
+              textDecoration: 'underline',
+              fontSize: '14px',
+              marginTop: '10px'
+            }}
+          >
+            {isAdminMode ? "Switch to User Sign-In" : "ADMIN SIGN-IN PAGE"}
+          </button>
         </div>
       </div>
     </div>

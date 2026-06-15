@@ -29,7 +29,8 @@ from services.mongo_service import (
     candidates_collection,
     users_collection,
     close_role, get_all_closed_roles,
-    db
+    db,
+    admin_settings_collection
 )
 
 from services.qdrant_service import (
@@ -382,13 +383,23 @@ async def add_candidate(
         )
 
     import threading
-    def _embed_in_background():
+    def _background_tasks():
         try:
             store_resume_embedding(candidate_id_num, resume_text, name, applied_role)
             print(f"✅ Background embedding done for {candidate_id_str}")
         except Exception as e:
             print(f"⚠️ Background embedding failed for {candidate_id_str}: {e}")
-    threading.Thread(target=_embed_in_background, daemon=True).start()
+            
+        settings = get_global_settings()
+        if settings.get("auto_fitment_enabled") is True:
+            try:
+                print(f"⚙️ Auto-Fitment is ON. Calculating fitment for {candidate_id_str}...")
+                score_fitment_logic(candidate_id_str, force_rescore=True)
+                print(f"✅ Auto-Fitment complete for {candidate_id_str}")
+            except Exception as e:
+                print(f"⚠️ Auto-Fitment failed for {candidate_id_str}: {e}")
+
+    threading.Thread(target=_background_tasks, daemon=True).start()
 
     return {
         "candidate_id":    candidate_id_str,
@@ -1168,3 +1179,37 @@ async def talent_pool_send_to_pending(candidate_id: str):
         "message": f"Candidate {candidate_id} moved to Pending successfully.",
         "candidate_id": candidate_id
     }
+
+
+def get_global_settings():
+    settings = admin_settings_collection.find_one({"setting_id": "global"})
+    if not settings:
+        default_settings = {
+            "setting_id": "global",
+            "auto_fitment_enabled": False, 
+            "active_llm": "llama3.1:8b"     
+        }
+        admin_settings_collection.insert_one(default_settings)
+        return default_settings
+    return settings
+
+@app.get("/admin/settings/")
+async def get_settings():
+    settings = get_global_settings()
+    settings.pop("_id", None)
+    return settings
+
+@app.post("/admin/settings/")
+async def update_settings(payload: dict = Body(...)):
+    update_data = {}
+    if "auto_fitment_enabled" in payload:
+        update_data["auto_fitment_enabled"] = bool(payload["auto_fitment_enabled"])
+    if "active_llm" in payload:
+        update_data["active_llm"] = payload["active_llm"]
+
+    admin_settings_collection.update_one(
+        {"setting_id": "global"},
+        {"$set": update_data},
+        upsert=True
+    )
+    return {"message": "Settings updated successfully"}

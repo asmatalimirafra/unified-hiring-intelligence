@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import './AddCandidate.css';
 import { FaCheckCircle } from 'react-icons/fa';
-import { BASE_URL } from '../../services/api';
+import { BASE_URL, ATS_REJECT_THRESHOLD } from '../../services/api';
 
 // ── Toast Component ───────────────────────────────────────────────────────────
 function Toast({ toasts }) {
@@ -421,11 +421,11 @@ export default function AddCandidate() {
           )}
 
           {atsScore !== null && (
-            <div className={`ats-score-badge ${atsScore >= 30 ? 'ats-pass' : 'ats-fail'}`}>
+            <div className={`ats-score-badge ${atsScore >= ATS_REJECT_THRESHOLD ? 'ats-pass' : 'ats-fail'}`}>
               📊 ATS Score: <strong>{atsScore.toFixed(1)}%</strong>
-              {atsScore < 30
-                ? ' — Below 30%: this candidate will not appear in the interview schedule.'
-                : ' — Above 30%: eligible for interview scheduling.'}
+              {atsScore < ATS_REJECT_THRESHOLD
+                ? ` — Below ${ATS_REJECT_THRESHOLD}%: this candidate will not appear in the interview schedule.`
+                : ` — Above ${ATS_REJECT_THRESHOLD}%: eligible for interview scheduling.`}
             </div>
           )}
 

@@ -42,7 +42,7 @@ LLM_MODEL           = os.getenv("LLM_MODEL", "llama3.1:8b")
 EMBEDDING_MODEL     = os.getenv("EMBEDDING_MODEL", "BAAI/bge-large-en-v1.5")
 
 # ── Business rules ──────────────────────────────────────────────────────────
-ATS_REJECT_THRESHOLD = float(os.getenv("ATS_REJECT_THRESHOLD", "30"))
+ATS_REJECT_THRESHOLD = float(os.getenv("ATS_REJECT_THRESHOLD", "50"))
 
 # ── CORS ────────────────────────────────────────────────────────────────────
 CORS_ORIGINS = [

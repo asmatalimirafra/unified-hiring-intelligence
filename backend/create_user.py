@@ -34,6 +34,15 @@ users_to_add = [
         "password": "Tejdeep",
         "role": "Interviewer",
         "department": "Android"
+    },
+    # Add this dictionary inside your users_to_add list in create_user.py
+    {
+        "user_id": "ADM-001",
+        "name": "System Admin",
+        "email": "admin@company.com",
+        "password": "Admin", 
+        "role": "Admin",
+        "department": "Administration"
     }
 ]
 

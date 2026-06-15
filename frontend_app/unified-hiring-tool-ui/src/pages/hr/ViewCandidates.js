@@ -4,7 +4,7 @@ import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import './ViewCandidates.css';
 import { FaTrashAlt, FaEye, FaCalendarPlus, FaBriefcase, FaSearch, FaTimes } from 'react-icons/fa';
-import { BASE_URL } from '../../services/api';
+import { BASE_URL, ATS_REJECT_THRESHOLD, ATS_TIERS } from '../../services/api';
 
 const axiosConfig = { headers: { 'ngrok-skip-browser-warning': 'true' } };
 
@@ -101,16 +101,16 @@ function MatchedRolesModal({ candidate, roles, onClose }) {
   if (!candidate) return null;
 
   const getScoreColor = (score) => {
-    if (score >= 70) return '#10b981';
-    if (score >= 50) return '#3b82f6';
-    if (score >= 30) return '#f97316';
+    if (score >= ATS_TIERS.strong) return '#10b981';
+    if (score >= ATS_TIERS.good)   return '#3b82f6';
+    if (score >= ATS_TIERS.weak)   return '#f97316';
     return '#ef4444';
   };
 
   const getScoreLabel = (score) => {
-    if (score >= 70) return 'Strong Match';
-    if (score >= 50) return 'Good Match';
-    if (score >= 30) return 'Moderate';
+    if (score >= ATS_TIERS.strong) return 'Strong Match';
+    if (score >= ATS_TIERS.good)   return 'Good Match';
+    if (score >= ATS_TIERS.weak)   return 'Moderate';
     return 'Weak Match';
   };
 
@@ -283,9 +283,9 @@ function ViewCandidates() {
   const getAtsBadge = (score) => {
     if (score === null || score === undefined)
       return <span className="badge bg-secondary">—</span>;
-    if (score >= 75)
+    if (score >= ATS_TIERS.high)
       return <span className="badge bg-success" title="ATS: High match">{score.toFixed(1)}% ✓</span>;
-    if (score >= 30)
+    if (score >= ATS_REJECT_THRESHOLD)
       return <span className="badge bg-warning text-dark" title="ATS: Moderate match">{score.toFixed(1)}% ✓</span>;
     return <span className="badge bg-danger" title="ATS: Below threshold">{score.toFixed(1)}% ✗</span>;
   };
@@ -350,7 +350,7 @@ function ViewCandidates() {
     const yes = await askConfirm({
       icon: '⚠️',
       title: 'Manually approve this candidate?',
-      message: `"${candidate.name}" scored ${score}% on ATS (below the 30% threshold). Are you sure you want to move them to Pending Interviews?`,
+      message: `"${candidate.name}" scored ${score}% on ATS (below the ${ATS_REJECT_THRESHOLD}% threshold). Are you sure you want to move them to Pending Interviews?`,
       confirmLabel: 'Yes, Send to Pending',
       variant: 'warning'
     });
@@ -428,7 +428,7 @@ function ViewCandidates() {
     !c.candidate_selected && !c.candidate_rejected &&
     !c.manual_override &&
     (c.ats_score !== null && c.ats_score !== undefined) &&
-    c.ats_score < 30
+    c.ats_score < ATS_REJECT_THRESHOLD
   );
 
   const pending = filtered.filter(c =>
@@ -436,7 +436,7 @@ function ViewCandidates() {
     (
       c.ats_score === null ||
       c.ats_score === undefined ||
-      c.ats_score >= 30 ||
+      c.ats_score >= ATS_REJECT_THRESHOLD ||
       c.manual_override === true
     )
   );
@@ -548,7 +548,7 @@ function ViewCandidates() {
   const renderRejectedSection = () => (
     <>
       <p style={{ fontSize: '0.85rem', color: '#888', marginBottom: '0.75rem' }}>
-        These candidates scored below 30% on the ATS keyword match.
+        These candidates scored below {ATS_REJECT_THRESHOLD}% on the ATS keyword match.
         Use "Send to Pending" to manually approve candidates you believe may
         still perform well in interviews.
       </p>
@@ -794,7 +794,7 @@ function ViewCandidates() {
                     ? <span className="badge bg-success">Selected</span>
                     : c.candidate_rejected
                     ? <span className="badge bg-danger">Rejected</span>
-                    : (!c.manual_override && c.ats_score !== null && c.ats_score !== undefined && c.ats_score < 30)
+                    : (!c.manual_override && c.ats_score !== null && c.ats_score !== undefined && c.ats_score < ATS_REJECT_THRESHOLD)
                     ? <span className="badge bg-warning text-dark">ATS Rejected</span>
                     : <span className="badge bg-primary">Pending</span>;
                   return (
