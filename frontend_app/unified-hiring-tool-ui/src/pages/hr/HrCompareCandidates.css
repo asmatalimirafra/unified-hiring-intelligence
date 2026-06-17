@@ -252,3 +252,45 @@
   color: #9ca3af;
   font-size: 0.9rem;
 }
+
+/* ── Toast Notifications ── */
+.hrc-toast-container {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 9999;
+}
+
+.hrc-toast {
+  display: flex;
+  align-items: center;
+  padding: 14px 24px;
+  border-radius: 6px;
+  color: white;
+  font-weight: 500;
+  font-size: 1rem;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.15);
+  animation: hrcSlideIn 0.3s ease forwards;
+}
+
+.hrc-toast--success {
+  background-color: #2ecc71; /* Green */
+}
+
+.hrc-toast--error {
+  background-color: #e74c3c; /* Red */
+}
+
+.hrc-toast-icon {
+  margin-right: 12px;
+  font-weight: bold;
+  font-size: 1.2rem;
+}
+
+@keyframes hrcSlideIn {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}

@@ -1,31 +1,31 @@
-/* ── Full-width page wrapper (replaces Bootstrap .container) ── */
+/* ── Full-width page wrapper ── */
 .full-screen-wrapper,
 .page-wrapper {
   width: 100%;
+  /* Ensure it fills the screen below the navbar */
+  min-height: calc(100vh - 64px); /* Adjust 64px based on your HrNavbar height */
   padding: 2rem 2.5rem;
   box-sizing: border-box;
+  /* Add a soft canvas background */
+  background-color: #f8fafc; 
 }
 
-/* ── AddCandidate page — remove max-width constraint ── */
+/* ── AddCandidate page & other content views ── */
 .add-candidate-container {
   width: 100%;
-  max-width: 100% !important;
-  padding: 2rem 2.5rem;
+  max-width: 100% !important; /* Retained from your original CSS */
+  padding: 2.5rem;
   box-sizing: border-box;
+  
+  /* Upgrade to a modern card look */
+  background-color: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
 }
 
-/* ── Full-width page wrapper (replaces Bootstrap .container) ── */
-.full-screen-wrapper,
-.page-wrapper {
-  width: 100%;
-  padding: 2rem 2.5rem;
-  box-sizing: border-box;
-}
-
-/* ── AddCandidate page ── */
-.add-candidate-container {
-  width: 100%;
-  max-width: 100% !important;
-  padding: 2rem 2.5rem;
-  box-sizing: border-box;
+/* Optional: Add a subtle hover effect for interactivity if this container acts as a summary */
+.add-candidate-container:hover {
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
+  transition: box-shadow 0.3s ease-in-out;
 }

@@ -1,51 +1,255 @@
-.login-container {
+/* ── Main Layout Wrapper ── */
+.login-page-wrapper {
+  display: flex;
   height: 100vh;
-  background-color: #f2f0f0;
+  width: 100vw;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  overflow: hidden;
+}
+
+/* ── Left Branding Panel ── */
+.login-left-panel {
+  flex: 1.2;
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.login-box {
-  width: 350px;
-  padding: 30px;
-  border-radius: 8px;
-  background-color: white;
-  box-shadow: 0 0 8px rgba(0, 0, 0, 0.2);
-}
-
-.login-title {
-  font-size: 28px;
-  text-align: center;
-  margin-bottom: 20px;
-  font-weight: bold;
-}
-
-.login-title span {
-  color: #0046ff;
-}
-
-.login-box input {
-  margin-bottom: 15px;
-}
-
-.login-box .btn {
-  width: 100%;
-  background-color: #0046ff;
+  padding: 4rem;
   color: white;
+  transition: background 0.5s ease-in-out;
 }
 
-.login-box .btn:hover {
-  background-color: #0038cc;
+/* Dynamic Themes for Left Panel */
+.user-theme {
+  background: linear-gradient(135deg, #0046ff 0%, #6366f1 100%);
 }
 
-.login-footer {
-  text-align: right;
-  font-size: 12px;
-  margin-top: 10px;
+.admin-theme {
+  background: linear-gradient(135deg, #b71c1c 0%, #d32f2f 100%);
 }
 
-.login-footer a {
+.brand-content {
+  max-width: 500px;
+  animation: fadeIn 1s ease-out;
+}
+
+.brand-content h1 {
+  font-size: 3.5rem;
+  font-weight: 800;
+  line-height: 1.1;
+  margin-bottom: 1.5rem;
+  text-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.brand-content p {
+  font-size: 1.25rem;
+  line-height: 1.6;
+  opacity: 0.9;
+}
+
+/* ── Right Form Panel ── */
+.login-right-panel {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #ffffff;
+}
+
+.login-box-modern {
+  width: 100%;
+  max-width: 420px;
+  padding: 2rem;
+}
+
+.login-title-modern {
+  font-size: 2rem;
+  font-weight: 800;
+  color: #111827;
+  margin-bottom: 0.5rem;
+}
+
+.login-title-modern span {
   color: #0046ff;
-  text-decoration: none;
+}
+
+.admin-theme ~ .login-right-panel .login-title-modern span {
+  color: #d32f2f;
+}
+
+.login-subtitle {
+  color: #6b7280;
+  font-size: 1rem;
+  margin-bottom: 2.5rem;
+}
+
+/* ── Form Inputs ── */
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.input-group label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #374151;
+}
+
+.form-control-modern {
+  width: 100%;
+  padding: 0.85rem 1rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 1rem;
+  background-color: #f9fafb;
+  transition: all 0.2s;
+  box-sizing: border-box;
+}
+
+.form-control-modern:focus {
+  outline: none;
+  border-color: #0046ff;
+  background-color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(0, 70, 255, 0.1);
+}
+
+.admin-theme ~ .login-right-panel .form-control-modern:focus {
+  border-color: #d32f2f;
+  box-shadow: 0 0 0 3px rgba(211, 47, 47, 0.1);
+}
+
+/* ── Buttons ── */
+.btn-modern {
+  width: 100%;
+  padding: 0.9rem;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 700;
+  color: white;
+  cursor: pointer;
+  margin-top: 1rem;
+  transition: all 0.2s;
+}
+
+.btn-user {
+  background-color: #0046ff;
+}
+
+.btn-user:hover {
+  background-color: #0038cc;
+  box-shadow: 0 4px 12px rgba(0, 70, 255, 0.2);
+}
+
+.btn-admin {
+  background-color: #d32f2f;
+}
+
+.btn-admin:hover {
+  background-color: #b71c1c;
+  box-shadow: 0 4px 12px rgba(211, 47, 47, 0.2);
+}
+
+/* ── Footer ── */
+.login-footer-modern {
+  margin-top: 2rem;
+  text-align: center;
+  font-size: 0.95rem;
+}
+
+.footer-text {
+  color: #6b7280;
+  margin-right: 0.5rem;
+}
+
+.btn-text-only {
+  background: none;
+  border: none;
+  color: #0046ff;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.95rem;
+  transition: color 0.2s;
+}
+
+.btn-text-only:hover {
+  text-decoration: underline;
+}
+
+.admin-theme ~ .login-right-panel .btn-text-only {
+  color: #d32f2f;
+}
+
+/* ── Toast Notifications (Kept exactly the same) ── */
+.login-toast-container {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 9999;
+}
+
+.login-toast {
+  display: flex;
+  align-items: center;
+  padding: 14px 24px;
+  border-radius: 6px;
+  color: white;
+  font-weight: 500;
+  font-size: 1rem;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.15);
+  animation: loginSlideIn 0.3s ease forwards;
+}
+
+.login-toast--success {
+  background-color: #2ecc71; 
+}
+
+.login-toast--error {
+  background-color: #e74c3c; 
+}
+
+.login-toast-icon {
+  margin-right: 12px;
+  font-weight: bold;
+  font-size: 1.2rem;
+}
+
+@keyframes loginSlideIn {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Responsiveness for smaller screens ── */
+@media (max-width: 768px) {
+  .login-page-wrapper {
+    flex-direction: column;
+  }
+  .login-left-panel {
+    flex: 0.6;
+    padding: 2rem;
+    text-align: center;
+  }
+  .brand-content h1 {
+    font-size: 2.2rem;
+  }
+  .login-right-panel {
+    flex: 1;
+    align-items: flex-start;
+    padding-top: 3rem;
+  }
 }

@@ -1,6 +1,7 @@
 // src/layouts/AdminLayout.js
 import React from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
+import '../pages/admin/AdminDashboard.css'; // Import CSS
 
 function AdminLayout() {
   const navigate = useNavigate();
@@ -11,14 +12,14 @@ function AdminLayout() {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-      <header style={{ background: '#333', color: '#fff', padding: '1rem', display: 'flex', justifyContent: 'space-between' }}>
-        <h2>Admin Console</h2>
-        <button onClick={handleLogout} style={{ background: '#d32f2f', color: '#fff', border: 'none', padding: '0.5rem 1rem', cursor: 'pointer', borderRadius: '4px' }}>
+    <div className="admin-layout-container">
+      <header className="admin-header">
+        <h2>Admin Console: Mirafra Technologies</h2>
+        <button className="admin-logout-btn" onClick={handleLogout}>
           Logout
         </button>
       </header>
-      <main style={{ flex: 1, padding: '2rem', background: '#f4f6f8' }}>
+      <main className="admin-main-content">
         <Outlet />
       </main>
     </div>

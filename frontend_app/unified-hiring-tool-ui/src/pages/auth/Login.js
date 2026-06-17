@@ -4,14 +4,37 @@ import './Login.css';
 import { useNavigate } from 'react-router-dom';
 import { BASE_URL } from '../../services/api';
 
+// ── Toast Component ──
+function Toast({ toasts }) {
+  return (
+    <div className="login-toast-container">
+      {toasts.map(t => (
+        <div key={t.id} className={`login-toast login-toast--${t.type}`}>
+          <span className="login-toast-icon">{t.type === 'success' ? '✓' : '✕'}</span>
+          <span className="login-toast-msg">{t.msg}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [isAdminMode, setIsAdminMode] = useState(false); // Toggle state for Admin Login
+  const [isAdminMode, setIsAdminMode] = useState(false);
   const navigate = useNavigate();
 
+  const [toasts, setToasts] = useState([]);
+
+  // Keeps only one toast on screen at a time
+  const showToast = (msg, type = 'success') => {
+    const id = Date.now();
+    setToasts([{ id, msg, type }]); 
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500);
+  };
+
   useEffect(() => {
-    localStorage.removeItem('user'); // Force logout on visiting login
+    localStorage.removeItem('user');
   }, []);
 
   const handleLogin = async (e) => {
@@ -24,89 +47,125 @@ function Login() {
       const res = await axios.post(`${BASE_URL}/login/`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
-          // BYPASS THE NGROK WARNING PAGE
           'ngrok-skip-browser-warning': '69420',
         },
       });
 
-      console.log('✅ Login Response:', res.data);
-
-      // Save the WHOLE res.data object to include all user details
-      localStorage.setItem('user', JSON.stringify(res.data));
-
       const { role, user_id } = res.data;
 
-      // Redirect based on role
+      // ── STRICT MODE VALIDATION ──
+      if (isAdminMode && role !== 'Admin') {
+        showToast('Access denied: Please use the User Sign-In page.', 'error');
+        return; 
+      }
+
+      if (!isAdminMode && role === 'Admin') {
+        showToast('Access denied: Please use the Admin Sign-In page.', 'error');
+        return; 
+      }
+
+      localStorage.setItem('user', JSON.stringify(res.data));
+
       if (role === 'HR') {
         navigate('/hr/dashboard');
       } else if (role === 'Interviewer') {
         navigate(`/interviewer/${user_id}/dashboard`);
       } else if (role === 'Admin') {
-        navigate('/admin/dashboard'); // Admin routing
+        navigate('/admin/dashboard'); 
       } else {
-        alert('Unknown role');
+        showToast('Unknown role', 'error');
       }
     } catch (err) {
-      console.error('❌ Login Error:', err);
-      alert('Invalid credentials');
+      showToast('Invalid credentials', 'error');
     }
   };
 
   return (
-    <div className="login-container">
-      <div className="login-box">
-        <div className="login-title">
-          {isAdminMode ? (
-            <>System <span>Admin</span></>
-          ) : (
-            <>Mirafra<span>Technologies</span></>
-          )}
+    <>
+      <Toast toasts={toasts} />
+      <div className="login-page-wrapper">
+        
+        {/* LEFT PANEL - Dynamic based on role */}
+        <div className={`login-left-panel ${isAdminMode ? 'admin-theme' : 'user-theme'}`}>
+          <div className="brand-content">
+            <h1>Unified Hiring <br/>Intelligence</h1>
+            <p>
+              {isAdminMode 
+                ? "System administration, configuration, and LLM orchestration." 
+                : "Streamline your recruitment process with AI-driven insights and skill-gap analysis."}
+            </p>
+          </div>
         </div>
-        <form onSubmit={handleLogin}>
-          <input
-            type="email"
-            className="form-control"
-            placeholder={isAdminMode ? "Admin Email" : "Username"}
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-          <input
-            type="password"
-            className="form-control"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-          <button 
-            type="submit" 
-            className="btn" 
-            style={isAdminMode ? { backgroundColor: '#d32f2f' } : {}}
-          >
-            {isAdminMode ? "Sign In as Admin" : "Sign In"}
-          </button>
-        </form>
-        <div className="login-footer">
-          <button 
-            type="button" 
-            className="btn-text-only" 
-            onClick={() => setIsAdminMode(!isAdminMode)}
-            style={{ 
-              background: 'none', 
-              border: 'none', 
-              color: '#007bff', 
-              cursor: 'pointer', 
-              textDecoration: 'underline',
-              fontSize: '14px',
-              marginTop: '10px'
-            }}
-          >
-            {isAdminMode ? "Switch to User Sign-In" : "ADMIN SIGN-IN PAGE"}
-          </button>
+
+        {/* RIGHT PANEL - The Form */}
+        <div className="login-right-panel">
+          <div className="login-box-modern">
+            <div className="login-title-modern">
+              {isAdminMode ? (
+                <>System <span>Admin</span></>
+              ) : (
+                <>Mirafra <span>Technologies</span></>
+              )}
+            </div>
+            
+            <p className="login-subtitle">
+              {isAdminMode ? "Sign in to manage system controls" : "Welcome back! Please enter your details."}
+            </p>
+
+            <form onSubmit={handleLogin} className="login-form">
+              <div className="input-group">
+                <label>Email Address</label>
+                <input
+                  type="email"
+                  className="form-control-modern"
+                  placeholder={isAdminMode ? "admin@company.com" : "name@company.com"}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              </div>
+              
+              <div className="input-group">
+                <label>Password</label>
+                <input
+                  type="password"
+                  className="form-control-modern"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+              </div>
+
+              <button 
+                type="submit" 
+                className={`btn-modern ${isAdminMode ? 'btn-admin' : 'btn-user'}`}
+              >
+                {isAdminMode ? "Authenticate as Admin" : "Sign In"}
+              </button>
+            </form>
+
+            <div className="login-footer-modern">
+              <span className="footer-text">
+                {isAdminMode ? "Not an administrator?" : "System administrator?"}
+              </span>
+              <button 
+                type="button" 
+                className="btn-text-only" 
+                onClick={() => {
+                  setIsAdminMode(!isAdminMode);
+                  setEmail('');
+                  setPassword('');
+                }}
+              >
+                {isAdminMode ? "Switch to User Portal" : "Admin Sign-In"}
+              </button>
+            </div>
+          </div>
         </div>
+
       </div>
-    </div>
+    </>
   );
 }
 

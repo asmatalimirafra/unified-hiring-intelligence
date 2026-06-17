@@ -1,6 +1,6 @@
 // App.js
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 
 import Login from './pages/auth/Login';
 import HrDashboard from './pages/hr/HrDashboard';
@@ -28,6 +28,7 @@ import HrCompareCandidates from './pages/hr/HrCompareCandidates';
 import RagChat from './pages/hr/Rag';
 import InterviewerRag from './pages/interviewer/Interviewer_Rag';
 
+// Admin Pages
 import AdminLayout from './layouts/AdminLayout';
 import AdminDashboard from './pages/admin/AdminDashboard';
 
@@ -58,6 +59,22 @@ function App() {
           <Route path="compare"        element={<HrCompareCandidates />} />
         </Route>
 
+        {/* ── INTERVIEWER ROUTES ────────────────────────────────────────── */}
+        <Route
+          path="/interviewer/:userId"
+          element={
+            <ProtectedRoute allowedRole="Interviewer" matchUserId>
+              <InterviewerLayout />
+            </ProtectedRoute>
+          }
+        >
+          <Route path="dashboard"  element={<InterviewerDashboard />} />
+          <Route path="fitment"    element={<FitmentScorer />} />
+          <Route path="compare"    element={<CompareCandidates />} />
+          <Route path="interviews" element={<InterviewPage />} />
+          <Route path="assistant"  element={<InterviewerRag />} />
+        </Route>
+
         {/* ── ADMIN ROUTES ─────────────────────────────────────────────────── */}
         <Route
           path="/admin"
@@ -67,25 +84,9 @@ function App() {
             </ProtectedRoute>
           }
         >
+          {/* Default to dashboard if someone goes to exactly /admin */}
+          <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<AdminDashboard />} />
-        </Route>
-
-        {/* ── INTERVIEWER ROUTES ────────────────────────────────────────── */}
-        <Route
-          path="/interviewer/:userId"
-          element={
-            <ProtectedRoute allowedRole="Interviewer" matchUserId>
-              <InterviewerLayout />
-            </ProtectedRoute>
-          }
-
-        
-        >
-          <Route path="dashboard"  element={<InterviewerDashboard />} />
-          <Route path="fitment"    element={<FitmentScorer />} />
-          <Route path="compare"    element={<CompareCandidates />} />
-          <Route path="interviews" element={<InterviewPage />} />
-          <Route path="assistant"  element={<InterviewerRag />} />
         </Route>
       </Routes>
     </Router>

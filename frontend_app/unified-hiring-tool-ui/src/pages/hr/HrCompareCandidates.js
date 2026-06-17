@@ -6,8 +6,21 @@ import ResumeViewer from '../../components/ResumeViewer';
 import ComparisonSection from '../../components/ComparisonSection';
 import { BASE_URL } from '../../services/api';
 
-// const BASE_URL = 'https://unwithering-unattentively-herbert.ngrok-free.dev';
 const HEADERS  = { headers: { 'ngrok-skip-browser-warning': 'true' } };
+
+// ── Toast Component ───────────────────────────────────────────────────────────
+function Toast({ toasts }) {
+  return (
+    <div className="hrc-toast-container">
+      {toasts.map(t => (
+        <div key={t.id} className={`hrc-toast hrc-toast--${t.type}`}>
+          <span className="hrc-toast-icon">{t.type === 'success' ? '✓' : '✕'}</span>
+          <span className="hrc-toast-msg">{t.msg}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 // ── Pipeline status helper ────────────────────────────────────────────────────
 function getPipelineStatus(c) {
@@ -38,7 +51,17 @@ function HrCompareCandidates() {
   const [searchTerm, setSearchTerm]             = useState('');
   const [resumeModal, setResumeModal]           = useState({ open: false, candidateId: '', fileName: '' });
 
-  // ── Fetch roles and candidates exactly like ViewCandidates.js ────────────
+  // ── Toast State ─────────────────────────────────────────────────────────────
+  const [toasts, setToasts] = useState([]);
+
+  // FIX: Overwrites the array so only ONE toast shows at a time
+  const showToast = (msg, type = 'success') => {
+    const id = Date.now();
+    setToasts([{ id, msg, type }]); 
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500);
+  };
+
+  // ── Fetch roles and candidates ──────────────────────────────────────────────
   useEffect(() => {
     const params = hrId ? { hr_id: hrId } : {};
 
@@ -49,7 +72,6 @@ function HrCompareCandidates() {
       .then(([rolesRes, candidatesRes]) => {
         setRoles(Array.isArray(rolesRes.data) ? rolesRes.data : []);
 
-        // Exclude joined candidates
         const eligible = (candidatesRes.data || []).filter(c => !c.candidate_joined);
         setAllCandidates(eligible);
       })
@@ -77,7 +99,10 @@ function HrCompareCandidates() {
   const handleToggle = (id) => {
     setSelectedIds(prev => {
       if (prev.includes(id)) return prev.filter(x => x !== id);
-      if (prev.length >= 4)  { alert('Maximum 4 candidates can be compared at once.'); return prev; }
+      if (prev.length >= 4)  { 
+        showToast('Maximum 4 candidates can be compared at once.', 'error'); 
+        return prev; 
+      }
       return [...prev, id];
     });
     setComparisonData([]);
@@ -100,7 +125,7 @@ function HrCompareCandidates() {
       setComparisonData(enriched);
     } catch (err) {
       console.error('Comparison failed:', err);
-      alert('Failed to fetch fitment data for one or more candidates. Please try again.');
+      showToast('Failed to fetch fitment data for one or more candidates. Please try again.', 'error');
     } finally {
       setComparing(false);
     }
@@ -114,6 +139,7 @@ function HrCompareCandidates() {
 
   return (
     <div className="hrc-page">
+      <Toast toasts={toasts} />
 
       <div className="hrc-header">
         <div>
