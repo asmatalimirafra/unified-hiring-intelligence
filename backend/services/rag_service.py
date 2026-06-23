@@ -3,7 +3,7 @@ import requests
 import re
 from collections import Counter
 from sentence_transformers import SentenceTransformer
-from services.mongo_service import candidates_collection
+from services.mongo_service import candidates_collection, db
 from services.qdrant_service import qdrant_client as client
 import torch
 
@@ -84,12 +84,23 @@ def _normalise_mongo_id(raw_id) -> str:
 
 
 def _ollama_generate(prompt: str, stream: bool):
-    """Single entry point to Ollama. Always sets num_ctx so the prompt isn't
-    silently truncated. Returns a token generator (stream) or a string."""
+    """Single entry point to Ollama. Dynamically resolves active model selection."""
+    
+    # Read dynamic configuration from MongoDB, default to env file if unavailable
+    try:
+        settings = db["admin_settings"].find_one({"setting_id": "global"})
+        active_model = settings.get("active_llm") if settings else CHAT_MODEL
+    except Exception as e:
+        print("⚠️ Failed to fetch dynamic LLM setting, using default:", e)
+        active_model = CHAT_MODEL
+
+    if not active_model:
+        active_model = CHAT_MODEL
+
     response = requests.post(
         OLLAMA_URL,
         json={
-            "model": CHAT_MODEL,
+            "model": active_model,  # <-- Dynamic model selection injection
             "prompt": prompt,
             "stream": stream,
             "options": {"num_ctx": NUM_CTX, "temperature": 0.3},

@@ -21,6 +21,7 @@ function getPipelineStatus(c) {
   return                               { label: 'Pending',            cls: 'status-pending'    };
 }
 
+
 function ScoreBadge({ score }) {
   if (score === null || score === undefined)
     return <span className="hrf-badge hrf-badge-unscored">—</span>;

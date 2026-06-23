@@ -2,13 +2,22 @@ import requests
 import re
 
 from config import OLLAMA_GENERATE_URL as OLLAMA_BASE_URL, LLM_MODEL as MODEL
-
+from services.mongo_service import db
 # OLLAMA_BASE_URL = "http://localhost:11434/api/generate"
 # MODEL = "llama3.1:8b"
 
 
 def call_fitment_llm(prompt: str, max_tokens: int = 2000, model_name: str = None) -> str:
-    # FIX: Added 'if' for the ternary operator
+    # If no model is explicitly passed, dynamically fetch the active one from the Admin settings
+    if not model_name:
+        try:
+            settings = db["admin_settings"].find_one({"setting_id": "global"})
+            model_name = settings.get("active_llm") if settings else MODEL
+        except Exception as e:
+            print(f"⚠️ Failed to fetch dynamic LLM setting, using default: {e}")
+            model_name = MODEL
+            
+    # Final fallback just in case the DB returned an empty string
     active_model = model_name if model_name else MODEL
     
     try:
