@@ -39,8 +39,8 @@ users_to_add = [
     {
         "user_id": "ADM-001",
         "name": "System Admin",
-        "email": "admin@company.com",
-        "password": "Admin", 
+        "email": "admin1@company.com",
+        "password": "Admin1", 
         "role": "Admin",
         "department": "Administration"
     }
