@@ -120,22 +120,27 @@ def store_jd_embedding(role_id, jd_text):
     )
     return "JD embedded in Qdrant"
 
-def store_resume_embedding(candidate_id, resume_text, name, applied_role):
+def store_resume_embedding(candidate_id, resume_text, name, applied_role, hr_id=None):
     """Generate vector from resume text and store in Qdrant.
     Chunk + mean-pool so the WHOLE resume is represented, not just the
-    first ~400 words (the 512-token truncation that was capping cosine)."""
+    first ~400 words (the 512-token truncation that was capping cosine).
+    hr_id is stored in the payload so rag_service can filter Qdrant results
+    by HR scope without a secondary Mongo lookup (fix #6)."""
     vector = _embed_document(resume_text)
+    payload = {
+        "candidate_id": candidate_id,
+        "name": name,
+        "applied_role": applied_role,
+    }
+    if hr_id:
+        payload["hr_id"] = hr_id
     client.upsert(
         collection_name=RESUME_COLLECTION,
         points=[
             PointStruct(
                 id=candidate_id,
                 vector=vector,
-                payload={
-                    "candidate_id": candidate_id,
-                    "name": name,
-                    "applied_role": applied_role
-                }
+                payload=payload,
             )
         ]
     )
@@ -185,4 +190,8 @@ def delete_jd_vector(role_id):
         points_selector=PointIdsList(points=[role_id])
     )
 
-qdrant_client = client  # This creates an alias so both names work
+qdrant_client = client  # alias so both names work
+
+# ── Exported for reuse — rag_service imports this instead of loading a second
+# copy of the same model (saves ~1.3 GB RAM on Colab).
+embedder = model

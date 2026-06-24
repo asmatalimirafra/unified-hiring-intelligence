@@ -270,8 +270,12 @@ const RagChat = () => {
                 },
                 body: JSON.stringify({
                     query: currentInput,
-                    thread_id: activeThreadId && !activeThreadId.toString().startsWith('temp_') ? activeThreadId : null,
-                    user_email: userEmail
+                    user_email: userEmail,
+                    // Fix #16: omit thread_id entirely when there is no real thread yet
+                    // so the backend never receives a literal "null" string.
+                    ...(activeThreadId && !activeThreadId.toString().startsWith('temp_')
+                        ? { thread_id: activeThreadId }
+                        : {}),
                 }),
             });
 
@@ -301,7 +305,16 @@ const RagChat = () => {
             const headerThreadId = response.headers.get("X-Thread-Id");
             if (headerThreadId && headerThreadId !== activeThreadId) {
                 setActiveThreadId(headerThreadId);
-                setTimeout(fetchThreads, 1000);
+                // Fix #13: optimistically add the new thread to the sidebar immediately
+                // using the first user message as the title, then sync in background.
+                setThreads(prev => {
+                    const exists = prev.some(t => t.id === headerThreadId);
+                    if (exists) return prev;
+                    const title = currentInput.slice(0, 40) + (currentInput.length > 40 ? "..." : "");
+                    return [{ id: headerThreadId, title }, ...prev];
+                });
+                // Background sync to get the server-authoritative title/order.
+                setTimeout(fetchThreads, 1500);
             }
 
         } catch (error) {
@@ -396,6 +409,22 @@ const RagChat = () => {
 
     const submitEdit = async () => {
         if (!editValue.trim() || editingIndex === null) return;
+
+        // Fix #7: delete messages after the edited message in MongoDB so the
+        // thread history stays in sync with what the user sees in the UI.
+        const editedMsg = messages[editingIndex];
+        if (editedMsg?.timestamp && activeThreadId && !activeThreadId.toString().startsWith('temp_')) {
+            try {
+                await fetch(`${BASE_URL}/hr/threads/${activeThreadId}/messages-after`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json', ...NGROK_HEADERS },
+                    body: JSON.stringify({ after_timestamp: editedMsg.timestamp }),
+                });
+            } catch (err) {
+                console.warn('⚠️ Could not truncate thread history on edit:', err);
+            }
+        }
+
         const updatedMessages = messages.slice(0, editingIndex);
         setMessages(updatedMessages);
         setEditingIndex(null);

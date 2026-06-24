@@ -21,6 +21,29 @@ interviewers_collection.create_index("interviewer_id", unique=True)
 users_collection.create_index("user_id", unique=True)
 roles_collection.create_index("role_id", unique=True)
 
+# ── Performance indexes ────────────────────────────────────────────────────────
+# Fix #2: chat_history — every message load does find({thread_id}) + sort
+# timestamp. Without this index Mongo scans the whole collection on each call.
+_chat_col = db["chat_history"]
+_chat_col.create_index(
+    [("thread_id", 1), ("timestamp", 1)],
+    name="thread_timestamp",
+    background=True,
+)
+# Needed by the threads sidebar aggregate (match by user_email + context).
+_chat_col.create_index(
+    [("user_email", 1), ("context", 1), ("timestamp", 1)],
+    name="user_context_timestamp",
+    background=True,
+)
+
+# Fix #4: HR-scoped candidate queries (count, list, name lookup, post-filter).
+candidates_collection.create_index(
+    [("hr_id", 1), ("applied_role", 1)],
+    name="hr_role",
+    background=True,
+)
+
 def get_role_id_by_name(role_name, hr_id=None):
     """
     Look up a role by name. If hr_id is provided, restrict to that HR's roles

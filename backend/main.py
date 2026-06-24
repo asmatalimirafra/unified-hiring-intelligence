@@ -385,7 +385,9 @@ async def add_candidate(
     import threading
     def _background_tasks():
         try:
-            store_resume_embedding(candidate_id_num, resume_text, name, applied_role)
+            # Fix #6: pass hr_id so Qdrant payload stores it for HR-scoped
+            # semantic search filtering in rag_service.
+            store_resume_embedding(candidate_id_num, resume_text, name, applied_role, hr_id=hr_id)
             print(f"✅ Background embedding done for {candidate_id_str}")
         except Exception as e:
             print(f"⚠️ Background embedding failed for {candidate_id_str}: {e}")
@@ -854,13 +856,20 @@ from uuid import uuid4
 chat_collection = db["chat_history"]
 
 
-def load_thread_history(thread_id: str) -> list:
+def load_thread_history(thread_id: str, context: str = None) -> list:
+    """Fix #10: fetch only the last 20 messages at the DB level (descending),
+    then reverse to chronological order.
+    Fix #15: optional context param ('hr'|'interviewer') prevents messages from
+    different portals mixing on a shared thread_id."""
+    query: dict = {"thread_id": thread_id}
+    if context:
+        query["context"] = context
     messages = list(
-        chat_collection.find(
-            {"thread_id": thread_id},
-            {"_id": 0, "sender": 1, "text": 1}
-        ).sort("timestamp", 1)
+        chat_collection.find(query, {"_id": 0, "sender": 1, "text": 1})
+        .sort("timestamp", -1)
+        .limit(20)
     )
+    messages.reverse()
     return messages
 
 
@@ -915,16 +924,40 @@ async def delete_hr_thread(thread_id: str):
     return {"message": f"Thread {thread_id} deleted ({result.deleted_count} messages removed)."}
 
 
+@app.delete("/hr/threads/{thread_id}/messages-after")
+async def truncate_thread_after(thread_id: str, body: dict = Body(...)):
+    """Fix #7: delete all messages in a thread with timestamp > after_timestamp.
+    Called by the frontend when the user edits a past message, so MongoDB stays
+    in sync with the truncated UI state."""
+    after_ts_str = body.get("after_timestamp")
+    if not after_ts_str:
+        raise HTTPException(status_code=400, detail="after_timestamp is required.")
+    try:
+        after_ts = datetime.fromisoformat(after_ts_str.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid after_timestamp format. Use ISO 8601.")
+    result = chat_collection.delete_many({
+        "thread_id": thread_id,
+        "timestamp": {"$gt": after_ts},
+    })
+    return {"deleted": result.deleted_count}
+
+
 @app.post("/hr-chat/")
 async def hr_chat(request: dict):
-    query = request.get("query")
-    user_email = request.get("user_email", "hr@company.com")
-    thread_id = request.get("thread_id")
+    # Fix #17: validate query before doing anything
+    query = (request.get("query") or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
-    if not thread_id or thread_id == "null":
+    user_email = request.get("user_email", "hr@company.com")
+    thread_id  = request.get("thread_id")
+
+    # Fix #16: treat missing/null/temp thread_id uniformly
+    if not thread_id or str(thread_id) in ("null", "undefined"):
         thread_id = str(uuid4())
 
-    chat_history = load_thread_history(thread_id)
+    chat_history = load_thread_history(thread_id, context="hr")
 
     existing = chat_collection.find_one(
         {"thread_id": thread_id, "custom_title": {"$exists": True, "$ne": None}},
@@ -933,30 +966,39 @@ async def hr_chat(request: dict):
     custom_title = existing.get("custom_title") if existing else None
 
     chat_collection.insert_one({
-        "thread_id": thread_id,
+        "thread_id":  thread_id,
         "user_email": user_email,
-        "sender": "user",
-        "text": query,
-        "context": "hr",
-        "timestamp": datetime.utcnow(),
+        "sender":     "user",
+        "text":       query,
+        "context":    "hr",
+        "timestamp":  datetime.utcnow(),
         **({"custom_title": custom_title} if custom_title else {})
     })
 
     def stream_generator():
         full_response = ""
-        for chunk in get_hr_chat_response(query, chat_history=chat_history, stream=True):
+        # Fix #4: pass user_email as hr_email so rag_service scopes all DB/Qdrant
+        # queries to this HR's candidates only.
+        for chunk in get_hr_chat_response(
+            query, chat_history=chat_history, stream=True, hr_email=user_email
+        ):
             full_response += chunk
             yield chunk
 
-        chat_collection.insert_one({
-            "thread_id": thread_id,
-            "user_email": user_email,
-            "sender": "bot",
-            "text": full_response,
-            "context": "hr",
-            "timestamp": datetime.utcnow(),
-            **({"custom_title": custom_title} if custom_title else {})
-        })
+        # Fix #12: wrap bot-message save in try/except so a DB failure doesn't
+        # silently swallow the response that the user already saw streamed.
+        try:
+            chat_collection.insert_one({
+                "thread_id":  thread_id,
+                "user_email": user_email,
+                "sender":     "bot",
+                "text":       full_response,
+                "context":    "hr",
+                "timestamp":  datetime.utcnow(),
+                **({"custom_title": custom_title} if custom_title else {})
+            })
+        except Exception as e:
+            print(f"⚠️ Failed to persist bot message for thread {thread_id}: {e}")
 
     return StreamingResponse(
         stream_generator(),
@@ -998,38 +1040,50 @@ async def get_interviewer_history(thread_id: str):
 
 @app.post("/interviewer-chat/")
 async def interviewer_chat(request: dict):
-    query = request.get("query")
-    user_email = request.get("user_email", "interviewer@company.com")
-    thread_id = request.get("thread_id")
+    # Fix #17: validate query
+    query = (request.get("query") or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
-    if not thread_id or thread_id == "null":
+    user_email = request.get("user_email", "interviewer@company.com")
+    thread_id  = request.get("thread_id")
+
+    # Fix #16
+    if not thread_id or str(thread_id) in ("null", "undefined"):
         thread_id = str(uuid4())
 
-    chat_history = load_thread_history(thread_id)
+    # Fix #15: scope load to "interviewer" context so HR/interviewer threads
+    # never mix even on a theoretical UUID collision.
+    chat_history = load_thread_history(thread_id, context="interviewer")
 
     chat_collection.insert_one({
-        "thread_id": thread_id,
+        "thread_id":  thread_id,
         "user_email": user_email,
-        "sender": "user",
-        "text": query,
-        "context": "interviewer",
-        "timestamp": datetime.utcnow()
+        "sender":     "user",
+        "text":       query,
+        "context":    "interviewer",
+        "timestamp":  datetime.utcnow()
     })
 
     def stream_generator():
         full_response = ""
+        # Interviewers see all candidates (no HR scope applied here).
         for chunk in get_hr_chat_response(query, chat_history=chat_history, stream=True):
             full_response += chunk
             yield chunk
 
-        chat_collection.insert_one({
-            "thread_id": thread_id,
-            "user_email": user_email,
-            "sender": "bot",
-            "text": full_response,
-            "context": "interviewer",
-            "timestamp": datetime.utcnow()
-        })
+        # Fix #12: guard bot-message persistence
+        try:
+            chat_collection.insert_one({
+                "thread_id":  thread_id,
+                "user_email": user_email,
+                "sender":     "bot",
+                "text":       full_response,
+                "context":    "interviewer",
+                "timestamp":  datetime.utcnow()
+            })
+        except Exception as e:
+            print(f"⚠️ Failed to persist bot message for thread {thread_id}: {e}")
 
     return StreamingResponse(
         stream_generator(),
