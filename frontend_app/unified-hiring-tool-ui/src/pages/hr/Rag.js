@@ -503,7 +503,7 @@ const RagChat = () => {
                         <>
                             {messages.map((msg, index) => (
                                 <div key={index} className={`message-bubble ${msg.sender}`}>
-                                    <div className="avatar">{msg.sender === 'user' ? 'HR' : ' '}</div>
+                                    <div className="avatar">{msg.sender === 'user' ? 'Qry' : 'Ans.'}</div>
                                     <div className="message-content">
                                         {msg.sender === 'user' && editingIndex === index ? (
                                             <div className="edit-area">

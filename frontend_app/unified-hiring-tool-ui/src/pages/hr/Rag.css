@@ -1,21 +1,31 @@
+/* ── Global Box Sizing for RAG to prevent scrollbars ── */
+.rag-layout, .rag-layout * {
+    box-sizing: border-box;
+}
+
 /* Core Layout */
 .rag-layout {
     display: flex;
-    height: 100vh;
-    width: 100vw;
+    height: 100%;
+    width: 100%;
     overflow: hidden;
     background-color: #f9f9f9;
+    margin: 0;
+    padding: 0;
 }
 
 /* ── Sidebar ─────────────────────────────────────────────────────────────── */
 .chat-sidebar {
     width: 260px;
+    min-width: 260px;
     background-color: #202123;
     color: white;
     display: flex;
     flex-direction: column;
     padding: 10px;
     height: 100%;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .new-chat-btn {
@@ -152,17 +162,21 @@
 /* ── Main Chat Area ───────────────────────────────────────────────────────── */
 .chat-main {
     flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     height: 100%;
+    min-height: 0;
     position: relative;
     overflow: hidden;
 }
 
 .chat-window {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
-    padding: 40px 15% 20px 15%;
+    overflow-x: hidden;
+    padding: 20px 15% 20px 15%;
     display: flex;
     flex-direction: column;
 }
@@ -198,8 +212,10 @@
     align-items: center;
     justify-content: center;
     flex: 1;
+    min-height: 0;
     text-align: center;
     color: #6b7280;
+    overflow: hidden;
 }
 
 .welcome-screen h2 {
@@ -211,7 +227,8 @@
 /* Input area */
 .input-container {
     width: 100%;
-    padding: 10px 15% 30px 15%;
+    flex-shrink: 0;
+    padding: 10px 15% 20px 15%;
     background: white;
     border-top: 1px solid #eee;
 }

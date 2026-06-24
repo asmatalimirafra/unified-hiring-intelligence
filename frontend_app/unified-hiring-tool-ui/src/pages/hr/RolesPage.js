@@ -6,7 +6,6 @@ import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
 import { BASE_URL } from '../../services/api';
 
-
 const quillModules = {
   toolbar: [
     [{ 'font': [] }, { 'size': ['small', false, 'large', 'huge'] }],
@@ -423,11 +422,8 @@ function RolesPage() {
         onCancel={handleConfirmNo}
       />
 
-      <div className="d-flex justify-content-between align-items-center mb-4">
+      <div className="mb-4">
         <h1>Role Management</h1>
-        <button className="btn btn-success" onClick={() => setShowAddModal(true)}>
-          + Add New Role
-        </button>
       </div>
 
       <div className="roles-tabs">
@@ -442,6 +438,15 @@ function RolesPage() {
             <span className="roles-tab-count">{t.count}</span>
           </button>
         ))}
+        
+        {/* ── Add the new Tab-style button right beside the mapped tabs ── */}
+        <button
+          className="roles-tab add-role-tab"
+          onClick={() => setShowAddModal(true)}
+        >
+          <span className="roles-tab-icon">➕</span>
+          <span className="roles-tab-label">Add New Role</span>
+        </button>
       </div>
 
       <div className="roles-section">

@@ -286,6 +286,19 @@ h2 {
   color: #ffffff;
 }
 
+/* Add these new styles specifically for the Add Role Tab */
+.add-role-tab {
+  color: #10b981; /* Emerald green to signify an 'Add' action */
+  font-weight: 600;
+  margin-left: 8px; /* Give it a tiny bit of extra breathing room from the closed tab */
+}
+
+.add-role-tab:hover {
+  color: #059669;
+  background: rgba(16, 185, 129, 0.08); /* Light green hover background */
+  border-bottom-color: #10b981; 
+}
+
 /* The active tab panel sits flush with the bottom of the tab strip. A small
    top margin gives the section heading some breathing room. */
 .roles-section {
